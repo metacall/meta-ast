@@ -1,0 +1,40 @@
+# meta-ast Documentation
+
+This directory contains the implementation-facing technical documentation for `meta-ast`.
+
+Later we will have an MDBOOK-style user guide in `docs/user-guide` but this section is focused on design and implementation artifacts for traceability and onboarding.
+
+The structure is intentionally traceable: proposal → specs → architecture → ADRs → roadmap → validation artifacts so this bureaucratized manner is easier to debug and trace .
+
+## Document map
+
+- `ARCHITECTURE.md` — system architecture, component boundaries, and runtime flow.
+- `DEV_CRATE_DECISIONS.md` — crate selection rationale and trade-offs.
+- `CI_CD.md` — CI/CD architecture and quality gates.
+- `ROADMAP.md` — phase-aligned implementation milestones and measurable gates.
+
+## Specs
+
+- `specs/requirements.md` — normative requirements and acceptance criteria.
+- `specs/graph-model.md` — symbol graph and datagraph contracts, including `language_id`, project-root-relative `path`, `snapshot_id`, `file_id`, `visibility`, and `DataNode` semantics.
+- `specs/symbol-extraction.md` — language-pack extraction contracts.
+- `specs/traceability.md` — mapping from proposal deliverables to implementation/docs/tests.
+
+## Architecture decisions (ADRs)
+
+- `rfcs/0001-language-loading-model.md`
+- `rfcs/0002-error-semantics-and-recovery.md`
+- `rfcs/0003-incremental-parsing-strategy.md`
+- `rfcs/0004-graph-representation-and-scc.md`
+- `rfcs/0005-output-contract-policy.md`
+- `rfcs/0006-type-inference-scope.md`
+- `rfcs/0007-dgraph-integration-scope.md`
+
+## Scope policy
+
+- **MVP (must ship):** symbol extraction, inspect-compatible JSON, dependency graph + SCC, cross-platform CI.
+- **Stretch:** intra-procedural dataflow beyond simple def-use, live Dgraph sink, advanced cross-language type matching.
+
+## Update policy
+
+When implementation changes any public contract (schema, CLI behavior, graph semantics, language support), update the corresponding file in this directory in the same pull request.
