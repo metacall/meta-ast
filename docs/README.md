@@ -4,11 +4,12 @@ This directory contains the implementation-facing technical documentation for `m
 
 Later we will have an MDBOOK-style user guide in `docs/user-guide` but this section is focused on design and implementation artifacts for traceability and onboarding.
 
-The structure is intentionally traceable: proposal → specs → architecture → ADRs → roadmap → validation artifacts so this bureaucratized manner is easier to debug and trace .
+The structure is intentionally traceable: proposal → specs → architecture → structure → ADRs → roadmap → validation artifacts so this bureaucratized manner is easier to debug and trace.
 
 ## Document map
 
 - `ARCHITECTURE.md` — system architecture, component boundaries, and runtime flow.
+- `structure.md` — code structure, data structures, design patterns, module layout, and implementation order.
 - `DEV_CRATE_DECISIONS.md` — crate selection rationale and trade-offs.
 - `CI_CD.md` — CI/CD architecture and quality gates.
 - `ROADMAP.md` — phase-aligned implementation milestones and measurable gates.

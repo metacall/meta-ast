@@ -27,6 +27,8 @@
 - **Output layer:** inspect-compatible serialization and optional adapters.
 - **Interface layer:** CLI + library API (future: C ABI).
 
+Detailed module layout, data structures, and dependency direction are defined in `structure.md`.
+
 ## 4. Data contracts (summary)
 
 Primary inspect-compatible entity groups:
@@ -54,6 +56,8 @@ Detailed graph contract is defined in `specs/graph-model.md`, including `languag
 - Baseline mode: re-parse changed file and recompute impacted graph region.
 - Optimized mode: apply `InputEdit` + changed range reduction.
 - Optimization is benchmark-triggered and must not compromise correctness.
+
+Parallel parse + extract uses rayon per-file; graph assembly is sequential. See `structure.md` section 5 for pipeline phase details.
 
 ## 7. Compatibility and integration
 
