@@ -1,0 +1,19 @@
+# Rust formatting configuration
+edition = "2024"
+
+# Line width and whitespace
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Unix"
+
+# Heuristics
+use_small_heuristics = "Default"
+
+# Imports and modules
+reorder_imports = true
+reorder_modules = true
+
+# Shorthand preferences
+use_try_shorthand = false
+use_field_init_shorthand = false

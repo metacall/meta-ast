@@ -1,0 +1,50 @@
+# Clippy configuration
+msrv = "1.92.0"
+cognitive-complexity-threshold = 30
+too-many-arguments-threshold = 8
+type-complexity-threshold = 250
+pass-by-value-size-limit = 256
+too-many-lines-threshold = 100
+vec-box-size-threshold = 4096
+max-trait-bounds = 3
+max-struct-bools = 3
+max-fn-params-bools = 3
+warn-on-all-wildcard-imports = false
+disallowed-names = ["foo", "baz", "quux", "lorem", "ipsum"]
+doc-valid-idents = [
+    "KiB",
+    "MiB",
+    "GiB",
+    "TiB",
+    "PiB",
+    "EiB",
+    "DirectX",
+    "ECMAScript",
+    "GPLv2",
+    "GPLv3",
+    "GitHub",
+    "GitLab",
+    "IPv4",
+    "IPv6",
+    "ClojureScript",
+    "CoffeeScript",
+    "JavaScript",
+    "PureScript",
+    "TypeScript",
+    "NaN",
+    "NaNs",
+    "OAuth",
+    "GraphQL",
+    "OCaml",
+    "OpenGL",
+    "OpenMP",
+    "OpenSSH",
+    "WebGL",
+    "TensorFlow",
+    "TrueType",
+    "iOS",
+    "macOS",
+    "FreeBSD",
+    "MinGW",
+    "CamelCase",
+]
