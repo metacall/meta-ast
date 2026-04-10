@@ -1,0 +1,67 @@
+---
+source: src/language/c.rs
+assertion_line: 205
+expression: symbols
+---
+[
+  {
+    "name": "add",
+    "kind": "Function",
+    "source_range": {
+      "byte_start": 20,
+      "byte_end": 63,
+      "start": {
+        "line": 2,
+        "column": 0
+      },
+      "end": {
+        "line": 4,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": "(int a, int b)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "print_hello",
+    "kind": "Function",
+    "source_range": {
+      "byte_start": 65,
+      "byte_end": 122,
+      "start": {
+        "line": 6,
+        "column": 0
+      },
+      "end": {
+        "line": 8,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": "(void)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "get_counter",
+    "kind": "Function",
+    "source_range": {
+      "byte_start": 149,
+      "byte_end": 194,
+      "start": {
+        "line": 12,
+        "column": 0
+      },
+      "end": {
+        "line": 14,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": "(void)",
+    "docstring": null,
+    "is_async": false
+  }
+]

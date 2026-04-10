@@ -1,0 +1,47 @@
+---
+source: src/language/javascript.rs
+assertion_line: 214
+expression: symbols
+---
+[
+  {
+    "name": "hello",
+    "kind": "Function",
+    "source_range": {
+      "byte_start": 0,
+      "byte_end": 40,
+      "start": {
+        "line": 0,
+        "column": 0
+      },
+      "end": {
+        "line": 2,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": "()",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "fetchData",
+    "kind": "Function",
+    "source_range": {
+      "byte_start": 42,
+      "byte_end": 142,
+      "start": {
+        "line": 4,
+        "column": 0
+      },
+      "end": {
+        "line": 7,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": "(url)",
+    "docstring": null,
+    "is_async": true
+  }
+]

@@ -1,0 +1,187 @@
+---
+source: src/language/typescript.rs
+assertion_line: 231
+expression: symbols
+---
+[
+  {
+    "name": "Shape",
+    "kind": "Interface",
+    "source_range": {
+      "byte_start": 0,
+      "byte_end": 64,
+      "start": {
+        "line": 0,
+        "column": 0
+      },
+      "end": {
+        "line": 3,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Color",
+    "kind": "Interface",
+    "source_range": {
+      "byte_start": 66,
+      "byte_end": 121,
+      "start": {
+        "line": 5,
+        "column": 0
+      },
+      "end": {
+        "line": 8,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Point",
+    "kind": "TypeAlias",
+    "source_range": {
+      "byte_start": 123,
+      "byte_end": 170,
+      "start": {
+        "line": 10,
+        "column": 0
+      },
+      "end": {
+        "line": 13,
+        "column": 2
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Vector",
+    "kind": "TypeAlias",
+    "source_range": {
+      "byte_start": 172,
+      "byte_end": 208,
+      "start": {
+        "line": 15,
+        "column": 0
+      },
+      "end": {
+        "line": 15,
+        "column": 36
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Direction",
+    "kind": "Enum",
+    "source_range": {
+      "byte_start": 210,
+      "byte_end": 302,
+      "start": {
+        "line": 17,
+        "column": 0
+      },
+      "end": {
+        "line": 22,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Circle",
+    "kind": "Class",
+    "source_range": {
+      "byte_start": 304,
+      "byte_end": 534,
+      "start": {
+        "line": 24,
+        "column": 0
+      },
+      "end": {
+        "line": 34,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "constructor",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 340,
+      "byte_end": 377,
+      "start": {
+        "line": 25,
+        "column": 4
+      },
+      "end": {
+        "line": 25,
+        "column": 41
+      }
+    },
+    "visibility": null,
+    "signature": "(public radius: number)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "area",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 383,
+      "byte_end": 457,
+      "start": {
+        "line": 27,
+        "column": 4
+      },
+      "end": {
+        "line": 29,
+        "column": 5
+      }
+    },
+    "visibility": null,
+    "signature": "()",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "perimeter",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 463,
+      "byte_end": 532,
+      "start": {
+        "line": 31,
+        "column": 4
+      },
+      "end": {
+        "line": 33,
+        "column": 5
+      }
+    },
+    "visibility": null,
+    "signature": "()",
+    "docstring": null,
+    "is_async": false
+  }
+]

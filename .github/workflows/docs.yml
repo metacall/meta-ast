@@ -1,0 +1,58 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "src/**"]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cargo-doc:
+    name: cargo-doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build docs
+        run: cargo rustdoc --all-features -- --deny warnings
+
+  mdbook:
+    name: mdbook
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for book.toml
+        id: check
+        run: |
+          if [ -f "docs/book.toml" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install mdbook
+        if: steps.check.outputs.exists == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+
+      - name: Build mdbook
+        if: steps.check.outputs.exists == 'true'
+        run: mdbook build docs/
+
+      - name: Deploy to GitHub Pages
+        if: steps.check.outputs.exists == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/book

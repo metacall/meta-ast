@@ -1,0 +1,87 @@
+---
+source: src/language/go.rs
+assertion_line: 255
+expression: symbols
+---
+[
+  {
+    "name": "Rectangle",
+    "kind": "Struct",
+    "source_range": {
+      "byte_start": 14,
+      "byte_end": 71,
+      "start": {
+        "line": 2,
+        "column": 0
+      },
+      "end": {
+        "line": 5,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Area",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 73,
+      "byte_end": 138,
+      "start": {
+        "line": 7,
+        "column": 0
+      },
+      "end": {
+        "line": 9,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": "()",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Perimeter",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 140,
+      "byte_end": 215,
+      "start": {
+        "line": 11,
+        "column": 0
+      },
+      "end": {
+        "line": 13,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": "()",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Describer",
+    "kind": "Interface",
+    "source_range": {
+      "byte_start": 217,
+      "byte_end": 264,
+      "start": {
+        "line": 15,
+        "column": 0
+      },
+      "end": {
+        "line": 17,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  }
+]

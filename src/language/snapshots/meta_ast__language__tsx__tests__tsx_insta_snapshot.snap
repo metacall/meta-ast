@@ -1,0 +1,87 @@
+---
+source: src/language/tsx.rs
+assertion_line: 210
+expression: symbols
+---
+[
+  {
+    "name": "Props",
+    "kind": "Interface",
+    "source_range": {
+      "byte_start": 28,
+      "byte_end": 82,
+      "start": {
+        "line": 2,
+        "column": 0
+      },
+      "end": {
+        "line": 5,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Greeting",
+    "kind": "Function",
+    "source_range": {
+      "byte_start": 84,
+      "byte_end": 176,
+      "start": {
+        "line": 7,
+        "column": 0
+      },
+      "end": {
+        "line": 9,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": "(props: Props)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "App",
+    "kind": "Class",
+    "source_range": {
+      "byte_start": 281,
+      "byte_end": 419,
+      "start": {
+        "line": 15,
+        "column": 7
+      },
+      "end": {
+        "line": 19,
+        "column": 1
+      }
+    },
+    "visibility": "Public",
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "render",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 328,
+      "byte_end": 417,
+      "start": {
+        "line": 16,
+        "column": 4
+      },
+      "end": {
+        "line": 18,
+        "column": 5
+      }
+    },
+    "visibility": "Public",
+    "signature": "()",
+    "docstring": null,
+    "is_async": false
+  }
+]
