@@ -1,0 +1,147 @@
+---
+source: src/language/cpp.rs
+assertion_line: 316
+expression: symbols
+---
+[
+  {
+    "name": "Animal",
+    "kind": "Class",
+    "source_range": {
+      "byte_start": 19,
+      "byte_end": 251,
+      "start": {
+        "line": 2,
+        "column": 0
+      },
+      "end": {
+        "line": 12,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Animal",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 46,
+      "byte_end": 87,
+      "start": {
+        "line": 4,
+        "column": 4
+      },
+      "end": {
+        "line": 4,
+        "column": 45
+      }
+    },
+    "visibility": null,
+    "signature": "(std::string name)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "speak",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 126,
+      "byte_end": 171,
+      "start": {
+        "line": 7,
+        "column": 4
+      },
+      "end": {
+        "line": 7,
+        "column": 49
+      }
+    },
+    "visibility": null,
+    "signature": "()",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "get_name",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 176,
+      "byte_end": 216,
+      "start": {
+        "line": 8,
+        "column": 4
+      },
+      "end": {
+        "line": 8,
+        "column": 44
+      }
+    },
+    "visibility": null,
+    "signature": "()",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Dog",
+    "kind": "Class",
+    "source_range": {
+      "byte_start": 254,
+      "byte_end": 389,
+      "start": {
+        "line": 14,
+        "column": 0
+      },
+      "end": {
+        "line": 19,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Dog",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 294,
+      "byte_end": 333,
+      "start": {
+        "line": 16,
+        "column": 4
+      },
+      "end": {
+        "line": 16,
+        "column": 43
+      }
+    },
+    "visibility": null,
+    "signature": "(std::string name)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "speak",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 339,
+      "byte_end": 387,
+      "start": {
+        "line": 18,
+        "column": 4
+      },
+      "end": {
+        "line": 18,
+        "column": 52
+      }
+    },
+    "visibility": null,
+    "signature": "()",
+    "docstring": null,
+    "is_async": false
+  }
+]
