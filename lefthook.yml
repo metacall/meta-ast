@@ -1,0 +1,41 @@
+min_version: "1.11"
+
+pre-commit:
+  parallel: true
+  commands:
+    fmt:
+      run: cargo fmt --all -- --check
+    trailing-whitespace:
+      glob: "*.{rs,toml,md,yml,yaml}"
+      run: |
+        files=$(grep -rlI '[[:space:]]$' {staged_files} 2>/dev/null || true)
+        if [ -n "$files" ]; then
+          echo "Trailing whitespace found in:"
+          echo "$files"
+          exit 1
+        fi
+    merge-conflict:
+      glob: "*.{rs,toml,md,lock}"
+      run: |
+        files=$(grep -rnI '<<<<<<<\|>>>>>>>\|=======$' {staged_files} 2>/dev/null || true)
+        if [ -n "$files" ]; then
+          echo "Merge conflict markers found:"
+          echo "$files"
+          exit 1
+        fi
+    large-files:
+      run: |
+        for f in {staged_files}; do
+          size=$(wc -c < "$f" 2>/dev/null || echo 0)
+          if [ "$size" -gt 524288 ]; then
+            echo "File too large (>512KB): $f ($size bytes)"
+            exit 1
+          fi
+        done
+
+pre-push:
+  commands:
+    clippy:
+      run: cargo clippy --all-targets --all-features -- -D warnings
+    test:
+      run: cargo nextest run --all-features
