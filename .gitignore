@@ -20,6 +20,5 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# Snapshots `for now`
-src/language/snapshots
-tests/integration/snapshots
+# Insta pending snapshots (local only)
+*.snap.new

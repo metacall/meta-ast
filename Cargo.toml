@@ -6,7 +6,6 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -50,6 +49,11 @@ walkdir = "2.5.0"
 [dev-dependencies]
 insta = { version = "1.42", features = ["json"] }
 jsonschema = "0.45"
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "pipeline"
+harness = false
 
 [profile.release]
 opt-level = "z"

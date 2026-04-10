@@ -70,3 +70,62 @@ Rust channels:
 ## 9. Documentation policy in CI
 
 Any change that touches output contract, graph semantics, or language extraction must update relevant docs under `docs/` in the same PR.
+
+## 10. Toolchain configuration
+
+- `rust-toolchain.toml` pins channel `1.92.0` with `rustfmt` and `clippy` components.
+- `deny.toml` enforces license allowlist (MIT, Apache-2.0, BSD, ISC, etc.) and bans wildcard dependencies.
+- `clippy.toml` sets MSRV and complexity thresholds.
+- `rustfmt.toml` sets edition 2024 formatting rules.
+
+## 11. Pre-commit hooks (lefthook)
+
+Managed via `lefthook.yml`. Install with:
+
+```sh
+https://lefthook.dev/install/
+
+lefthook install
+```
+a dev script will be provided later to automate this process
+### pre-commit (parallel, fast)
+
+1. `cargo fmt --all -- --check` — formatting gate.
+2. Trailing whitespace check (`*.rs`, `*.toml`, `*.md`, `*.yml`).
+3. Merge conflict marker detection.
+4. Large file guard (>512KB).
+
+### pre-push (sequential, thorough)
+
+1. `cargo clippy --all-targets --all-features -- -D warnings` — lint gate.
+2. `cargo nextest run --all-features` — local test gate.
+
+## 12. Test runner (nextest)
+
+CI and local dev use `cargo-nextest` for faster test execution.
+
+- Config: `.config/nextest.toml`
+- CI profile: `fail-fast = false` (full matrix visibility).
+- Slow-timeout: 60s per test, terminate after 3 periods.
+
+## 13. Benchmarks (criterion)
+
+- Dev dependency: `criterion` 0.5 with `html_reports` feature.
+- Benchmark target: `benches/pipeline.rs` — extraction throughput per language fixture.
+- Profile: `opt-level = 3`, LTO enabled (see `[profile.bench]` in `Cargo.toml`).
+
+## 14. Release targets
+
+| Target triple | OS | Runner |
+|---|---|---|
+| `x86_64-unknown-linux-gnu` | Linux (glibc) | `ubuntu-latest` |
+| `x86_64-unknown-linux-musl` | Linux (static) | `ubuntu-latest` + musl-tools |
+| `x86_64-apple-darwin` | macOS (Intel) | `macos-13` |
+| `aarch64-apple-darwin` | macOS (Apple Silicon) | `macos-latest` |
+| `x86_64-pc-windows-msvc` | Windows | `windows-latest` |
+
+## 15. Snapshot policy
+
+- Insta `.snap` files are committed to the repository.
+- Pending snapshots (`.snap.new`) are gitignored.
+- Update workflow: `cargo insta test` → `cargo insta review` → commit accepted `.snap` files.
