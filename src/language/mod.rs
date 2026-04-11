@@ -1,4 +1,5 @@
 pub mod c;
+pub(crate) mod common;
 pub mod cpp;
 pub mod go;
 pub mod javascript;
