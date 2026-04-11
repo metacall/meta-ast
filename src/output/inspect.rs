@@ -96,49 +96,39 @@ mod tests {
     }
 
     #[test]
-    fn symbol_to_func_entry() {
-        let sym = make_symbol(1, "my_func", SymbolKind::Function);
-        let output = symbols_to_inspect_output(&[sym]);
-        assert_eq!(output.funcs.len(), 1);
-        assert_eq!(output.classes.len(), 0);
-        assert_eq!(output.objects.len(), 0);
-        assert_eq!(output.funcs[0].name, "my_func");
-    }
+    fn symbols_map_to_expected_bucket() {
+        let cases = [
+            ("my_func", SymbolKind::Function, 1usize, 0usize, 0usize),
+            ("do_thing", SymbolKind::Method, 1usize, 0usize, 0usize),
+            ("MyClass", SymbolKind::Class, 0usize, 1usize, 0usize),
+            ("Point", SymbolKind::Struct, 0usize, 1usize, 0usize),
+            ("MY_CONST", SymbolKind::Constant, 0usize, 0usize, 1usize),
+        ];
 
-    #[test]
-    fn symbol_to_class_entry() {
-        let sym = make_symbol(1, "MyClass", SymbolKind::Class);
-        let output = symbols_to_inspect_output(&[sym]);
-        assert_eq!(output.classes.len(), 1);
-        assert_eq!(output.funcs.len(), 0);
-        assert_eq!(output.objects.len(), 0);
-        assert_eq!(output.classes[0].name, "MyClass");
-    }
-
-    #[test]
-    fn symbol_to_object_entry() {
-        let sym = make_symbol(1, "MY_CONST", SymbolKind::Constant);
-        let output = symbols_to_inspect_output(&[sym]);
-        assert_eq!(output.objects.len(), 1);
-        assert_eq!(output.funcs.len(), 0);
-        assert_eq!(output.classes.len(), 0);
-        assert_eq!(output.objects[0].name, "MY_CONST");
-    }
-
-    #[test]
-    fn method_maps_to_func() {
-        let sym = make_symbol(1, "do_thing", SymbolKind::Method);
-        let output = symbols_to_inspect_output(&[sym]);
-        assert_eq!(output.funcs.len(), 1);
-        assert_eq!(output.funcs[0].name, "do_thing");
-    }
-
-    #[test]
-    fn struct_maps_to_class() {
-        let sym = make_symbol(1, "Point", SymbolKind::Struct);
-        let output = symbols_to_inspect_output(&[sym]);
-        assert_eq!(output.classes.len(), 1);
-        assert_eq!(output.classes[0].name, "Point");
+        for (name, kind, funcs, classes, objects) in cases {
+            let sym = make_symbol(1, name, kind);
+            let output = symbols_to_inspect_output(&[sym]);
+            assert_eq!(output.funcs.len(), funcs, "unexpected funcs for {name}");
+            assert_eq!(
+                output.classes.len(),
+                classes,
+                "unexpected classes for {name}"
+            );
+            assert_eq!(
+                output.objects.len(),
+                objects,
+                "unexpected objects for {name}"
+            );
+            if funcs == 1 {
+                assert_eq!(output.funcs[0].name, name);
+            }
+            if classes == 1 {
+                assert_eq!(output.classes[0].name, name);
+            }
+            if objects == 1 {
+                assert_eq!(output.objects[0].name, name);
+            }
+        }
     }
 
     #[test]

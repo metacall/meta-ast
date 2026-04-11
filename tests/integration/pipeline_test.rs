@@ -26,6 +26,31 @@ fn end_to_end_python_project() {
     assert!(parsed["funcs"].is_array());
     assert!(parsed["classes"].is_array());
     assert!(parsed["objects"].is_array());
+
+    for func in parsed["funcs"].as_array().unwrap() {
+        assert!(func["name"].is_string(), "func must have name");
+        assert!(
+            func["source_range"].is_object(),
+            "func must have source_range"
+        );
+        assert!(func["async"].is_boolean(), "func must have async field");
+    }
+
+    for class in parsed["classes"].as_array().unwrap() {
+        assert!(class["name"].is_string(), "class must have name");
+        assert!(
+            class["source_range"].is_object(),
+            "class must have source_range"
+        );
+    }
+
+    for obj in parsed["objects"].as_array().unwrap() {
+        assert!(obj["name"].is_string(), "object must have name");
+        assert!(
+            obj["source_range"].is_object(),
+            "object must have source_range"
+        );
+    }
 }
 
 #[test]

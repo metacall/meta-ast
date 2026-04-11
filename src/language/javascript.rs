@@ -1,28 +1,10 @@
 use crate::language::{RawSymbol, impl_language};
-use crate::model::{SourceRange, SymbolKind, Visibility};
+use crate::model::{SymbolKind, Visibility};
 
-fn source_range_from_node(node: &tree_sitter::Node) -> SourceRange {
-    SourceRange {
-        byte_start: node.start_byte(),
-        byte_end: node.end_byte(),
-        start: crate::model::LineColumn {
-            line: node.start_position().row,
-            column: node.start_position().column,
-        },
-        end: crate::model::LineColumn {
-            line: node.end_position().row,
-            column: node.end_position().column,
-        },
-    }
-}
+use super::common::{field_text, has_child_kind, source_range_from_node};
 
 fn extract_signature(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
-    let params = node.child_by_field_name("parameters")?;
-    params.utf8_text(source).ok().map(|s| s.to_string())
-}
-
-fn has_async_child(node: &tree_sitter::Node) -> bool {
-    node.children(&mut node.walk()).any(|c| c.kind() == "async")
+    field_text(node, "parameters", source)
 }
 
 fn extract_named_symbol(
@@ -31,9 +13,8 @@ fn extract_named_symbol(
     kind: SymbolKind,
     visibility: Option<Visibility>,
 ) -> Option<RawSymbol> {
-    let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
-    let is_async = has_async_child(node);
+    let name = field_text(node, "name", source)?;
+    let is_async = has_child_kind(node, "async");
     let signature = extract_signature(node, source);
 
     Some(RawSymbol {
