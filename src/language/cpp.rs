@@ -1,5 +1,7 @@
 use crate::language::{RawSymbol, impl_language};
-use crate::model::{LineColumn, SourceRange, SymbolKind};
+use crate::model::SymbolKind;
+
+use super::common::source_range_from_node;
 
 fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
     let mut symbols = Vec::new();
@@ -232,21 +234,6 @@ fn extract_typedef(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol>
         docstring: None,
         is_async: false,
     })
-}
-
-fn source_range_from_node(node: &tree_sitter::Node) -> SourceRange {
-    SourceRange {
-        byte_start: node.start_byte(),
-        byte_end: node.end_byte(),
-        start: LineColumn {
-            line: node.start_position().row,
-            column: node.start_position().column,
-        },
-        end: LineColumn {
-            line: node.end_position().row,
-            column: node.end_position().column,
-        },
-    }
 }
 
 impl_language!(
