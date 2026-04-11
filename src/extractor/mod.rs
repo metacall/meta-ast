@@ -67,9 +67,9 @@ fn extract_single_file(
     lang: &LangId,
 ) -> Result<(Vec<crate::language::RawSymbol>, Vec<Diagnostic>), Error> {
     let source = std::fs::read(path)?;
-    let parsed = parser::parse(*lang, &source)?;
+    let tree = parser::parse_tree(*lang, &source)?;
 
-    let ratio = parser::error_ratio(&parsed.tree, &source);
+    let ratio = parser::error_ratio(&tree, &source);
     let mut diags = Vec::new();
 
     if ratio > 0.5 {
@@ -84,7 +84,7 @@ fn extract_single_file(
         });
     }
 
-    let raw_symbols = crate::language::extract_symbols_for(*lang, &parsed.tree, &source);
+    let raw_symbols = crate::language::extract_symbols_for(*lang, &tree, &source);
 
     Ok((raw_symbols, diags))
 }

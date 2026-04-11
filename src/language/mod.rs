@@ -16,6 +16,7 @@ use tree_sitter::Tree;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
+#[repr(usize)]
 pub enum LangId {
     Python,
     JavaScript,

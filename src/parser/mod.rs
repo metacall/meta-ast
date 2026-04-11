@@ -1,23 +1,50 @@
+use std::cell::RefCell;
+
 use tree_sitter::Parser;
 
 use crate::error::Error;
 use crate::language::LangId;
+
+const LANG_COUNT: usize = 8;
+
+thread_local! {
+    static PARSERS: RefCell<[Option<Parser>; LANG_COUNT]> = const { RefCell::new([const { None }; LANG_COUNT]) };
+}
 
 pub struct ParsedFile {
     pub tree: tree_sitter::Tree,
     pub source: Vec<u8>,
 }
 
+fn get_or_init_parser(
+    parsers: &mut [Option<Parser>; LANG_COUNT],
+    lang: LangId,
+) -> Result<&mut Parser, Error> {
+    let idx = lang as usize;
+    if parsers[idx].is_none() {
+        let mut parser = Parser::new();
+        let grammar = crate::language::grammar_for(lang);
+        parser
+            .set_language(&grammar)
+            .map_err(|e| Error::Config(format!("failed to set language: {e}")))?;
+        parsers[idx] = Some(parser);
+    }
+    Ok(unsafe { parsers[idx].as_mut().unwrap_unchecked() })
+}
+
+pub fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tree, Error> {
+    PARSERS.with(|cache| {
+        let parsers = &mut *cache.borrow_mut();
+        let parser = get_or_init_parser(parsers, lang)?;
+        parser.parse(source, None).ok_or_else(|| Error::Parse {
+            path: Default::default(),
+            message: "parser returned no tree".into(),
+        })
+    })
+}
+
 pub fn parse(lang: LangId, source: &[u8]) -> Result<ParsedFile, Error> {
-    let mut parser = Parser::new();
-    let grammar = crate::language::grammar_for(lang);
-    parser
-        .set_language(&grammar)
-        .map_err(|e| Error::Config(format!("failed to set language: {e}")))?;
-    let tree = parser.parse(source, None).ok_or_else(|| Error::Parse {
-        path: Default::default(),
-        message: "parser returned no tree".into(),
-    })?;
+    let tree = parse_tree(lang, source)?;
     Ok(ParsedFile {
         tree,
         source: source.to_vec(),
@@ -29,6 +56,9 @@ pub fn error_ratio(tree: &tree_sitter::Tree, source: &[u8]) -> f64 {
         return 0.0;
     }
     let root = tree.root_node();
+    if !root.has_error() {
+        return 0.0;
+    }
     let mut total = 0u32;
     let mut errors = 0u32;
     count_nodes(&root, &mut total, &mut errors);
@@ -52,6 +82,22 @@ fn count_nodes(node: &tree_sitter::Node, total: &mut u32, errors: &mut u32) {
 mod tests {
     use super::*;
     use crate::language::LangId;
+
+    #[test]
+    fn parse_tree_valid_python() {
+        let tree = parse_tree(LangId::Python, b"def hello(): pass").unwrap();
+        assert!(!tree.root_node().has_error());
+        assert_eq!(tree.root_node().kind(), "module");
+    }
+
+    #[test]
+    fn parse_tree_switches_languages() {
+        let python = parse_tree(LangId::Python, b"def hello(): pass").unwrap();
+        assert_eq!(python.root_node().kind(), "module");
+
+        let javascript = parse_tree(LangId::JavaScript, b"function hello() {}").unwrap();
+        assert_eq!(javascript.root_node().kind(), "program");
+    }
 
     fn has_error_node(node: &tree_sitter::Node) -> bool {
         if node.is_error() {

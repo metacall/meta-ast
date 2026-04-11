@@ -35,9 +35,6 @@ petgraph = "0.8.3"
 clap = { version = "4.5", features = ["derive", "env", "color"] }
 notify = "8.2.0"
 
-# Multi-level caching
-moka = { version = "0.12", features = ["future"] }
-
 # Parallelism
 rayon = "1.10"
 
