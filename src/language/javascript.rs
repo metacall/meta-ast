@@ -3,17 +3,20 @@ use crate::model::{SymbolKind, Visibility};
 
 use super::common::{field_text, has_child_kind, source_range_from_node};
 
-fn extract_signature(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
-    field_text(node, "parameters", source)
+fn extract_signature<'a>(
+    node: &tree_sitter::Node<'a>,
+    source: &'a [u8],
+) -> Option<std::borrow::Cow<'a, str>> {
+    field_text(node, "parameters", source).map(std::borrow::Cow::from)
 }
 
-fn extract_named_symbol(
-    node: &tree_sitter::Node,
-    source: &[u8],
+fn extract_named_symbol<'a>(
+    node: &tree_sitter::Node<'a>,
+    source: &'a [u8],
     kind: SymbolKind,
     visibility: Option<Visibility>,
-) -> Option<RawSymbol> {
-    let name = field_text(node, "name", source)?;
+) -> Option<RawSymbol<'a>> {
+    let name = field_text(node, "name", source)?.into();
     let is_async = has_child_kind(node, "async");
     let signature = extract_signature(node, source);
 
@@ -28,11 +31,11 @@ fn extract_named_symbol(
     })
 }
 
-fn extract_class_with_methods(
-    node: &tree_sitter::Node,
-    source: &[u8],
+fn extract_class_with_methods<'a>(
+    node: &tree_sitter::Node<'a>,
+    source: &'a [u8],
     visibility: Option<Visibility>,
-) -> Vec<RawSymbol> {
+) -> Vec<RawSymbol<'a>> {
     let mut symbols = Vec::new();
 
     if let Some(sym) = extract_named_symbol(node, source, SymbolKind::Class, visibility) {
@@ -53,11 +56,16 @@ fn extract_class_with_methods(
     symbols
 }
 
-fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
+fn extract<'a>(tree: &'a tree_sitter::Tree, source: &'a [u8]) -> Vec<RawSymbol<'a>> {
     let mut symbols = Vec::new();
     let root = tree.root_node();
 
-    fn visit(node: tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>, exported: bool) {
+    fn visit<'a>(
+        node: tree_sitter::Node<'a>,
+        source: &'a [u8],
+        symbols: &mut Vec<RawSymbol<'a>>,
+        exported: bool,
+    ) {
         if node.is_error() || node.is_missing() {
             return;
         }
@@ -165,7 +173,7 @@ mod tests {
             .filter(|s| matches!(s.kind, SymbolKind::Method))
             .collect();
         assert_eq!(methods.len(), 2);
-        let method_names: Vec<_> = methods.iter().map(|m| m.name.as_str()).collect();
+        let method_names: Vec<_> = methods.iter().map(|m| m.name.as_ref()).collect();
         assert!(method_names.contains(&"constructor"));
         assert!(method_names.contains(&"bar"));
     }

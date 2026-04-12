@@ -3,11 +3,11 @@ use crate::model::SymbolKind;
 
 use super::common::source_range_from_node;
 
-fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
+fn extract<'a>(tree: &'a tree_sitter::Tree, source: &'a [u8]) -> Vec<RawSymbol<'a>> {
     let mut symbols = Vec::new();
     let root = tree.root_node();
 
-    fn visit(node: tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>) {
+    fn visit<'a>(node: tree_sitter::Node<'a>, source: &'a [u8], symbols: &mut Vec<RawSymbol<'a>>) {
         if node.is_error() || node.is_missing() {
             return;
         }
@@ -44,14 +44,14 @@ fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
     symbols
 }
 
-fn extract_function(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_function<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     let signature = node
         .child_by_field_name("parameters")
         .and_then(|p| p.utf8_text(source).ok())
-        .map(|s| s.to_string());
+        .map(|s| s.into());
 
     Some(RawSymbol {
         name,
@@ -64,14 +64,14 @@ fn extract_function(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol
     })
 }
 
-fn extract_method(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_method<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     let signature = node
         .child_by_field_name("parameters")
         .and_then(|p| p.utf8_text(source).ok())
-        .map(|s| s.to_string());
+        .map(|s| s.into());
 
     Some(RawSymbol {
         name,
@@ -84,7 +84,11 @@ fn extract_method(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> 
     })
 }
 
-fn extract_type_declaration(node: &tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>) {
+fn extract_type_declaration<'a>(
+    node: &tree_sitter::Node<'a>,
+    source: &'a [u8],
+    symbols: &mut Vec<RawSymbol<'a>>,
+) {
     for child in node.children(&mut node.walk()) {
         if child.kind() == "type_spec" {
             let name_node = child
@@ -94,7 +98,7 @@ fn extract_type_declaration(node: &tree_sitter::Node, source: &[u8], symbols: &m
                 continue;
             };
             let name = match name_node.utf8_text(source) {
-                Ok(n) => n.to_string(),
+                Ok(n) => std::borrow::Cow::from(n),
                 Err(_) => continue,
             };
 
@@ -121,10 +125,10 @@ fn extract_type_declaration(node: &tree_sitter::Node, source: &[u8], symbols: &m
     }
 }
 
-fn extract_const_declaration(
-    node: &tree_sitter::Node,
-    source: &[u8],
-    symbols: &mut Vec<RawSymbol>,
+fn extract_const_declaration<'a>(
+    node: &tree_sitter::Node<'a>,
+    source: &'a [u8],
+    symbols: &mut Vec<RawSymbol<'a>>,
 ) {
     for child in node.children(&mut node.walk()) {
         if child.kind() == "const_spec" {
@@ -133,7 +137,7 @@ fn extract_const_declaration(
                 && let Ok(name) = name_node.utf8_text(source)
             {
                 symbols.push(RawSymbol {
-                    name: name.to_string(),
+                    name: name.into(),
                     kind: SymbolKind::Constant,
                     source_range: source_range_from_node(&child),
                     visibility: None,
@@ -146,7 +150,11 @@ fn extract_const_declaration(
     }
 }
 
-fn extract_var_declaration(node: &tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>) {
+fn extract_var_declaration<'a>(
+    node: &tree_sitter::Node<'a>,
+    source: &'a [u8],
+    symbols: &mut Vec<RawSymbol<'a>>,
+) {
     for child in node.children(&mut node.walk()) {
         if child.kind() == "var_spec" {
             let name_node = child.child_by_field_name("name");
@@ -154,7 +162,7 @@ fn extract_var_declaration(node: &tree_sitter::Node, source: &[u8], symbols: &mu
                 && let Ok(name) = name_node.utf8_text(source)
             {
                 symbols.push(RawSymbol {
-                    name: name.to_string(),
+                    name: name.into(),
                     kind: SymbolKind::Object,
                     source_range: source_range_from_node(&child),
                     visibility: None,

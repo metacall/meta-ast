@@ -3,13 +3,18 @@ use crate::model::SymbolKind;
 
 use super::common::source_range_from_node;
 
-fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
+fn extract<'a>(tree: &'a tree_sitter::Tree, source: &'a [u8]) -> Vec<RawSymbol<'a>> {
     let mut symbols = Vec::new();
     visit(tree.root_node(), source, &mut symbols, false);
     symbols
 }
 
-fn visit(node: tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>, in_class: bool) {
+fn visit<'a>(
+    node: tree_sitter::Node<'a>,
+    source: &'a [u8],
+    symbols: &mut Vec<RawSymbol<'a>>,
+    in_class: bool,
+) {
     if node.is_error() || node.is_missing() {
         return;
     }
@@ -98,16 +103,22 @@ fn visit(node: tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>, i
     }
 }
 
-fn get_cpp_function_name(declarator: &tree_sitter::Node, source: &[u8]) -> Option<String> {
+fn get_cpp_function_name<'a>(
+    declarator: &tree_sitter::Node<'a>,
+    source: &'a [u8],
+) -> Option<std::borrow::Cow<'a, str>> {
     match declarator.kind() {
         "function_declarator" | "parenthesized_declarator" => {
             let inner = declarator.child_by_field_name("declarator")?;
             get_cpp_function_name(&inner, source)
         }
-        "identifier" | "field_identifier" => declarator.utf8_text(source).ok().map(String::from),
+        "identifier" | "field_identifier" => declarator
+            .utf8_text(source)
+            .ok()
+            .map(std::borrow::Cow::from),
         "qualified_identifier" => declarator
             .child_by_field_name("name")
-            .and_then(|n| n.utf8_text(source).ok().map(String::from)),
+            .and_then(|n| n.utf8_text(source).ok().map(std::borrow::Cow::from)),
         _ => None,
     }
 }
@@ -125,12 +136,12 @@ fn get_cpp_function_params<'a>(
     }
 }
 
-fn extract_function(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_function<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let declarator = node.child_by_field_name("declarator")?;
     let name = get_cpp_function_name(&declarator, source)?;
 
     let signature = get_cpp_function_params(&declarator)
-        .and_then(|p: tree_sitter::Node<'_>| p.utf8_text(source).ok().map(String::from));
+        .and_then(|p: tree_sitter::Node<'_>| p.utf8_text(source).ok().map(std::borrow::Cow::from));
 
     Some(RawSymbol {
         name,
@@ -143,12 +154,12 @@ fn extract_function(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol
     })
 }
 
-fn extract_method(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_method<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let declarator = node.child_by_field_name("declarator")?;
     let name = get_cpp_function_name(&declarator, source)?;
 
     let signature = get_cpp_function_params(&declarator)
-        .and_then(|p: tree_sitter::Node<'_>| p.utf8_text(source).ok().map(String::from));
+        .and_then(|p: tree_sitter::Node<'_>| p.utf8_text(source).ok().map(std::borrow::Cow::from));
 
     Some(RawSymbol {
         name,
@@ -161,9 +172,9 @@ fn extract_method(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> 
     })
 }
 
-fn extract_class(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_class<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     Some(RawSymbol {
         name,
@@ -176,9 +187,9 @@ fn extract_class(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
     })
 }
 
-fn extract_struct(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_struct<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     Some(RawSymbol {
         name,
@@ -191,9 +202,9 @@ fn extract_struct(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> 
     })
 }
 
-fn extract_enum(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_enum<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     Some(RawSymbol {
         name,
@@ -206,9 +217,9 @@ fn extract_enum(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
     })
 }
 
-fn extract_namespace(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_namespace<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     Some(RawSymbol {
         name,
@@ -221,9 +232,9 @@ fn extract_namespace(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbo
     })
 }
 
-fn extract_typedef(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_typedef<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let declarator = node.child_by_field_name("declarator")?;
-    let name = declarator.utf8_text(source).ok()?.to_string();
+    let name = declarator.utf8_text(source).ok()?.into();
 
     Some(RawSymbol {
         name,

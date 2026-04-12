@@ -8,14 +8,13 @@ pub mod rust;
 pub mod tsx;
 pub mod typescript;
 
-use std::fmt;
-
 use serde::Serialize;
 use tree_sitter::Tree;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, strum::Display, strum::AsRefStr)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 #[repr(usize)]
 pub enum LangId {
     Python,
@@ -28,28 +27,26 @@ pub enum LangId {
     Go,
 }
 
-impl fmt::Display for LangId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = serde_json::to_string(self).unwrap_or_else(|_| "\"unknown\"".to_string());
-        write!(f, "{}", s.trim_matches('"'))
-    }
-}
-
 pub trait LanguagePack: Clone + Send + Sync + 'static {
     fn grammar(&self) -> tree_sitter::Language;
     fn id(&self) -> &'static str;
     fn file_extensions(&self) -> &'static [&'static str];
-    fn extract_symbols(&self, tree: &Tree, source: &[u8]) -> Vec<RawSymbol>;
+    fn extract_symbols<'a>(
+        &self,
+        tree: &'a Tree,
+        source: &'a [u8],
+        cursor: &mut tree_sitter::TreeCursor<'a>,
+    ) -> Vec<RawSymbol<'a>>;
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct RawSymbol {
-    pub name: String,
+pub struct RawSymbol<'a> {
+    pub name: std::borrow::Cow<'a, str>,
     pub kind: crate::model::SymbolKind,
     pub source_range: crate::model::SourceRange,
     pub visibility: Option<crate::model::Visibility>,
-    pub signature: Option<String>,
-    pub docstring: Option<String>,
+    pub signature: Option<std::borrow::Cow<'a, str>>,
+    pub docstring: Option<std::borrow::Cow<'a, str>>,
     pub is_async: bool,
 }
 
@@ -68,8 +65,13 @@ macro_rules! impl_language {
             fn file_extensions(&self) -> &'static [&'static str] {
                 $extensions
             }
-            fn extract_symbols(&self, tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
-                $extract_fn(tree, source)
+            fn extract_symbols<'a>(
+                &self,
+                tree: &'a tree_sitter::Tree,
+                source: &'a [u8],
+                cursor: &mut tree_sitter::TreeCursor<'a>,
+            ) -> Vec<RawSymbol<'a>> {
+                $extract_fn(tree, source, cursor)
             }
         }
     };
@@ -90,16 +92,21 @@ pub fn grammar_for(id: LangId) -> tree_sitter::Language {
     }
 }
 
-pub fn extract_symbols_for(id: LangId, tree: &Tree, source: &[u8]) -> Vec<RawSymbol> {
+pub fn extract_symbols_for<'a>(
+    id: LangId,
+    tree: &'a Tree,
+    source: &'a [u8],
+    cursor: &mut tree_sitter::TreeCursor<'a>,
+) -> Vec<RawSymbol<'a>> {
     match id {
-        LangId::Python => python::Python.extract_symbols(tree, source),
-        LangId::JavaScript => javascript::JavaScript.extract_symbols(tree, source),
-        LangId::TypeScript => typescript::TypeScript.extract_symbols(tree, source),
-        LangId::Tsx => tsx::Tsx.extract_symbols(tree, source),
-        LangId::C => c::C.extract_symbols(tree, source),
-        LangId::Cpp => cpp::Cpp.extract_symbols(tree, source),
-        LangId::Rust => rust::Rust.extract_symbols(tree, source),
-        LangId::Go => go::Go.extract_symbols(tree, source),
+        LangId::Python => python::Python.extract_symbols(tree, source, cursor),
+        LangId::JavaScript => javascript::JavaScript.extract_symbols(tree, source, cursor),
+        LangId::TypeScript => typescript::TypeScript.extract_symbols(tree, source, cursor),
+        LangId::Tsx => tsx::Tsx.extract_symbols(tree, source, cursor),
+        LangId::C => c::C.extract_symbols(tree, source, cursor),
+        LangId::Cpp => cpp::Cpp.extract_symbols(tree, source, cursor),
+        LangId::Rust => rust::Rust.extract_symbols(tree, source, cursor),
+        LangId::Go => go::Go.extract_symbols(tree, source, cursor),
     }
 }
 

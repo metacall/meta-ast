@@ -2,11 +2,11 @@ use crate::language::{RawSymbol, impl_language};
 
 use super::common::source_range_from_node;
 
-fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
+fn extract<'a>(tree: &'a tree_sitter::Tree, source: &'a [u8]) -> Vec<RawSymbol<'a>> {
     let mut symbols = Vec::new();
     let root = tree.root_node();
 
-    fn visit(node: tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>) {
+    fn visit<'a>(node: tree_sitter::Node<'a>, source: &'a [u8], symbols: &mut Vec<RawSymbol<'a>>) {
         if node.is_error() || node.is_missing() {
             return;
         }
@@ -63,9 +63,9 @@ fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
     symbols
 }
 
-fn extract_function(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_function<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     let is_async = node.children(&mut node.walk()).any(|c| c.kind() == "async");
 
@@ -82,9 +82,9 @@ fn extract_function(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol
     })
 }
 
-fn extract_class(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_class<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     let signature = extract_signature(node, source);
 
@@ -99,7 +99,7 @@ fn extract_class(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
     })
 }
 
-fn extract_method(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
+fn extract_method<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
     let target = if node.kind() == "decorated_definition" {
         node.children(&mut node.walk())
             .find(|c| c.kind() == "function_definition")?
@@ -108,7 +108,7 @@ fn extract_method(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> 
     };
 
     let name_node = target.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     let is_async = target
         .children(&mut target.walk())
@@ -127,12 +127,18 @@ fn extract_method(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> 
     })
 }
 
-fn extract_signature(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
+fn extract_signature<'a>(
+    node: &tree_sitter::Node<'a>,
+    source: &'a [u8],
+) -> Option<std::borrow::Cow<'a, str>> {
     let params = node.child_by_field_name("parameters")?;
-    Some(params.utf8_text(source).ok()?.to_string())
+    Some(params.utf8_text(source).ok()?.into())
 }
 
-fn extract_docstring(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
+fn extract_docstring<'a>(
+    node: &tree_sitter::Node<'a>,
+    source: &'a [u8],
+) -> Option<std::borrow::Cow<'a, str>> {
     let body = node.child_by_field_name("body")?;
     let first_stmt = body.child(0)?;
     if first_stmt.kind() == "expression_statement"
@@ -142,7 +148,7 @@ fn extract_docstring(node: &tree_sitter::Node, source: &[u8]) -> Option<String> 
         return expr
             .utf8_text(source)
             .ok()
-            .map(|s| s.trim_matches(|c: char| c == '\'' || c == '"').to_string());
+            .map(|s| s.trim_matches(|c: char| c == '\'' || c == '"').into());
     }
     None
 }
@@ -216,7 +222,7 @@ mod tests {
         let src = b"def valid_function(): pass\ndef broken_function(\n";
         let tree = parse(src);
         let symbols = extract(&tree, src);
-        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_ref()).collect();
         assert!(names.contains(&"valid_function"));
     }
 

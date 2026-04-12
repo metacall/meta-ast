@@ -3,11 +3,16 @@ use crate::model::{SymbolKind, Visibility};
 
 use super::common::source_range_from_node;
 
-fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
+fn extract<'a>(tree: &'a tree_sitter::Tree, source: &'a [u8]) -> Vec<RawSymbol<'a>> {
     let mut symbols = Vec::new();
     let root = tree.root_node();
 
-    fn visit(node: tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>, in_impl: bool) {
+    fn visit<'a>(
+        node: tree_sitter::Node<'a>,
+        source: &'a [u8],
+        symbols: &mut Vec<RawSymbol<'a>>,
+        in_impl: bool,
+    ) {
         if node.is_error() || node.is_missing() {
             return;
         }
@@ -81,9 +86,13 @@ fn extract_visibility(node: &tree_sitter::Node) -> Option<Visibility> {
     }
 }
 
-fn extract_function(node: &tree_sitter::Node, source: &[u8], in_impl: bool) -> Option<RawSymbol> {
+fn extract_function<'a>(
+    node: &tree_sitter::Node<'a>,
+    source: &'a [u8],
+    in_impl: bool,
+) -> Option<RawSymbol<'a>> {
     let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     let is_async = node.children(&mut node.walk()).any(|c| {
         if c.kind() == "function_modifiers" {
@@ -96,7 +105,7 @@ fn extract_function(node: &tree_sitter::Node, source: &[u8], in_impl: bool) -> O
     let signature = node
         .child_by_field_name("parameters")
         .and_then(|p| p.utf8_text(source).ok())
-        .map(|s| s.to_string());
+        .map(|s| s.into());
 
     Some(RawSymbol {
         name,
@@ -113,13 +122,13 @@ fn extract_function(node: &tree_sitter::Node, source: &[u8], in_impl: bool) -> O
     })
 }
 
-fn extract_named_item(
-    node: &tree_sitter::Node,
-    source: &[u8],
+fn extract_named_item<'a>(
+    node: &tree_sitter::Node<'a>,
+    source: &'a [u8],
     kind: SymbolKind,
-) -> Option<RawSymbol> {
+) -> Option<RawSymbol<'a>> {
     let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
+    let name = name_node.utf8_text(source).ok()?.into();
 
     Some(RawSymbol {
         name,
