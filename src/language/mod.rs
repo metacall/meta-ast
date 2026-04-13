@@ -165,7 +165,8 @@ mod tests {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(&grammar_for(LangId::Python)).unwrap();
         let tree = parser.parse(b"def hello(): pass", None).unwrap();
-        let symbols = extract_symbols_for(LangId::Python, &tree, b"def hello(): pass");
+        let mut cursor = tree.walk();
+        let symbols = extract_symbols_for(LangId::Python, &tree, b"def hello(): pass", &mut cursor);
         assert!(!symbols.is_empty());
     }
 }
