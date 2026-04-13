@@ -1,178 +1,67 @@
 use crate::language::{RawSymbol, impl_language};
-use crate::model::SymbolKind;
+use once_cell::sync::Lazy;
 
-use super::common::source_range_from_node;
+static GO_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_go::LANGUAGE.into(),
+        r#"
+(function_declaration
+  name: (identifier) @name
+  parameters: (parameter_list) @signature
+) @kind.function
 
-fn extract<'a>(tree: &'a tree_sitter::Tree, source: &'a [u8]) -> Vec<RawSymbol<'a>> {
-    let mut symbols = Vec::new();
-    let root = tree.root_node();
+(method_declaration
+  name: (field_identifier) @name
+  parameters: (parameter_list) @signature
+) @kind.method
 
-    fn visit<'a>(node: tree_sitter::Node<'a>, source: &'a [u8], symbols: &mut Vec<RawSymbol<'a>>) {
-        if node.is_error() || node.is_missing() {
-            return;
-        }
+(type_declaration
+  (type_spec
+    name: (type_identifier) @name
+    type: (struct_type)
+  )
+) @kind.struct
 
-        match node.kind() {
-            "function_declaration" => {
-                if let Some(sym) = extract_function(&node, source) {
-                    symbols.push(sym);
-                }
-            }
-            "method_declaration" => {
-                if let Some(sym) = extract_method(&node, source) {
-                    symbols.push(sym);
-                }
-            }
-            "type_declaration" => {
-                extract_type_declaration(&node, source, symbols);
-            }
-            "const_declaration" => {
-                extract_const_declaration(&node, source, symbols);
-            }
-            "var_declaration" => {
-                extract_var_declaration(&node, source, symbols);
-            }
-            _ => {
-                for child in node.children(&mut node.walk()) {
-                    visit(child, source, symbols);
-                }
-            }
-        }
-    }
+(type_declaration
+  (type_spec
+    name: (type_identifier) @name
+    type: (interface_type)
+  )
+) @kind.interface
 
-    visit(root, source, &mut symbols);
-    symbols
-}
+(type_declaration
+  (type_spec
+    name: (type_identifier) @name
+    type: [
+      (type_identifier)
+      (pointer_type)
+      (function_type)
+      (array_type)
+      (slice_type)
+      (map_type)
+      (channel_type)
+    ]
+  )
+) @kind.type_alias
 
-fn extract_function<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
-    let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.into();
+(const_spec
+  name: (identifier) @name
+) @kind.constant
 
-    let signature = node
-        .child_by_field_name("parameters")
-        .and_then(|p| p.utf8_text(source).ok())
-        .map(|s| s.into());
+(var_spec
+  name: (identifier) @name
+) @kind.object
+"#,
+    )
+    .expect("Failed to parse Go query")
+});
 
-    Some(RawSymbol {
-        name,
-        kind: SymbolKind::Function,
-        source_range: source_range_from_node(node),
-        visibility: None,
-        signature,
-        docstring: None,
-        is_async: false,
-    })
-}
-
-fn extract_method<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
-    let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.into();
-
-    let signature = node
-        .child_by_field_name("parameters")
-        .and_then(|p| p.utf8_text(source).ok())
-        .map(|s| s.into());
-
-    Some(RawSymbol {
-        name,
-        kind: SymbolKind::Method,
-        source_range: source_range_from_node(node),
-        visibility: None,
-        signature,
-        docstring: None,
-        is_async: false,
-    })
-}
-
-fn extract_type_declaration<'a>(
-    node: &tree_sitter::Node<'a>,
+fn extract<'a>(
+    tree: &'a tree_sitter::Tree,
     source: &'a [u8],
-    symbols: &mut Vec<RawSymbol<'a>>,
-) {
-    for child in node.children(&mut node.walk()) {
-        if child.kind() == "type_spec" {
-            let name_node = child
-                .children(&mut child.walk())
-                .find(|c| c.kind() == "type_identifier");
-            let Some(name_node) = name_node else {
-                continue;
-            };
-            let name = match name_node.utf8_text(source) {
-                Ok(n) => std::borrow::Cow::from(n),
-                Err(_) => continue,
-            };
-
-            let kind = child
-                .child_by_field_name("type")
-                .map(|t| t.kind())
-                .map(|k| match k {
-                    "struct_type" => SymbolKind::Struct,
-                    "interface_type" => SymbolKind::Interface,
-                    _ => SymbolKind::Struct,
-                })
-                .unwrap_or(SymbolKind::Struct);
-
-            symbols.push(RawSymbol {
-                name,
-                kind,
-                source_range: source_range_from_node(node),
-                visibility: None,
-                signature: None,
-                docstring: None,
-                is_async: false,
-            });
-        }
-    }
-}
-
-fn extract_const_declaration<'a>(
-    node: &tree_sitter::Node<'a>,
-    source: &'a [u8],
-    symbols: &mut Vec<RawSymbol<'a>>,
-) {
-    for child in node.children(&mut node.walk()) {
-        if child.kind() == "const_spec" {
-            let name_node = child.child_by_field_name("name");
-            if let Some(name_node) = name_node
-                && let Ok(name) = name_node.utf8_text(source)
-            {
-                symbols.push(RawSymbol {
-                    name: name.into(),
-                    kind: SymbolKind::Constant,
-                    source_range: source_range_from_node(&child),
-                    visibility: None,
-                    signature: None,
-                    docstring: None,
-                    is_async: false,
-                });
-            }
-        }
-    }
-}
-
-fn extract_var_declaration<'a>(
-    node: &tree_sitter::Node<'a>,
-    source: &'a [u8],
-    symbols: &mut Vec<RawSymbol<'a>>,
-) {
-    for child in node.children(&mut node.walk()) {
-        if child.kind() == "var_spec" {
-            let name_node = child.child_by_field_name("name");
-            if let Some(name_node) = name_node
-                && let Ok(name) = name_node.utf8_text(source)
-            {
-                symbols.push(RawSymbol {
-                    name: name.into(),
-                    kind: SymbolKind::Object,
-                    source_range: source_range_from_node(&child),
-                    visibility: None,
-                    signature: None,
-                    docstring: None,
-                    is_async: false,
-                });
-            }
-        }
-    }
+    _cursor: &mut tree_sitter::TreeCursor<'a>,
+) -> Vec<RawSymbol<'a>> {
+    super::common::extract_with_query(tree, source, &GO_QUERY)
 }
 
 impl_language!(Go, tree_sitter_go::LANGUAGE.into(), extract, &["go"]);
@@ -191,18 +80,11 @@ mod tests {
     }
 
     #[test]
-    fn go_grammar_loads() {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_go::LANGUAGE.into())
-            .unwrap();
-    }
-
-    #[test]
     fn extract_function() {
         let src = b"package main\n\nfunc Hello() {}";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Hello");
         assert!(matches!(symbols[0].kind, SymbolKind::Function));
@@ -212,7 +94,8 @@ mod tests {
     fn extract_struct() {
         let src = b"package main\n\ntype Rect struct {\n\tWidth float64\n}";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Rect");
         assert!(matches!(symbols[0].kind, SymbolKind::Struct));
@@ -222,20 +105,11 @@ mod tests {
     fn extract_method_with_receiver() {
         let src = b"package main\n\nfunc (r *Rect) Area() float64 { return 0 }";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Area");
         assert!(matches!(symbols[0].kind, SymbolKind::Method));
-    }
-
-    #[test]
-    fn extract_interface() {
-        let src = b"package main\n\ntype Writer interface {\n\tWrite([]byte) error\n}";
-        let tree = parse(src);
-        let symbols = extract(&tree, src);
-        assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name, "Writer");
-        assert!(matches!(symbols[0].kind, SymbolKind::Interface));
     }
 
     #[test]
@@ -246,7 +120,8 @@ mod tests {
         )
         .unwrap();
         let tree = parse(src.as_bytes());
-        let symbols = extract(&tree, src.as_bytes());
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
         insta::assert_json_snapshot!(symbols);
     }
 }

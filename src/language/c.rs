@@ -1,137 +1,46 @@
 use crate::language::{RawSymbol, impl_language};
-use crate::model::SymbolKind;
+use once_cell::sync::Lazy;
 
-use super::common::source_range_from_node;
+use super::common::extract_with_query;
 
-fn extract<'a>(tree: &'a tree_sitter::Tree, source: &'a [u8]) -> Vec<RawSymbol<'a>> {
-    let mut symbols = Vec::new();
-    visit(tree.root_node(), source, &mut symbols);
-    symbols
-}
+static C_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_c::LANGUAGE.into(),
+        r#"
+        (function_definition
+            declarator: [
+                (function_declarator
+                    declarator: (identifier) @name
+                    parameters: (parameter_list) @signature)
+                (function_declarator
+                    declarator: (parenthesized_declarator
+                        (identifier) @name)
+                    parameters: (parameter_list) @signature)
+                (pointer_declarator
+                    declarator: (function_declarator
+                        declarator: (identifier) @name
+                        parameters: (parameter_list) @signature))
+            ]) @kind.function
 
-fn visit<'a>(node: tree_sitter::Node<'a>, source: &'a [u8], symbols: &mut Vec<RawSymbol<'a>>) {
-    if node.is_error() || node.is_missing() {
-        return;
-    }
+        (struct_specifier
+            name: (type_identifier) @name) @kind.struct
 
-    match node.kind() {
-        "function_definition" => {
-            if let Some(sym) = extract_function(&node, source) {
-                symbols.push(sym);
-            }
-        }
-        "struct_specifier" => {
-            if let Some(sym) = extract_struct(&node, source) {
-                symbols.push(sym);
-            }
-        }
-        "enum_specifier" => {
-            if let Some(sym) = extract_enum(&node, source) {
-                symbols.push(sym);
-            }
-        }
-        "type_definition" => {
-            if let Some(sym) = extract_typedef(&node, source) {
-                symbols.push(sym);
-            }
-        }
-        _ => {
-            for child in node.children(&mut node.walk()) {
-                visit(child, source, symbols);
-            }
-        }
-    }
-}
+        (enum_specifier
+            name: (type_identifier) @name) @kind.enum
 
-fn get_c_function_name<'a>(
-    declarator: &tree_sitter::Node<'a>,
+        (type_definition
+            declarator: (type_identifier) @name) @kind.type_alias
+        "#,
+    )
+    .expect("Failed to parse C query")
+});
+
+fn extract<'a>(
+    tree: &'a tree_sitter::Tree,
     source: &'a [u8],
-) -> Option<std::borrow::Cow<'a, str>> {
-    match declarator.kind() {
-        "function_declarator" | "parenthesized_declarator" => {
-            let inner = declarator.child_by_field_name("declarator")?;
-            get_c_function_name(&inner, source)
-        }
-        "identifier" => declarator
-            .utf8_text(source)
-            .ok()
-            .map(std::borrow::Cow::from),
-        _ => None,
-    }
-}
-
-fn get_c_function_params<'a>(declarator: &tree_sitter::Node<'a>) -> Option<tree_sitter::Node<'a>> {
-    match declarator.kind() {
-        "function_declarator" => declarator.child_by_field_name("parameters"),
-        "parenthesized_declarator" => {
-            let inner = declarator.child_by_field_name("declarator")?;
-            get_c_function_params(&inner)
-        }
-        _ => None,
-    }
-}
-
-fn extract_function<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
-    let declarator = node.child_by_field_name("declarator")?;
-    let name = get_c_function_name(&declarator, source)?;
-
-    let signature = get_c_function_params(&declarator)
-        .and_then(|p: tree_sitter::Node<'_>| p.utf8_text(source).ok().map(std::borrow::Cow::from));
-
-    Some(RawSymbol {
-        name,
-        kind: SymbolKind::Function,
-        source_range: source_range_from_node(node),
-        visibility: None,
-        signature,
-        docstring: None,
-        is_async: false,
-    })
-}
-
-fn extract_struct<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
-    let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.into();
-
-    Some(RawSymbol {
-        name,
-        kind: SymbolKind::Struct,
-        source_range: source_range_from_node(node),
-        visibility: None,
-        signature: None,
-        docstring: None,
-        is_async: false,
-    })
-}
-
-fn extract_enum<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
-    let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.into();
-
-    Some(RawSymbol {
-        name,
-        kind: SymbolKind::Enum,
-        source_range: source_range_from_node(node),
-        visibility: None,
-        signature: None,
-        docstring: None,
-        is_async: false,
-    })
-}
-
-fn extract_typedef<'a>(node: &tree_sitter::Node<'a>, source: &'a [u8]) -> Option<RawSymbol<'a>> {
-    let declarator = node.child_by_field_name("declarator")?;
-    let name = declarator.utf8_text(source).ok()?.into();
-
-    Some(RawSymbol {
-        name,
-        kind: SymbolKind::TypeAlias,
-        source_range: source_range_from_node(node),
-        visibility: None,
-        signature: None,
-        docstring: None,
-        is_async: false,
-    })
+    _cursor: &mut tree_sitter::TreeCursor<'a>,
+) -> Vec<RawSymbol<'a>> {
+    extract_with_query(tree, source, &C_QUERY)
 }
 
 impl_language!(C, tree_sitter_c::LANGUAGE.into(), extract, &["c"]);
@@ -161,7 +70,8 @@ mod tests {
     fn extract_function() {
         let src = b"int add(int a, int b) { return a + b; }";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "add");
         assert!(matches!(symbols[0].kind, SymbolKind::Function));
@@ -172,7 +82,8 @@ mod tests {
     fn extract_struct() {
         let src = b"struct Point { int x; int y; };";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         let s = symbols.iter().find(|s| s.name == "Point").unwrap();
         assert!(matches!(s.kind, SymbolKind::Struct));
     }
@@ -181,7 +92,8 @@ mod tests {
     fn extract_enum() {
         let src = b"enum Color { RED, GREEN };";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         let s = symbols.iter().find(|s| s.name == "Color").unwrap();
         assert!(matches!(s.kind, SymbolKind::Enum));
     }
@@ -194,7 +106,8 @@ mod tests {
         )
         .unwrap();
         let tree = parse(src.as_bytes());
-        let symbols = extract(&tree, src.as_bytes());
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
         insta::assert_json_snapshot!(symbols);
     }
 }
