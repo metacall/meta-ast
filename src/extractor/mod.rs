@@ -73,7 +73,8 @@ fn extract_single_file(
         });
     }
 
-    let raw_symbols = crate::language::extract_symbols_for(*lang, &tree, &source);
+    let mut cursor = tree.walk();
+    let raw_symbols = crate::language::extract_symbols_for(*lang, &tree, &source, &mut cursor);
 
     let symbols = raw_symbols
         .into_iter()

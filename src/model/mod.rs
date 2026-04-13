@@ -23,7 +23,7 @@ pub struct SourceRange {
     pub end: LineColumn,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub enum SymbolKind {
     Function,
