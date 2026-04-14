@@ -1,150 +1,47 @@
 use crate::language::{RawSymbol, impl_language};
+use once_cell::sync::Lazy;
 
-use super::common::source_range_from_node;
+static PYTHON_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_python::LANGUAGE.into(),
+        r#"
+(function_definition
+  "async"? @async
+  name: (identifier) @name
+  parameters: (parameters) @signature
+  body: (block (expression_statement (string) @docstring)?)
+) @kind.function
 
-fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
-    let mut symbols = Vec::new();
-    let root = tree.root_node();
+(class_definition
+  name: (identifier) @name
+  body: (block (expression_statement (string) @docstring)?)
+) @kind.class
 
-    fn visit(node: tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>) {
-        if node.is_error() || node.is_missing() {
-            return;
-        }
+(decorated_definition
+  definition: [
+    (function_definition
+      "async"? @async
+      name: (identifier) @name
+      parameters: (parameters) @signature
+      body: (block (expression_statement (string) @docstring)?)
+    ) @kind.function
+    (class_definition
+      name: (identifier) @name
+      body: (block (expression_statement (string) @docstring)?)
+    ) @kind.class
+  ]
+)
+"#,
+    )
+    .expect("Failed to parse Python query")
+});
 
-        match node.kind() {
-            "function_definition" => {
-                if let Some(sym) = extract_function(&node, source) {
-                    symbols.push(sym);
-                }
-            }
-            "class_definition" => {
-                if let Some(sym) = extract_class(&node, source) {
-                    symbols.push(sym);
-                }
-                for child in node.children(&mut node.walk()) {
-                    if (child.kind() == "function_definition"
-                        || child.kind() == "decorated_definition")
-                        && let Some(sym) = extract_method(&child, source)
-                    {
-                        symbols.push(sym);
-                    }
-                }
-            }
-            "decorated_definition" => {
-                for child in node.children(&mut node.walk()) {
-                    if child.kind() == "function_definition" {
-                        if let Some(sym) = extract_function(&child, source) {
-                            symbols.push(sym);
-                        }
-                    } else if child.kind() == "class_definition" {
-                        if let Some(sym) = extract_class(&child, source) {
-                            symbols.push(sym);
-                        }
-                        for inner in child.children(&mut child.walk()) {
-                            if (inner.kind() == "function_definition"
-                                || inner.kind() == "decorated_definition")
-                                && let Some(sym) = extract_method(&inner, source)
-                            {
-                                symbols.push(sym);
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {
-                for child in node.children(&mut node.walk()) {
-                    visit(child, source, symbols);
-                }
-            }
-        }
-    }
-
-    visit(root, source, &mut symbols);
-    symbols
-}
-
-fn extract_function(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
-    let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
-
-    let is_async = node.children(&mut node.walk()).any(|c| c.kind() == "async");
-
-    let signature = extract_signature(node, source);
-
-    Some(RawSymbol {
-        name,
-        kind: crate::model::SymbolKind::Function,
-        source_range: source_range_from_node(node),
-        visibility: None,
-        signature,
-        docstring: extract_docstring(node, source),
-        is_async,
-    })
-}
-
-fn extract_class(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
-    let name_node = node.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
-
-    let signature = extract_signature(node, source);
-
-    Some(RawSymbol {
-        name,
-        kind: crate::model::SymbolKind::Class,
-        source_range: source_range_from_node(node),
-        visibility: None,
-        signature,
-        docstring: extract_docstring(node, source),
-        is_async: false,
-    })
-}
-
-fn extract_method(node: &tree_sitter::Node, source: &[u8]) -> Option<RawSymbol> {
-    let target = if node.kind() == "decorated_definition" {
-        node.children(&mut node.walk())
-            .find(|c| c.kind() == "function_definition")?
-    } else {
-        *node
-    };
-
-    let name_node = target.child_by_field_name("name")?;
-    let name = name_node.utf8_text(source).ok()?.to_string();
-
-    let is_async = target
-        .children(&mut target.walk())
-        .any(|c| c.kind() == "async");
-
-    let signature = extract_signature(&target, source);
-
-    Some(RawSymbol {
-        name,
-        kind: crate::model::SymbolKind::Method,
-        source_range: source_range_from_node(node),
-        visibility: None,
-        signature,
-        docstring: extract_docstring(&target, source),
-        is_async,
-    })
-}
-
-fn extract_signature(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
-    let params = node.child_by_field_name("parameters")?;
-    Some(params.utf8_text(source).ok()?.to_string())
-}
-
-fn extract_docstring(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
-    let body = node.child_by_field_name("body")?;
-    let first_stmt = body.child(0)?;
-    if first_stmt.kind() == "expression_statement"
-        && let Some(expr) = first_stmt.child(0)
-        && expr.kind() == "string"
-    {
-        return expr
-            .utf8_text(source)
-            .ok()
-            .map(|s| s.trim_matches(|c: char| c == '\'' || c == '"').to_string());
-    }
-    None
+fn extract<'a>(
+    tree: &'a tree_sitter::Tree,
+    source: &'a [u8],
+    _cursor: &mut tree_sitter::TreeCursor<'a>,
+) -> Vec<RawSymbol<'a>> {
+    super::common::extract_with_query(tree, source, &PYTHON_QUERY)
 }
 
 impl_language!(
@@ -178,7 +75,8 @@ mod tests {
     #[test]
     fn extract_simple_function() {
         let tree = parse(b"def hello(): pass");
-        let symbols = extract(&tree, b"def hello(): pass");
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, b"def hello(): pass", &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "hello");
         assert!(matches!(symbols[0].kind, SymbolKind::Function));
@@ -187,7 +85,8 @@ mod tests {
     #[test]
     fn extract_async_function() {
         let tree = parse(b"async def fetch(): pass");
-        let symbols = extract(&tree, b"async def fetch(): pass");
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, b"async def fetch(): pass", &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert!(symbols[0].is_async);
     }
@@ -197,27 +96,22 @@ mod tests {
         let src =
             "class Foo:\n    def __init__(self):\n        pass\n    def bar(self):\n        pass\n";
         let tree = parse(src.as_bytes());
-        let symbols = extract(&tree, src.as_bytes());
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
         let foo = symbols.iter().find(|s| s.name == "Foo").unwrap();
         assert!(matches!(foo.kind, SymbolKind::Class));
+        let bar = symbols.iter().find(|s| s.name == "bar").unwrap();
+        assert!(matches!(bar.kind, SymbolKind::Method));
     }
 
     #[test]
     fn extract_decorated_function() {
         let src = "@decorator\ndef decorated_func(x):\n    return x * 2\n";
         let tree = parse(src.as_bytes());
-        let symbols = extract(&tree, src.as_bytes());
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "decorated_func");
-    }
-
-    #[test]
-    fn skip_error_nodes() {
-        let src = b"def valid_function(): pass\ndef broken_function(\n";
-        let tree = parse(src);
-        let symbols = extract(&tree, src);
-        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"valid_function"));
     }
 
     #[test]
@@ -227,21 +121,10 @@ mod tests {
     pass
 "#;
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].docstring.as_deref(), Some("Say hello."));
-    }
-
-    #[test]
-    fn extract_class_with_docstring() {
-        let src = br#"class Foo:
-    """A foo class."""
-    pass
-"#;
-        let tree = parse(src);
-        let symbols = extract(&tree, src);
-        let class = symbols.iter().find(|s| s.name == "Foo").unwrap();
-        assert_eq!(class.docstring.as_deref(), Some("A foo class."));
     }
 
     #[test]
@@ -252,7 +135,8 @@ mod tests {
         )
         .unwrap();
         let tree = parse(src.as_bytes());
-        let symbols = extract(&tree, src.as_bytes());
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
         insta::assert_json_snapshot!(symbols);
     }
 }

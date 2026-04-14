@@ -16,38 +16,26 @@ pub fn extract(files: &[(std::path::PathBuf, LangId)]) -> ExtractionResult {
 
     let results: Vec<_> = files
         .par_iter()
-        .filter_map(|(path, lang)| match extract_single_file(path, lang) {
-            Ok((raw_symbols, diags)) => Some((path.clone(), *lang, raw_symbols, diags)),
-            Err(e) => {
-                let diag = Diagnostic {
-                    path: path.clone(),
-                    severity: Severity::Error,
-                    message: e.to_string(),
-                    source_range: None,
-                };
-                Some((path.clone(), *lang, Vec::new(), vec![diag]))
-            }
-        })
+        .filter_map(
+            |(path, lang)| match extract_single_file(path, lang, &id_gen) {
+                Ok((symbols, diags)) => Some((path.clone(), *lang, symbols, diags)),
+                Err(e) => {
+                    let diag = Diagnostic {
+                        path: path.clone(),
+                        severity: Severity::Error,
+                        message: e.to_string(),
+                        source_range: None,
+                    };
+                    Some((path.clone(), *lang, Vec::new(), vec![diag]))
+                }
+            },
+        )
         .collect();
 
     let mut symbols = Vec::new();
-    for (path, lang, raw_symbols, mut diags) in results {
+    for (_path, _lang, mut file_symbols, mut diags) in results {
         diagnostics.append(&mut diags);
-        for raw in raw_symbols {
-            let symbol = Symbol {
-                id: id_gen.next(),
-                name: raw.name,
-                kind: raw.kind,
-                language: lang,
-                file_path: path.clone(),
-                source_range: raw.source_range,
-                visibility: raw.visibility,
-                signature: raw.signature,
-                docstring: raw.docstring,
-                is_async: raw.is_async,
-            };
-            symbols.push(symbol);
-        }
+        symbols.append(&mut file_symbols);
     }
 
     symbols.sort_by(|a, b| {
@@ -65,7 +53,8 @@ pub fn extract(files: &[(std::path::PathBuf, LangId)]) -> ExtractionResult {
 fn extract_single_file(
     path: &std::path::Path,
     lang: &LangId,
-) -> Result<(Vec<crate::language::RawSymbol>, Vec<Diagnostic>), Error> {
+    id_gen: &IdGenerator<SymbolId>,
+) -> Result<(Vec<Symbol>, Vec<Diagnostic>), Error> {
     let source = std::fs::read(path)?;
     let tree = parser::parse_tree(*lang, &source)?;
 
@@ -84,9 +73,26 @@ fn extract_single_file(
         });
     }
 
-    let raw_symbols = crate::language::extract_symbols_for(*lang, &tree, &source);
+    let mut cursor = tree.walk();
+    let raw_symbols = crate::language::extract_symbols_for(*lang, &tree, &source, &mut cursor);
 
-    Ok((raw_symbols, diags))
+    let symbols = raw_symbols
+        .into_iter()
+        .map(|raw| Symbol {
+            id: id_gen.next(),
+            name: raw.name.into_owned(),
+            kind: raw.kind,
+            language: *lang,
+            file_path: path.to_path_buf(),
+            source_range: raw.source_range,
+            visibility: raw.visibility,
+            signature: raw.signature.map(|s| s.into_owned()),
+            docstring: raw.docstring.map(|s| s.into_owned()),
+            is_async: raw.is_async,
+        })
+        .collect();
+
+    Ok((symbols, diags))
 }
 
 #[cfg(test)]

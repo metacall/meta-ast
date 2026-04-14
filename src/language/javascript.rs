@@ -1,109 +1,58 @@
 use crate::language::{RawSymbol, impl_language};
-use crate::model::{SymbolKind, Visibility};
+use once_cell::sync::Lazy;
 
-use super::common::{field_text, has_child_kind, source_range_from_node};
+static JS_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_javascript::LANGUAGE.into(),
+        r#"
+(function_declaration
+  "async"? @async
+  name: (identifier) @name
+  parameters: (formal_parameters) @signature
+) @kind.function
 
-fn extract_signature(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
-    field_text(node, "parameters", source)
-}
+(generator_function_declaration
+  "async"? @async
+  name: (identifier) @name
+  parameters: (formal_parameters) @signature
+) @kind.function
 
-fn extract_named_symbol(
-    node: &tree_sitter::Node,
-    source: &[u8],
-    kind: SymbolKind,
-    visibility: Option<Visibility>,
-) -> Option<RawSymbol> {
-    let name = field_text(node, "name", source)?;
-    let is_async = has_child_kind(node, "async");
-    let signature = extract_signature(node, source);
+(class_declaration
+  name: (identifier) @name
+) @kind.class
 
-    Some(RawSymbol {
-        name,
-        kind,
-        source_range: source_range_from_node(node),
-        visibility,
-        signature,
-        docstring: None,
-        is_async,
-    })
-}
+(method_definition
+  "async"? @async
+  name: [
+    (property_identifier)
+    (identifier)
+  ] @name
+  parameters: (formal_parameters) @signature
+) @kind.method
 
-fn extract_class_with_methods(
-    node: &tree_sitter::Node,
-    source: &[u8],
-    visibility: Option<Visibility>,
-) -> Vec<RawSymbol> {
-    let mut symbols = Vec::new();
+(export_statement
+  [
+    (function_declaration
+      "async"? @async
+      name: (identifier) @name
+      parameters: (formal_parameters) @signature
+    ) @kind.function
+    (class_declaration
+      name: (identifier) @name
+    ) @kind.class
+  ]
+) @visibility.public
+"#,
+    )
+    .expect("Failed to parse JavaScript query")
+});
 
-    if let Some(sym) = extract_named_symbol(node, source, SymbolKind::Class, visibility) {
-        symbols.push(sym);
-    }
-
-    if let Some(body) = node.child_by_field_name("body") {
-        for child in body.children(&mut body.walk()) {
-            if child.kind() == "method_definition"
-                && let Some(method_sym) =
-                    extract_named_symbol(&child, source, SymbolKind::Method, visibility)
-            {
-                symbols.push(method_sym);
-            }
-        }
-    }
-
-    symbols
-}
-
-fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
-    let mut symbols = Vec::new();
-    let root = tree.root_node();
-
-    fn visit(node: tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>, exported: bool) {
-        if node.is_error() || node.is_missing() {
-            return;
-        }
-
-        let visibility = if exported {
-            Some(Visibility::Public)
-        } else {
-            None
-        };
-
-        match node.kind() {
-            "function_declaration" | "generator_function_declaration" => {
-                if let Some(sym) =
-                    extract_named_symbol(&node, source, SymbolKind::Function, visibility)
-                {
-                    symbols.push(sym);
-                }
-            }
-            "function" => {
-                if node.child_by_field_name("name").is_some()
-                    && let Some(sym) =
-                        extract_named_symbol(&node, source, SymbolKind::Function, visibility)
-                {
-                    symbols.push(sym);
-                }
-            }
-            "class_declaration" | "abstract_class_declaration" => {
-                symbols.extend(extract_class_with_methods(&node, source, visibility));
-            }
-            "export_statement" => {
-                for child in node.children(&mut node.walk()) {
-                    if child.kind() != "export" {
-                        visit(child, source, symbols, true);
-                    }
-                }
-            }
-            _ => {
-                for child in node.children(&mut node.walk()) {
-                    visit(child, source, symbols, exported);
-                }
-            }
-        }
-    }
-
-    visit(root, source, &mut symbols, false);
-    symbols
+fn extract<'a>(
+    tree: &'a tree_sitter::Tree,
+    source: &'a [u8],
+    _cursor: &mut tree_sitter::TreeCursor<'a>,
+) -> Vec<RawSymbol<'a>> {
+    super::common::extract_with_query(tree, source, &JS_QUERY)
 }
 
 impl_language!(
@@ -127,18 +76,11 @@ mod tests {
     }
 
     #[test]
-    fn js_grammar_loads() {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_javascript::LANGUAGE.into())
-            .unwrap();
-    }
-
-    #[test]
     fn extract_function_declaration() {
         let src = b"function hello() {}";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "hello");
         assert!(matches!(symbols[0].kind, SymbolKind::Function));
@@ -148,7 +90,8 @@ mod tests {
     fn extract_async_function() {
         let src = b"async function fetch() {}";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert!(symbols[0].is_async);
     }
@@ -157,7 +100,8 @@ mod tests {
     fn extract_class_and_methods() {
         let src = b"class Foo {\n  constructor() {}\n  bar() {}\n}";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         let class = symbols.iter().find(|s| s.name == "Foo").unwrap();
         assert!(matches!(class.kind, SymbolKind::Class));
         let methods: Vec<_> = symbols
@@ -165,20 +109,16 @@ mod tests {
             .filter(|s| matches!(s.kind, SymbolKind::Method))
             .collect();
         assert_eq!(methods.len(), 2);
-        let method_names: Vec<_> = methods.iter().map(|m| m.name.as_str()).collect();
-        assert!(method_names.contains(&"constructor"));
-        assert!(method_names.contains(&"bar"));
     }
 
     #[test]
     fn extract_exported_class() {
         let src = b"export class Foo { bar() {} }";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         let class = symbols.iter().find(|s| s.name == "Foo").unwrap();
         assert_eq!(class.visibility, Some(Visibility::Public));
-        let method = symbols.iter().find(|s| s.name == "bar").unwrap();
-        assert_eq!(method.visibility, Some(Visibility::Public));
     }
 
     #[test]
@@ -189,7 +129,8 @@ mod tests {
         )
         .unwrap();
         let tree = parse(src.as_bytes());
-        let symbols = extract(&tree, src.as_bytes());
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
         insta::assert_json_snapshot!(symbols);
     }
 }

@@ -1,6 +1,5 @@
 ---
 source: src/language/cpp.rs
-assertion_line: 316
 expression: symbols
 ---
 [
@@ -41,6 +40,26 @@ expression: symbols
     },
     "visibility": null,
     "signature": "(std::string name)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "~Animal",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 92,
+      "byte_end": 120,
+      "start": {
+        "line": 5,
+        "column": 4
+      },
+      "end": {
+        "line": 5,
+        "column": 32
+      }
+    },
+    "visibility": null,
+    "signature": "()",
     "docstring": null,
     "is_async": false
   },

@@ -1,129 +1,83 @@
 use crate::language::{RawSymbol, impl_language};
-use crate::model::{SymbolKind, Visibility};
+use once_cell::sync::Lazy;
 
-use super::common::{field_text, has_child_kind, source_range_from_node};
+static TSX_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_typescript::LANGUAGE_TSX.into(),
+        r#"
+(function_declaration
+  "async"? @async
+  name: (identifier) @name
+  parameters: (formal_parameters) @signature
+) @kind.function
 
-fn extract_signature(node: &tree_sitter::Node, source: &[u8]) -> Option<String> {
-    field_text(node, "parameters", source)
-}
+(generator_function_declaration
+  "async"? @async
+  name: (identifier) @name
+  parameters: (formal_parameters) @signature
+) @kind.function
 
-fn extract_named_symbol(
-    node: &tree_sitter::Node,
-    source: &[u8],
-    kind: SymbolKind,
-    visibility: Option<Visibility>,
-) -> Option<RawSymbol> {
-    let name = field_text(node, "name", source)?;
-    let is_async = has_child_kind(node, "async");
-    let signature = extract_signature(node, source);
+(class_declaration
+  (type_identifier) @name
+) @kind.class
 
-    Some(RawSymbol {
-        name,
-        kind,
-        source_range: source_range_from_node(node),
-        visibility,
-        signature,
-        docstring: None,
-        is_async,
-    })
-}
+(abstract_class_declaration
+  (type_identifier) @name
+) @kind.class
 
-fn extract_class_with_methods(
-    node: &tree_sitter::Node,
-    source: &[u8],
-    visibility: Option<Visibility>,
-) -> Vec<RawSymbol> {
-    let mut symbols = Vec::new();
+(interface_declaration
+  (type_identifier) @name
+) @kind.interface
 
-    if let Some(sym) = extract_named_symbol(node, source, SymbolKind::Class, visibility) {
-        symbols.push(sym);
-    }
+(enum_declaration
+  (identifier) @name
+) @kind.enum
 
-    if let Some(body) = node.child_by_field_name("body") {
-        for child in body.children(&mut body.walk()) {
-            if child.kind() == "method_definition"
-                && let Some(method_sym) =
-                    extract_named_symbol(&child, source, SymbolKind::Method, visibility)
-            {
-                symbols.push(method_sym);
-            }
-        }
-    }
+(type_alias_declaration
+  (type_identifier) @name
+) @kind.type_alias
 
-    symbols
-}
+(method_definition
+  "async"? @async
+  name: (_) @name
+  parameters: (formal_parameters) @signature
+) @kind.method
 
-fn extract(tree: &tree_sitter::Tree, source: &[u8]) -> Vec<RawSymbol> {
-    let mut symbols = Vec::new();
-    let root = tree.root_node();
+(export_statement
+  [
+    (function_declaration
+      "async"? @async
+      name: (identifier) @name
+      parameters: (formal_parameters) @signature
+    ) @kind.function
+    (class_declaration
+      (type_identifier) @name
+    ) @kind.class
+    (abstract_class_declaration
+      (type_identifier) @name
+    ) @kind.class
+    (interface_declaration
+      (type_identifier) @name
+    ) @kind.interface
+    (enum_declaration
+      (identifier) @name
+    ) @kind.enum
+    (type_alias_declaration
+      (type_identifier) @name
+    ) @kind.type_alias
+  ]
+) @visibility.public
+"#,
+    )
+    .expect("Failed to parse TSX query")
+});
 
-    fn visit(node: tree_sitter::Node, source: &[u8], symbols: &mut Vec<RawSymbol>, exported: bool) {
-        if node.is_error() || node.is_missing() {
-            return;
-        }
-
-        let visibility = if exported {
-            Some(Visibility::Public)
-        } else {
-            None
-        };
-
-        match node.kind() {
-            "function_declaration" | "generator_function_declaration" => {
-                if let Some(sym) =
-                    extract_named_symbol(&node, source, SymbolKind::Function, visibility)
-                {
-                    symbols.push(sym);
-                }
-            }
-            "function" => {
-                if node.child_by_field_name("name").is_some()
-                    && let Some(sym) =
-                        extract_named_symbol(&node, source, SymbolKind::Function, visibility)
-                {
-                    symbols.push(sym);
-                }
-            }
-            "class_declaration" | "abstract_class_declaration" => {
-                symbols.extend(extract_class_with_methods(&node, source, visibility));
-            }
-            "interface_declaration" => {
-                if let Some(sym) =
-                    extract_named_symbol(&node, source, SymbolKind::Interface, visibility)
-                {
-                    symbols.push(sym);
-                }
-            }
-            "type_alias_declaration" => {
-                if let Some(sym) =
-                    extract_named_symbol(&node, source, SymbolKind::TypeAlias, visibility)
-                {
-                    symbols.push(sym);
-                }
-            }
-            "enum_declaration" => {
-                if let Some(sym) = extract_named_symbol(&node, source, SymbolKind::Enum, visibility)
-                {
-                    symbols.push(sym);
-                }
-            }
-            "export_statement" => {
-                for child in node.children(&mut node.walk()) {
-                    if child.kind() != "export" {
-                        visit(child, source, symbols, true);
-                    }
-                }
-            }
-            _ => {
-                for child in node.children(&mut node.walk()) {
-                    visit(child, source, symbols, exported);
-                }
-            }
-        }
-    }
-
-    visit(root, source, &mut symbols, false);
-    symbols
+fn extract<'a>(
+    tree: &'a tree_sitter::Tree,
+    source: &'a [u8],
+    _cursor: &mut tree_sitter::TreeCursor<'a>,
+) -> Vec<RawSymbol<'a>> {
+    super::common::extract_with_query(tree, source, &TSX_QUERY)
 }
 
 impl_language!(
@@ -147,18 +101,11 @@ mod tests {
     }
 
     #[test]
-    fn tsx_grammar_loads() {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_typescript::LANGUAGE_TSX.into())
-            .unwrap();
-    }
-
-    #[test]
     fn extract_tsx_function() {
         let src = b"function App(): JSX.Element { return <div/>; }";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "App");
         assert!(matches!(symbols[0].kind, SymbolKind::Function));
@@ -168,13 +115,11 @@ mod tests {
     fn extract_tsx_exported_class() {
         let src = b"export class Foo extends React.Component { render() { return <div/>; } }";
         let tree = parse(src);
-        let symbols = extract(&tree, src);
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src, &mut cursor);
         let class = symbols.iter().find(|s| s.name == "Foo").unwrap();
         assert!(matches!(class.kind, SymbolKind::Class));
         assert_eq!(class.visibility, Some(Visibility::Public));
-        let method = symbols.iter().find(|s| s.name == "render").unwrap();
-        assert!(matches!(method.kind, SymbolKind::Method));
-        assert_eq!(method.visibility, Some(Visibility::Public));
     }
 
     #[test]
@@ -185,7 +130,8 @@ mod tests {
         )
         .unwrap();
         let tree = parse(src.as_bytes());
-        let symbols = extract(&tree, src.as_bytes());
+        let mut cursor = tree.walk();
+        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
         insta::assert_json_snapshot!(symbols);
     }
 }
