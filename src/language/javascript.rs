@@ -42,7 +42,7 @@ static JS_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
       name: (identifier) @name
     ) @kind.class
   ]
-) @visibility.public
+)
 "#,
     )
     .expect("Failed to parse JavaScript query")

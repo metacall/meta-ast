@@ -64,7 +64,7 @@ pub const TS_FAMILY_QUERY: &str = r#"
       (type_identifier) @name
     ) @kind.type_alias
   ]
-) @visibility.public
+)
 "#;
 
 static TS_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {

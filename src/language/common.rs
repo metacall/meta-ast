@@ -73,7 +73,11 @@ pub(crate) fn extract_with_spec<'a>(
                     }
                 }
                 "async" => is_async = true,
-                "visibility.public" => visibility = Some(Visibility::Public),
+                "visibility.public" => {
+                    if capture.node.named_child_count() == 0 {
+                        visibility = Some(Visibility::Public);
+                    }
+                }
                 "visibility.private" => visibility = Some(Visibility::Private),
                 c if c.starts_with("kind.") => {
                     let k = match &c[5..] {

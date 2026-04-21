@@ -113,6 +113,51 @@ mod tests {
     }
 
     #[test]
+    fn pub_crate_is_not_public() {
+        let src = b"pub(crate) fn internal() {}";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src);
+        assert_eq!(symbols.len(), 1);
+        assert_ne!(symbols[0].visibility, Some(Visibility::Public));
+    }
+
+    #[test]
+    fn pub_super_is_not_public() {
+        let src = b"pub(super) fn internal() {}";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src);
+        assert_eq!(symbols.len(), 1);
+        assert_ne!(symbols[0].visibility, Some(Visibility::Public));
+    }
+
+    #[test]
+    fn pub_in_path_is_not_public() {
+        let src = b"pub(in crate::foo) fn internal() {}";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src);
+        assert_eq!(symbols.len(), 1);
+        assert_ne!(symbols[0].visibility, Some(Visibility::Public));
+    }
+
+    #[test]
+    fn pub_crate_struct_is_not_public() {
+        let src = b"pub(crate) struct Internal {}";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src);
+        assert_eq!(symbols.len(), 1);
+        assert_ne!(symbols[0].visibility, Some(Visibility::Public));
+    }
+
+    #[test]
+    fn bare_pub_function_is_public() {
+        let src = b"pub fn hello() {}";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src);
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].visibility, Some(Visibility::Public));
+    }
+
+    #[test]
     fn extract_impl_methods() {
         let src = b"impl Foo { fn bar(&self) {} }";
         let tree = parse(src);
