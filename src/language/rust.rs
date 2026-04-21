@@ -1,4 +1,4 @@
-use crate::language::{RawSymbol, impl_language};
+use crate::language::LanguageSpec;
 use once_cell::sync::Lazy;
 
 static RUST_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
@@ -51,26 +51,26 @@ static RUST_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     .expect("Failed to parse Rust query")
 });
 
-fn extract<'a>(
-    tree: &'a tree_sitter::Tree,
-    source: &'a [u8],
-    _cursor: &mut tree_sitter::TreeCursor<'a>,
-) -> Vec<RawSymbol<'a>> {
-    super::common::extract_with_query(tree, source, &RUST_QUERY)
+fn rust_query() -> &'static tree_sitter::Query {
+    &RUST_QUERY
 }
 
-impl_language!(Rust, tree_sitter_rust::LANGUAGE.into(), extract, &["rs"]);
+pub const RUST_SPEC: LanguageSpec = LanguageSpec {
+    extensions: &["rs"],
+    grammar_fn: || tree_sitter_rust::LANGUAGE.into(),
+    query_fn: rust_query,
+    class_like_parents: &["impl_item"],
+    ancestor_visibility_rules: &[],
+};
 
 #[cfg(test)]
 mod tests {
-    use super::extract;
+    use crate::language::{LangId, extract_symbols_for, grammar_for};
     use crate::model::{SymbolKind, Visibility};
 
     fn parse(source: &[u8]) -> tree_sitter::Tree {
         let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_rust::LANGUAGE.into())
-            .unwrap();
+        parser.set_language(&grammar_for(LangId::Rust)).unwrap();
         parser.parse(source, None).unwrap()
     }
 
@@ -78,8 +78,7 @@ mod tests {
     fn extract_function() {
         let src = b"fn hello() {}";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "hello");
         assert!(matches!(symbols[0].kind, SymbolKind::Function));
@@ -89,8 +88,7 @@ mod tests {
     fn extract_pub_function() {
         let src = b"pub fn hello() {}";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].visibility, Some(Visibility::Public));
     }
@@ -99,8 +97,7 @@ mod tests {
     fn extract_async_function() {
         let src = b"async fn fetch() {}";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src);
         assert_eq!(symbols.len(), 1);
         assert!(symbols[0].is_async);
     }
@@ -109,8 +106,7 @@ mod tests {
     fn extract_struct() {
         let src = b"struct Point { x: f64, y: f64 }";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Point");
         assert!(matches!(symbols[0].kind, SymbolKind::Struct));
@@ -120,8 +116,7 @@ mod tests {
     fn extract_impl_methods() {
         let src = b"impl Foo { fn bar(&self) {} }";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src);
         let bar = symbols.iter().find(|s| s.name == "bar").unwrap();
         assert!(matches!(bar.kind, SymbolKind::Method));
     }
@@ -134,8 +129,7 @@ mod tests {
         )
         .unwrap();
         let tree = parse(src.as_bytes());
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
+        let symbols = extract_symbols_for(LangId::Rust, &tree, src.as_bytes());
         insta::assert_json_snapshot!(symbols);
     }
 }
