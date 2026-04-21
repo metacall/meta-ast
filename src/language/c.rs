@@ -1,7 +1,5 @@
-use crate::language::{RawSymbol, impl_language};
+use crate::language::LanguageSpec;
 use once_cell::sync::Lazy;
-
-use super::common::extract_with_query;
 
 static C_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     tree_sitter::Query::new(
@@ -35,43 +33,39 @@ static C_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     .expect("Failed to parse C query")
 });
 
-fn extract<'a>(
-    tree: &'a tree_sitter::Tree,
-    source: &'a [u8],
-    _cursor: &mut tree_sitter::TreeCursor<'a>,
-) -> Vec<RawSymbol<'a>> {
-    extract_with_query(tree, source, &C_QUERY)
+fn c_query() -> &'static tree_sitter::Query {
+    &C_QUERY
 }
 
-impl_language!(C, tree_sitter_c::LANGUAGE.into(), extract, &["c"]);
+pub const C_SPEC: LanguageSpec = LanguageSpec {
+    extensions: &["c"],
+    grammar_fn: || tree_sitter_c::LANGUAGE.into(),
+    query_fn: c_query,
+    class_like_parents: &[],
+    ancestor_visibility_rules: &[],
+};
 
 #[cfg(test)]
 mod tests {
-    use super::extract;
+    use crate::language::{LangId, extract_symbols_for, grammar_for};
     use crate::model::SymbolKind;
 
     fn parse(source: &[u8]) -> tree_sitter::Tree {
         let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_c::LANGUAGE.into())
-            .unwrap();
+        parser.set_language(&grammar_for(LangId::C)).unwrap();
         parser.parse(source, None).unwrap()
     }
 
     #[test]
     fn c_grammar_loads() {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_c::LANGUAGE.into())
-            .unwrap();
+        let _ = grammar_for(LangId::C);
     }
 
     #[test]
     fn extract_function() {
         let src = b"int add(int a, int b) { return a + b; }";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::C, &tree, src);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "add");
         assert!(matches!(symbols[0].kind, SymbolKind::Function));
@@ -82,8 +76,7 @@ mod tests {
     fn extract_struct() {
         let src = b"struct Point { int x; int y; };";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::C, &tree, src);
         let s = symbols.iter().find(|s| s.name == "Point").unwrap();
         assert!(matches!(s.kind, SymbolKind::Struct));
     }
@@ -92,8 +85,7 @@ mod tests {
     fn extract_enum() {
         let src = b"enum Color { RED, GREEN };";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::C, &tree, src);
         let s = symbols.iter().find(|s| s.name == "Color").unwrap();
         assert!(matches!(s.kind, SymbolKind::Enum));
     }
@@ -106,8 +98,7 @@ mod tests {
         )
         .unwrap();
         let tree = parse(src.as_bytes());
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
+        let symbols = extract_symbols_for(LangId::C, &tree, src.as_bytes());
         insta::assert_json_snapshot!(symbols);
     }
 }

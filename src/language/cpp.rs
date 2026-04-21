@@ -1,7 +1,5 @@
-use crate::language::{RawSymbol, impl_language};
+use crate::language::LanguageSpec;
 use once_cell::sync::Lazy;
-
-use super::common::extract_with_query;
 
 static CPP_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     tree_sitter::Query::new(
@@ -33,31 +31,26 @@ static CPP_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     .expect("Failed to parse C++ query")
 });
 
-fn extract<'a>(
-    tree: &'a tree_sitter::Tree,
-    source: &'a [u8],
-    _cursor: &mut tree_sitter::TreeCursor<'a>,
-) -> Vec<RawSymbol<'a>> {
-    extract_with_query(tree, source, &CPP_QUERY)
+fn cpp_query() -> &'static tree_sitter::Query {
+    &CPP_QUERY
 }
 
-impl_language!(
-    Cpp,
-    tree_sitter_cpp::LANGUAGE.into(),
-    extract,
-    &["cc", "cpp", "cxx"]
-);
+pub const CPP_SPEC: LanguageSpec = LanguageSpec {
+    extensions: &["cc", "cpp", "cxx"],
+    grammar_fn: || tree_sitter_cpp::LANGUAGE.into(),
+    query_fn: cpp_query,
+    class_like_parents: &["class_specifier"],
+    ancestor_visibility_rules: &[],
+};
 
 #[cfg(test)]
 mod tests {
-    use super::extract;
+    use crate::language::{LangId, extract_symbols_for, grammar_for};
     use crate::model::SymbolKind;
 
     fn parse(source: &[u8]) -> tree_sitter::Tree {
         let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_cpp::LANGUAGE.into())
-            .unwrap();
+        parser.set_language(&grammar_for(LangId::Cpp)).unwrap();
         parser.parse(source, None).unwrap()
     }
 
@@ -65,8 +58,7 @@ mod tests {
     fn extract_class() {
         let src = b"class Foo { public: void bar() {} };";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Cpp, &tree, src);
         let foo = symbols.iter().find(|s| s.name == "Foo").unwrap();
         assert!(matches!(foo.kind, SymbolKind::Class));
     }
@@ -75,8 +67,7 @@ mod tests {
     fn extract_method() {
         let src = b"class Foo { public: void bar() {} };";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Cpp, &tree, src);
         let bar = symbols.iter().find(|s| s.name == "bar").unwrap();
         assert!(matches!(bar.kind, SymbolKind::Method));
     }
@@ -85,8 +76,7 @@ mod tests {
     fn extract_namespace() {
         let src = b"namespace math { int add(int a, int b) { return a + b; } }";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Cpp, &tree, src);
         let ns = symbols.iter().find(|s| s.name == "math").unwrap();
         assert!(matches!(ns.kind, SymbolKind::Namespace));
     }
@@ -99,8 +89,7 @@ mod tests {
         )
         .unwrap();
         let tree = parse(src.as_bytes());
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
+        let symbols = extract_symbols_for(LangId::Cpp, &tree, src.as_bytes());
         insta::assert_json_snapshot!(symbols);
     }
 }

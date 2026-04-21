@@ -1,4 +1,4 @@
-use crate::language::{RawSymbol, impl_language};
+use crate::language::LanguageSpec;
 use once_cell::sync::Lazy;
 
 static GO_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
@@ -56,26 +56,26 @@ static GO_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     .expect("Failed to parse Go query")
 });
 
-fn extract<'a>(
-    tree: &'a tree_sitter::Tree,
-    source: &'a [u8],
-    _cursor: &mut tree_sitter::TreeCursor<'a>,
-) -> Vec<RawSymbol<'a>> {
-    super::common::extract_with_query(tree, source, &GO_QUERY)
+fn go_query() -> &'static tree_sitter::Query {
+    &GO_QUERY
 }
 
-impl_language!(Go, tree_sitter_go::LANGUAGE.into(), extract, &["go"]);
+pub const GO_SPEC: LanguageSpec = LanguageSpec {
+    extensions: &["go"],
+    grammar_fn: || tree_sitter_go::LANGUAGE.into(),
+    query_fn: go_query,
+    class_like_parents: &[],
+    ancestor_visibility_rules: &[],
+};
 
 #[cfg(test)]
 mod tests {
-    use super::extract;
+    use crate::language::{LangId, extract_symbols_for, grammar_for};
     use crate::model::SymbolKind;
 
     fn parse(source: &[u8]) -> tree_sitter::Tree {
         let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_go::LANGUAGE.into())
-            .unwrap();
+        parser.set_language(&grammar_for(LangId::Go)).unwrap();
         parser.parse(source, None).unwrap()
     }
 
@@ -83,8 +83,7 @@ mod tests {
     fn extract_function() {
         let src = b"package main\n\nfunc Hello() {}";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Go, &tree, src);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Hello");
         assert!(matches!(symbols[0].kind, SymbolKind::Function));
@@ -94,8 +93,7 @@ mod tests {
     fn extract_struct() {
         let src = b"package main\n\ntype Rect struct {\n\tWidth float64\n}";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Go, &tree, src);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Rect");
         assert!(matches!(symbols[0].kind, SymbolKind::Struct));
@@ -105,8 +103,7 @@ mod tests {
     fn extract_method_with_receiver() {
         let src = b"package main\n\nfunc (r *Rect) Area() float64 { return 0 }";
         let tree = parse(src);
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src, &mut cursor);
+        let symbols = extract_symbols_for(LangId::Go, &tree, src);
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Area");
         assert!(matches!(symbols[0].kind, SymbolKind::Method));
@@ -120,8 +117,7 @@ mod tests {
         )
         .unwrap();
         let tree = parse(src.as_bytes());
-        let mut cursor = tree.walk();
-        let symbols = extract(&tree, src.as_bytes(), &mut cursor);
+        let symbols = extract_symbols_for(LangId::Go, &tree, src.as_bytes());
         insta::assert_json_snapshot!(symbols);
     }
 }
