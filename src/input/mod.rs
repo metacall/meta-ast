@@ -1,20 +1,23 @@
 use std::path::Path;
 
-use crate::language::LangId;
+use crate::language::{LangId, spec_for};
+
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+
+static EXT_MAP: Lazy<HashMap<&'static str, LangId>> = Lazy::new(|| {
+    LangId::all()
+        .iter()
+        .flat_map(|&id| {
+            let spec = spec_for(id);
+            spec.extensions.iter().map(move |&ext| (ext, id))
+        })
+        .collect()
+});
 
 pub fn detect_language(path: &Path) -> Option<LangId> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    match ext.as_str() {
-        "py" | "pyi" => Some(LangId::Python),
-        "js" | "mjs" | "cjs" => Some(LangId::JavaScript),
-        "ts" | "cts" | "mts" => Some(LangId::TypeScript),
-        "tsx" => Some(LangId::Tsx),
-        "c" => Some(LangId::C),
-        "cc" | "cpp" | "cxx" => Some(LangId::Cpp),
-        "rs" => Some(LangId::Rust),
-        "go" => Some(LangId::Go),
-        _ => None,
-    }
+    EXT_MAP.get(ext.as_str()).copied()
 }
 
 pub fn discover_files(
@@ -197,5 +200,19 @@ mod tests {
         let mut sorted = paths.clone();
         sorted.sort();
         assert_eq!(paths, sorted);
+    }
+
+    #[test]
+    fn ext_map_covers_all_catalog_extensions() {
+        for id in LangId::all() {
+            let spec = spec_for(id);
+            for &ext in spec.extensions {
+                assert_eq!(
+                    detect_language(&PathBuf::from(format!("foo.{ext}"))),
+                    Some(id),
+                    "extension {ext:?} should map to {id:?}"
+                );
+            }
+        }
     }
 }

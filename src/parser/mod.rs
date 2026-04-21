@@ -5,10 +5,8 @@ use tree_sitter::Parser;
 use crate::error::Error;
 use crate::language::LangId;
 
-const LANG_COUNT: usize = 8;
-
 thread_local! {
-    static PARSERS: RefCell<[Option<Parser>; LANG_COUNT]> = const { RefCell::new([const { None }; LANG_COUNT]) };
+    static PARSERS: RefCell<[Option<Parser>; LangId::COUNT]> = const { RefCell::new([const { None }; LangId::COUNT]) };
 }
 
 pub struct ParsedFile {
@@ -17,7 +15,7 @@ pub struct ParsedFile {
 }
 
 fn get_or_init_parser(
-    parsers: &mut [Option<Parser>; LANG_COUNT],
+    parsers: &mut [Option<Parser>; LangId::COUNT],
     lang: LangId,
 ) -> Result<&mut Parser, Error> {
     let idx = lang as usize;
