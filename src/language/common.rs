@@ -18,6 +18,27 @@ pub(super) fn source_range_from_node(node: &tree_sitter::Node) -> SourceRange {
     }
 }
 
+fn clean_docstring(text: &str) -> &str {
+    let s = text.trim_start();
+    let prefix_len = if s.starts_with("\"\"\"") || s.starts_with("'''") {
+        3
+    } else if s.starts_with('\"') || s.starts_with('\'') {
+        1
+    } else {
+        return text.trim();
+    };
+
+    let content_start = prefix_len;
+    let trimmed_end = text.trim_end();
+    let content_end = trimmed_end.len().saturating_sub(prefix_len);
+
+    if content_end <= content_start {
+        return "";
+    }
+
+    trimmed_end[content_start..content_end].trim()
+}
+
 #[cfg(test)]
 #[inline]
 pub(super) fn field_text<'a>(
@@ -66,9 +87,8 @@ pub(crate) fn extract_with_spec<'a>(
                 }
                 "docstring" => {
                     if let Ok(text) = capture.node.utf8_text(source) {
-                        let cleaned = text.trim_matches(|c: char| {
-                            c == '\'' || c == '"' || c == ' ' || c == '\n' || c == '\r'
-                        });
+                        let cleaned = clean_docstring(text);
+
                         docstring = Some(std::borrow::Cow::Borrowed(cleaned));
                     }
                 }

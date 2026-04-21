@@ -115,6 +115,68 @@ mod tests {
     }
 
     #[test]
+    fn docstring_does_not_eat_content_starting_with_quote() {
+        let src = br#"def f():
+    """"Quoted" at start."""
+    pass
+"#;
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Python, &tree, src);
+        assert_eq!(symbols.len(), 1);
+        let ds = symbols[0].docstring.as_deref().unwrap();
+        assert!(
+            ds.starts_with('"'),
+            "docstring content should start with a quote char, got: {ds:?}"
+        );
+        assert!(
+            ds.contains("Quoted"),
+            "docstring should contain 'Quoted', got: {ds:?}"
+        );
+    }
+
+    #[test]
+    fn docstring_does_not_eat_content_ending_with_quote() {
+        let src = br#"def f():
+    '''She said "hello"'''
+    pass
+"#;
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Python, &tree, src);
+        assert_eq!(symbols.len(), 1);
+        let ds = symbols[0].docstring.as_deref().unwrap();
+        assert!(
+            ds.contains("hello"),
+            "docstring should contain 'hello', got: {ds:?}"
+        );
+        assert!(
+            ds.contains(r#"""#),
+            "docstring should preserve inner double quotes, got: {ds:?}"
+        );
+    }
+
+    #[test]
+    fn docstring_multiline_strips_delimiters_not_content() {
+        let src = br#"def f():
+    """
+    She said "hi".
+    """
+    pass
+"#;
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Python, &tree, src);
+        assert_eq!(symbols.len(), 1);
+        let ds = symbols[0].docstring.as_deref().unwrap();
+        assert!(
+            !ds.starts_with('"'),
+            "docstring should not start with delimiter quote, got: {ds:?}"
+        );
+        assert!(
+            ds.contains(r#""hi""#),
+            "docstring should preserve inner quotes, got: {ds:?}"
+        );
+    }
+
+    #[test]
     fn python_insta_snapshot() {
         let src = std::fs::read_to_string(
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
