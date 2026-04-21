@@ -9,7 +9,9 @@ pub mod tsx;
 pub mod typescript;
 
 use serde::Serialize;
-use tree_sitter::Tree;
+use tree_sitter::Query;
+
+use crate::model::Visibility;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, strum::Display, strum::AsRefStr)]
 #[non_exhaustive]
@@ -27,16 +29,25 @@ pub enum LangId {
     Go,
 }
 
-pub trait LanguagePack: Clone + Send + Sync + 'static {
-    fn grammar(&self) -> tree_sitter::Language;
-    fn id(&self) -> &'static str;
-    fn file_extensions(&self) -> &'static [&'static str];
-    fn extract_symbols<'a>(
-        &self,
-        tree: &'a Tree,
-        source: &'a [u8],
-        cursor: &mut tree_sitter::TreeCursor<'a>,
-    ) -> Vec<RawSymbol<'a>>;
+impl LangId {
+    pub const COUNT: usize = 8;
+
+    pub fn all() -> [LangId; Self::COUNT] {
+        [
+            LangId::Python,
+            LangId::JavaScript,
+            LangId::TypeScript,
+            LangId::Tsx,
+            LangId::C,
+            LangId::Cpp,
+            LangId::Rust,
+            LangId::Go,
+        ]
+    }
+
+    pub fn spec(self) -> &'static LanguageSpec {
+        spec_for(self)
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -50,64 +61,37 @@ pub struct RawSymbol<'a> {
     pub is_async: bool,
 }
 
-macro_rules! impl_language {
-    ($lang:ident, $grammar:expr, $extract_fn:expr, $extensions:expr) => {
-        #[derive(Clone, Copy, Debug)]
-        pub struct $lang;
-
-        impl $crate::language::LanguagePack for $lang {
-            fn grammar(&self) -> tree_sitter::Language {
-                $grammar
-            }
-            fn id(&self) -> &'static str {
-                stringify!($lang)
-            }
-            fn file_extensions(&self) -> &'static [&'static str] {
-                $extensions
-            }
-            fn extract_symbols<'a>(
-                &self,
-                tree: &'a tree_sitter::Tree,
-                source: &'a [u8],
-                cursor: &mut tree_sitter::TreeCursor<'a>,
-            ) -> Vec<RawSymbol<'a>> {
-                $extract_fn(tree, source, cursor)
-            }
-        }
-    };
+pub struct LanguageSpec {
+    pub extensions: &'static [&'static str],
+    pub grammar_fn: fn() -> tree_sitter::Language,
+    pub query_fn: fn() -> &'static Query,
+    pub class_like_parents: &'static [&'static str],
+    pub ancestor_visibility_rules: &'static [(&'static str, Visibility)],
 }
 
-pub(crate) use impl_language;
+pub fn spec_for(id: LangId) -> &'static LanguageSpec {
+    match id {
+        LangId::Python => &python::PYTHON_SPEC,
+        LangId::JavaScript => &javascript::JS_SPEC,
+        LangId::TypeScript => &typescript::TS_SPEC,
+        LangId::Tsx => &tsx::TSX_SPEC,
+        LangId::C => &c::C_SPEC,
+        LangId::Cpp => &cpp::CPP_SPEC,
+        LangId::Rust => &rust::RUST_SPEC,
+        LangId::Go => &go::GO_SPEC,
+    }
+}
 
 pub fn grammar_for(id: LangId) -> tree_sitter::Language {
-    match id {
-        LangId::Python => python::Python.grammar(),
-        LangId::JavaScript => javascript::JavaScript.grammar(),
-        LangId::TypeScript => typescript::TypeScript.grammar(),
-        LangId::Tsx => tsx::Tsx.grammar(),
-        LangId::C => c::C.grammar(),
-        LangId::Cpp => cpp::Cpp.grammar(),
-        LangId::Rust => rust::Rust.grammar(),
-        LangId::Go => go::Go.grammar(),
-    }
+    (spec_for(id).grammar_fn)()
 }
 
 pub fn extract_symbols_for<'a>(
     id: LangId,
-    tree: &'a Tree,
+    tree: &'a tree_sitter::Tree,
     source: &'a [u8],
-    cursor: &mut tree_sitter::TreeCursor<'a>,
 ) -> Vec<RawSymbol<'a>> {
-    match id {
-        LangId::Python => python::Python.extract_symbols(tree, source, cursor),
-        LangId::JavaScript => javascript::JavaScript.extract_symbols(tree, source, cursor),
-        LangId::TypeScript => typescript::TypeScript.extract_symbols(tree, source, cursor),
-        LangId::Tsx => tsx::Tsx.extract_symbols(tree, source, cursor),
-        LangId::C => c::C.extract_symbols(tree, source, cursor),
-        LangId::Cpp => cpp::Cpp.extract_symbols(tree, source, cursor),
-        LangId::Rust => rust::Rust.extract_symbols(tree, source, cursor),
-        LangId::Go => go::Go.extract_symbols(tree, source, cursor),
-    }
+    common::extract_with_spec(tree, source, spec_for(id))
 }
 
 #[cfg(test)]
@@ -116,16 +100,7 @@ mod tests {
 
     #[test]
     fn lang_id_all_variants_exist() {
-        let variants = [
-            LangId::Python,
-            LangId::JavaScript,
-            LangId::TypeScript,
-            LangId::Tsx,
-            LangId::C,
-            LangId::Cpp,
-            LangId::Rust,
-            LangId::Go,
-        ];
+        let variants = LangId::all();
         for i in 0..variants.len() {
             for j in (i + 1)..variants.len() {
                 assert_ne!(variants[i], variants[j]);
@@ -146,16 +121,7 @@ mod tests {
 
     #[test]
     fn grammar_for_all_variants() {
-        for id in [
-            LangId::Python,
-            LangId::JavaScript,
-            LangId::TypeScript,
-            LangId::Tsx,
-            LangId::C,
-            LangId::Cpp,
-            LangId::Rust,
-            LangId::Go,
-        ] {
+        for id in LangId::all() {
             let _lang = grammar_for(id);
         }
     }
@@ -165,8 +131,70 @@ mod tests {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(&grammar_for(LangId::Python)).unwrap();
         let tree = parser.parse(b"def hello(): pass", None).unwrap();
-        let mut cursor = tree.walk();
-        let symbols = extract_symbols_for(LangId::Python, &tree, b"def hello(): pass", &mut cursor);
+        let symbols = extract_symbols_for(LangId::Python, &tree, b"def hello(): pass");
         assert!(!symbols.is_empty());
+    }
+
+    #[test]
+    fn spec_for_returns_spec_with_matching_extensions() {
+        let python_spec = spec_for(LangId::Python);
+        assert!(python_spec.extensions.contains(&"py"));
+        assert!(python_spec.extensions.contains(&"pyi"));
+
+        let js_spec = spec_for(LangId::JavaScript);
+        assert!(js_spec.extensions.contains(&"js"));
+    }
+
+    #[test]
+    fn lang_id_count_matches_variant_count() {
+        assert_eq!(LangId::COUNT, 8);
+        assert_eq!(LangId::all().len(), LangId::COUNT);
+    }
+
+    #[test]
+    fn all_specs_have_non_empty_extensions() {
+        for id in LangId::all() {
+            let spec = spec_for(id);
+            assert!(
+                !spec.extensions.is_empty(),
+                "{id:?} spec has empty extensions"
+            );
+        }
+    }
+
+    #[test]
+    fn no_duplicate_extensions_across_specs() {
+        use std::collections::HashSet;
+        let mut seen: HashSet<&str> = HashSet::new();
+        for id in LangId::all() {
+            let spec = spec_for(id);
+            for &ext in spec.extensions {
+                assert!(
+                    seen.insert(ext),
+                    "extension {ext:?} appears in more than one language spec"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn grammar_fn_smoke_test_all_variants() {
+        for id in LangId::all() {
+            let spec = spec_for(id);
+            let grammar = (spec.grammar_fn)();
+            let mut parser = tree_sitter::Parser::new();
+            assert!(
+                parser.set_language(&grammar).is_ok(),
+                "grammar_fn failed for {id:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn query_fn_smoke_test_all_variants() {
+        for id in LangId::all() {
+            let spec = spec_for(id);
+            let _query = (spec.query_fn)();
+        }
     }
 }

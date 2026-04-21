@@ -1,4 +1,4 @@
-use super::RawSymbol;
+use super::{LanguageSpec, RawSymbol};
 use crate::model::{LineColumn, SourceRange, SymbolKind, Visibility};
 use tree_sitter::StreamingIterator;
 
@@ -29,14 +29,15 @@ pub(super) fn field_text<'a>(
     field.utf8_text(source).ok().map(|s| s.into())
 }
 
-pub(super) fn extract_with_query<'a>(
+pub(crate) fn extract_with_spec<'a>(
     tree: &'a tree_sitter::Tree,
     source: &'a [u8],
-    query: &tree_sitter::Query,
+    spec: &LanguageSpec,
 ) -> Vec<RawSymbol<'a>> {
     use std::collections::HashMap;
     let mut symbols_map: HashMap<usize, (RawSymbol<'a>, usize)> = HashMap::new();
     let mut query_cursor = tree_sitter::QueryCursor::new();
+    let query = (spec.query_fn)();
     let mut matches = query_cursor.matches(query, tree.root_node(), source);
 
     while let Some(m) = matches.next() {
@@ -100,50 +101,30 @@ pub(super) fn extract_with_query<'a>(
         if let (Some(name), Some(mut kind), Some(node)) = (name, kind, primary_node) {
             let node_id = node.id();
 
-            // Context-sensitive kind refinement: Function -> Method if inside a class-like node
             if kind == SymbolKind::Function {
                 let mut parent = node.parent();
                 while let Some(p) = parent {
-                    match p.kind() {
-                        "class_definition"
-                        | "class_declaration"
-                        | "class_specifier"
-                        | "impl_item"
-                        | "class"
-                        | "interface_declaration"
-                        | "struct_item" => {
-                            kind = SymbolKind::Method;
-                            break;
-                        }
-                        _ => parent = p.parent(),
+                    if spec.class_like_parents.contains(&p.kind()) {
+                        kind = SymbolKind::Method;
+                        break;
                     }
+                    parent = p.parent();
                 }
             }
 
-            // Automatic visibility detection if not explicitly captured
-            // This is primarily for JavaScript/TypeScript where an export_statement
-            // ancestor implies public visibility for its children.
-            // but i think there's more proper way to do this by having language-specific queries capture visibility more accurately,
-            // so this is just a fallback that works very well for now to refactor later
-            // TODO!: Refactor language-specific queries to capture visibility more accurately, reducing reliance on this heuristic
-            if visibility.is_none() {
-                let lang_ptr = node.language().clone().into_raw();
-                if lang_ptr
-                    == crate::language::grammar_for(crate::language::LangId::JavaScript).into_raw()
-                    || lang_ptr
-                        == crate::language::grammar_for(crate::language::LangId::TypeScript)
-                            .into_raw()
-                    || lang_ptr
-                        == crate::language::grammar_for(crate::language::LangId::Tsx).into_raw()
-                {
-                    let mut parent = node.parent();
-                    while let Some(p) = parent {
-                        if p.kind() == "export_statement" {
-                            visibility = Some(Visibility::Public);
+            if visibility.is_none() && !spec.ancestor_visibility_rules.is_empty() {
+                let mut parent = node.parent();
+                while let Some(p) = parent {
+                    for (ancestor_kind, vis) in spec.ancestor_visibility_rules {
+                        if p.kind() == *ancestor_kind {
+                            visibility = Some(*vis);
                             break;
                         }
-                        parent = p.parent();
                     }
+                    if visibility.is_some() {
+                        break;
+                    }
+                    parent = p.parent();
                 }
             }
 
@@ -157,8 +138,6 @@ pub(super) fn extract_with_query<'a>(
                 is_async,
             };
 
-            // If we already have this node, only replace if the new match has more captures
-            // (which usually means it's a more specific match like a decorated definition)
             if let Some((_, existing_count)) = symbols_map.get(&node_id) {
                 if capture_count > *existing_count {
                     symbols_map.insert(node_id, (symbol, capture_count));
@@ -170,7 +149,6 @@ pub(super) fn extract_with_query<'a>(
     }
 
     let mut result: Vec<_> = symbols_map.into_values().map(|(s, _)| s).collect();
-    // Sort by position to maintain order
     result.sort_by_key(|s| s.source_range.byte_start);
     result
 }
