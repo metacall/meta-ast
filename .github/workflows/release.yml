@@ -21,12 +21,18 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             ext: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            ext: ""
           - os: macos-13
             target: x86_64-apple-darwin
             ext: ""
           - os: macos-latest
             target: aarch64-apple-darwin
             ext: ""
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            ext: ".exe"
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             ext: ".exe"
@@ -44,6 +50,9 @@ jobs:
       - name: Install musl-tools
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
 
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
@@ -105,6 +114,8 @@ jobs:
           files: |
             artifacts/meta-ast-x86_64-unknown-linux-gnu/*
             artifacts/meta-ast-x86_64-unknown-linux-musl/*
+            artifacts/meta-ast-aarch64-unknown-linux-gnu/*
             artifacts/meta-ast-x86_64-apple-darwin/*
             artifacts/meta-ast-aarch64-apple-darwin/*
+            artifacts/meta-ast-aarch64-pc-windows-msvc/*
             artifacts/meta-ast-x86_64-pc-windows-msvc/*
