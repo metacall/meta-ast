@@ -20,6 +20,7 @@ define_id_type!(FileId);
 define_id_type!(SymbolId);
 define_id_type!(SnapshotId);
 
+#[derive(Debug)]
 pub struct IdGenerator<T> {
     counter: AtomicU32,
     _marker: std::marker::PhantomData<T>,

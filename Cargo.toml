@@ -33,7 +33,7 @@ tree-sitter-go = "0.25.0"
 petgraph = "0.8.3"
 
 # Cli
-clap = { version = "4.5", features = ["derive", "env", "color"] }
+clap = { version = "4.6", features = ["derive", "env", "color"] }
 notify = "8.2.0"
 
 # Parallelism
@@ -52,6 +52,10 @@ criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "pipeline"
+harness = false
+
+[[bench]]
+name = "graph"
 harness = false
 
 [profile.release]

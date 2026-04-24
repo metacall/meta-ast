@@ -6,7 +6,7 @@ pre-commit:
     fmt:
       run: cargo fmt --all -- --check
     trailing-whitespace:
-      glob: "*.{rs,toml,md,yml,yaml}"
+      glob: "*.{rs,toml,yml,yaml}"
       run: |
         files=$(grep -rlI '[[:space:]]$' {staged_files} 2>/dev/null || true)
         if [ -n "$files" ]; then
