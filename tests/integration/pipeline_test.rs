@@ -21,7 +21,11 @@ fn end_to_end_python_project() {
         assert_eq!(symbol.language, meta_ast::language::LangId::Python);
     }
 
-    let json = meta_ast::output::inspect::to_inspect_json(&result.symbols).unwrap();
+    let json = meta_ast::output::inspect::serialize_inspect(
+        &result.symbols,
+        &meta_ast::output::OutputFormat::Json,
+    )
+    .unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert!(parsed["funcs"].is_array());
     assert!(parsed["classes"].is_array());
@@ -71,7 +75,11 @@ fn end_to_end_mixed_languages() {
     let result = meta_ast::extractor::extract(&files);
     assert!(!result.symbols.is_empty());
 
-    let json = meta_ast::output::inspect::to_inspect_json(&result.symbols).unwrap();
+    let json = meta_ast::output::inspect::serialize_inspect(
+        &result.symbols,
+        &meta_ast::output::OutputFormat::Json,
+    )
+    .unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert!(parsed["funcs"].is_array());
 }
@@ -113,7 +121,11 @@ fn json_output_has_required_structure() {
     let root = Path::new("tests/fixtures/python");
     let files = meta_ast::input::discover_files(root, None).unwrap();
     let result = meta_ast::extractor::extract(&files);
-    let json = meta_ast::output::inspect::to_inspect_json(&result.symbols).unwrap();
+    let json = meta_ast::output::inspect::serialize_inspect(
+        &result.symbols,
+        &meta_ast::output::OutputFormat::Json,
+    )
+    .unwrap();
 
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let obj = parsed.as_object().expect("root should be object");
