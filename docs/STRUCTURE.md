@@ -38,16 +38,21 @@ src/
 │   └── mod.rs                Pipeline orchestration: parallel parse + extract via rayon
 │
 ├── graph/
-│   ├── mod.rs                DiGraph construction, node/edge types (Phase 2)
-│   └── scc.rs                Tarjan SCC + deployability hints (Phase 2)
+│   ├── mod.rs                DiGraph construction, node/edge types
+│   ├── node.rs               NodeData enum (File / Symbol)
+│   ├── edge.rs               EdgeKind enum (Ownership / Import / Reference)
+│   ├── builder.rs            GraphBuilder, EdgeNormalizer
+│   └── scc.rs                Tarjan SCC + DeployabilityHint
 │
 ├── output/
-│   ├── mod.rs                Serialization pipeline
-│   └── inspect.rs            Inspect-compatible JSON emission
+│   ├── mod.rs                OutputFormat enum (Json / Yaml) with serialize dispatch
+│   ├── inspect.rs            Inspect-compatible JSON/YAML emission
+│   ├── graph.rs              GraphOutput + SCC serialization (metadata, nodes, edges, sccs)
+│   └── dashboard.rs          Interactive HTML dashboard (Cytoscape.js, --html flag)
 │
 └── interface/
     ├── mod.rs                CLI module root
-    └── args.rs               Clap derive structs
+    └── args.rs               Clap derive structs (Inspect, Graph + --format, --html, --self-contained)
 ```
 
 ### Module dependency direction

@@ -15,7 +15,7 @@
 4. Intermediate symbol model normalization.
 5. Dependency graph construction.
 6. SCC analysis (Tarjan) and deployability annotation.
-7. Output emission (JSON; optional sink/export adapters).
+7. Output emission (JSON, YAML, or interactive HTML dashboard).
 
 ## 3. Component boundaries
 
@@ -59,7 +59,17 @@ Detailed graph contract is defined in `specs/graph-model.md`, including `languag
 
 Parallel parse + extract uses rayon per-file; graph assembly is sequential. See `structure.md` section 5 for pipeline phase details.
 
-## 7. Compatibility and integration
+## 7. Output formats
+
+The CLI supports JSON and YAML for programmatic consumption, plus an interactive HTML dashboard for visual analysis.
+
+- **JSON / YAML:** Controlled by the `--format` flag. JSON is the default. YAML requires no extra setup - just pass `--format yaml`.
+- **HTML dashboard:** Separate concern, activated with `--html`. Generates a single `.html` file with an embedded Cytoscape.js graph. The browser auto-opens unless you redirect. Use `--self-contained` (requires `embed-cytoscape` feature) to bundle the JS library directly for offline use.
+
+The dashboard turns SCC analysis into something you can actually see. Nodes in cyclic clusters are colored red. Independent units are green. Instead of reading JSON blobs, you click around, expand symbols, and see exactly where the cycles are. This is the difference between "your code has cycles" and "here, this is the knot you need to untangle."
+
+## 8. Compatibility and integration
 
 - Output contract remains stable for MetaCall inspect-style consumers.
 - Optional integration layers (C ABI, Dgraph) are feature-scoped and do not block standalone operation.
+- Discussion and contributions: [Discord](https://discord.gg/VvSZRsBK)

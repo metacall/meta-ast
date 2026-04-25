@@ -8,13 +8,13 @@
 
 ## 2. Workflow layout
 
-- `lint.yml` — format + clippy + dependency policy checks.
-- `test.yml` — unit/integration/doc tests on Linux/macOS/Windows.
-- `security.yml` — dependency vulnerability checks.
-- `build.yml` — release build matrix and artifact upload.
-- `benchmark.yml` — criterion benchmarks and trend tracking.
-- `docs.yml` — docs generation and publication 'mdbook'.
-- `release.yml` — tag-driven release and package publication.
+- `lint.yml` - format + clippy + dependency policy checks.
+- `test.yml` - unit/integration/doc tests on Linux/macOS/Windows.
+- `security.yml` - dependency vulnerability checks.
+- `build.yml` - release build matrix and artifact upload.
+- `benchmark.yml` - criterion benchmarks and trend tracking.
+- `docs.yml` - docs generation and publication 'mdbook'.
+- `release.yml` - tag-driven release and package publication with changelog generation.
 
 ## 3. Quality gates
 
@@ -90,15 +90,15 @@ lefthook install
 a dev script will be provided later to automate this process
 ### pre-commit (parallel, fast)
 
-1. `cargo fmt --all -- --check` — formatting gate.
+1. `cargo fmt --all -- --check` - formatting gate.
 2. Trailing whitespace check (`*.rs`, `*.toml`, `*.md`, `*.yml`).
 3. Merge conflict marker detection.
 4. Large file guard (>512KB).
 
 ### pre-push (sequential, thorough)
 
-1. `cargo clippy --all-targets --all-features -- -D warnings` — lint gate.
-2. `cargo nextest run --all-features` — local test gate.
+1. `cargo clippy --all-targets --all-features -- -D warnings` - lint gate.
+2. `cargo nextest run --all-features` - local test gate.
 
 ## 12. Test runner (nextest)
 
@@ -111,7 +111,7 @@ CI and local dev use `cargo-nextest` for faster test execution.
 ## 13. Benchmarks (criterion)
 
 - Dev dependency: `criterion` 0.5 with `html_reports` feature.
-- Benchmark target: `benches/pipeline.rs` — extraction throughput per language fixture.
+- Benchmark target: `benches/pipeline.rs` - extraction throughput per language fixture.
 - Profile: `opt-level = 3`, LTO enabled (see `[profile.bench]` in `Cargo.toml`).
 
 ## 14. Release targets

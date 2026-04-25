@@ -47,14 +47,14 @@
 
 ## 3. Development dependencies
 
-- `insta` — snapshot testing for JSON output contracts.
-- `jsonschema` — output schema validation in tests.
-- `criterion` — benchmark gating (Phase 4).
+- `insta` - snapshot testing for JSON output contracts.
+- `jsonschema` - output schema validation in tests.
+- `criterion` - benchmark gating (Phase 4).
 
 ## 4. Recommended additions
 
-- `tracing`, `tracing-subscriber` — structured observability.
-- `cbindgen` — C ABI header generation when ABI phase begins.
+- `tracing`, `tracing-subscriber` - structured observability.
+- `cbindgen` - C ABI header generation when ABI phase begins.
 
 
 ## 5. Alternatives and trade-offs
