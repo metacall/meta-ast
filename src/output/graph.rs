@@ -278,14 +278,15 @@ impl GraphOutput {
     }
 }
 
-/// Serialize graph output to JSON string.
-pub fn to_graph_json(
+/// Serialize graph output to the specified format.
+pub fn serialize_graph(
     graph: &CodeGraph,
     scc_analysis: &SccAnalysis,
     snapshot_id: u64,
-) -> Result<String, serde_json::Error> {
+    format: &crate::output::OutputFormat,
+) -> anyhow::Result<String> {
     let output = GraphOutput::from_graph(graph, scc_analysis, snapshot_id);
-    serde_json::to_string_pretty(&output)
+    format.serialize(&output)
 }
 
 #[cfg(test)]
@@ -296,6 +297,7 @@ mod tests {
     use crate::model::{
         LineColumn, SourceRange, Symbol, SymbolId, SymbolKind, Visibility, ids::SnapshotId,
     };
+    use crate::output::OutputFormat;
     use std::path::PathBuf;
 
     fn sample_symbol(id: u32, name: &str, kind: SymbolKind, path: &str) -> Symbol {
@@ -348,7 +350,7 @@ mod tests {
         let graph = builder.build();
         let scc_result = SccAnalysis::analyze(&graph.graph);
 
-        let json = to_graph_json(&graph, &scc_result, 1).unwrap();
+        let json = serialize_graph(&graph, &scc_result, 1, &OutputFormat::Json).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         // Verify structure
@@ -400,7 +402,7 @@ mod tests {
         let graph = builder.build();
         let scc_result = SccAnalysis::analyze(&graph.graph);
 
-        let json = to_graph_json(&graph, &scc_result, 1).unwrap();
+        let json = serialize_graph(&graph, &scc_result, 1, &OutputFormat::Json).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         // Find an SCC with cyclic=true

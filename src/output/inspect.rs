@@ -52,9 +52,12 @@ pub fn symbols_to_inspect_output(symbols: &[Symbol]) -> InspectOutput {
     output
 }
 
-pub fn to_inspect_json(symbols: &[Symbol]) -> Result<String, serde_json::Error> {
+pub fn serialize_inspect(
+    symbols: &[Symbol],
+    format: &crate::output::OutputFormat,
+) -> anyhow::Result<String> {
     let output = symbols_to_inspect_output(symbols);
-    serde_json::to_string_pretty(&output)
+    format.serialize(&output)
 }
 
 #[cfg(test)]
@@ -62,6 +65,7 @@ mod tests {
     use super::*;
     use crate::language::LangId;
     use crate::model::{LineColumn, SourceRange, SymbolId, SymbolKind};
+    use crate::output::OutputFormat;
 
     fn make_symbol(id: u32, name: &str, kind: SymbolKind) -> Symbol {
         Symbol {
@@ -88,7 +92,7 @@ mod tests {
 
     #[test]
     fn empty_symbols_produces_empty_json() {
-        let json = to_inspect_json(&[]).unwrap();
+        let json = serialize_inspect(&[], &OutputFormat::Json).unwrap();
         assert_eq!(
             json,
             "{\n  \"funcs\": [],\n  \"classes\": [],\n  \"objects\": []\n}"
@@ -138,7 +142,7 @@ mod tests {
             make_symbol(2, "C1", SymbolKind::Class),
             make_symbol(3, "OBJ", SymbolKind::Constant),
         ];
-        let json = to_inspect_json(&symbols).unwrap();
+        let json = serialize_inspect(&symbols, &OutputFormat::Json).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.is_object());
         assert!(parsed["funcs"].is_array());
@@ -148,7 +152,7 @@ mod tests {
 
     #[test]
     fn inspect_output_required_keys() {
-        let json = to_inspect_json(&[]).unwrap();
+        let json = serialize_inspect(&[], &OutputFormat::Json).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         let keys: std::collections::HashSet<&str> = parsed
             .as_object()
