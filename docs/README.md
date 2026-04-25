@@ -8,18 +8,18 @@ The structure is intentionally traceable: proposal → specs → architecture �
 
 ## Document map
 
-- `ARCHITECTURE.md` — system architecture, component boundaries, and runtime flow.
-- `structure.md` — code structure, data structures, design patterns, module layout, and implementation order.
-- `DEV_CRATE_DECISIONS.md` — crate selection rationale and trade-offs.
-- `CI_CD.md` — CI/CD architecture and quality gates.
-- `ROADMAP.md` — phase-aligned implementation milestones and measurable gates.
+- `ARCHITECTURE.md` - system architecture, component boundaries, runtime flow, output formats, and dashboard visualization.
+- `structure.md` - code structure, data structures, design patterns, module layout, and implementation order.
+- `DEV_CRATE_DECISIONS.md` - crate selection rationale and trade-offs.
+- `CI_CD.md` - CI/CD architecture and quality gates.
+- `ROADMAP.md` - phase-aligned implementation milestones and measurable gates.
 
 ## Specs
 
-- `specs/requirements.md` — normative requirements and acceptance criteria.
-- `specs/graph-model.md` — symbol graph and datagraph contracts, including `language_id`, project-root-relative `path`, `snapshot_id`, `file_id`, `visibility`, and `DataNode` semantics.
-- `specs/symbol-extraction.md` — language-pack extraction contracts.
-- `specs/traceability.md` — mapping from proposal deliverables to implementation/docs/tests.
+- `specs/requirements.md` - normative requirements and acceptance criteria.
+- `specs/graph-model.md` - symbol graph and datagraph contracts, including `language_id`, project-root-relative `path`, `snapshot_id`, `file_id`, `visibility`, and `DataNode` semantics.
+- `specs/symbol-extraction.md` - language-pack extraction contracts.
+- `specs/traceability.md` - mapping from proposal deliverables to implementation/docs/tests.
 
 ## Architecture decisions (ADRs)
 
