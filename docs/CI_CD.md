@@ -120,9 +120,11 @@ CI and local dev use `cargo-nextest` for faster test execution.
 |---|---|---|
 | `x86_64-unknown-linux-gnu` | Linux (glibc) | `ubuntu-latest` |
 | `x86_64-unknown-linux-musl` | Linux (static) | `ubuntu-latest` + musl-tools |
-| `x86_64-apple-darwin` | macOS (Intel) | `macos-13` |
+| `aarch64-unknown-linux-gnu` | Linux (ARM64) | `ubuntu-24.04-arm` |
+| `x86_64-apple-darwin` | macOS (Intel) | `macos-15` |
 | `aarch64-apple-darwin` | macOS (Apple Silicon) | `macos-latest` |
-| `x86_64-pc-windows-msvc` | Windows | `windows-latest` |
+| `x86_64-pc-windows-msvc` | Windows (x64) | `windows-latest` |
+| `aarch64-pc-windows-msvc` | Windows (ARM64) | `windows-11-arm` |
 
 ## 15. Snapshot policy
 
