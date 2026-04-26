@@ -75,14 +75,62 @@ static TS_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     .expect("Failed to parse TypeScript query")
 });
 
+pub const TS_FAMILY_IMPORT_QUERY: &str = r#"
+(import_statement
+  source: (string) @import.path)
+(import_statement
+  (import_clause
+    (named_imports
+      (import_specifier
+        name: (identifier) @import.symbol
+        alias: (identifier)? @import.alias))))
+(import_statement
+  (import_clause
+    (identifier) @import.symbol))
+"#;
+
+pub const TS_FAMILY_REFERENCE_QUERY: &str = r#"
+(call_expression
+  function: (identifier) @reference.name)
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @reference.name))
+"#;
+
+static TS_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        TS_FAMILY_IMPORT_QUERY,
+    )
+    .expect("Failed to parse TypeScript import query")
+});
+
+static TS_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        TS_FAMILY_REFERENCE_QUERY,
+    )
+    .expect("Failed to parse TypeScript reference query")
+});
+
 fn ts_query() -> &'static tree_sitter::Query {
     &TS_QUERY
+}
+
+fn ts_import_query() -> &'static tree_sitter::Query {
+    &TS_IMPORT_QUERY
+}
+
+fn ts_reference_query() -> &'static tree_sitter::Query {
+    &TS_REFERENCE_QUERY
 }
 
 pub const TS_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["ts", "cts", "mts"],
     grammar_fn: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
     query_fn: ts_query,
+    import_query_fn: ts_import_query,
+    reference_query_fn: ts_reference_query,
     class_like_parents: &["class_declaration", "class"],
     ancestor_visibility_rules: &[("export_statement", Visibility::Public)],
 };
