@@ -55,10 +55,55 @@ fn rust_query() -> &'static tree_sitter::Query {
     &RUST_QUERY
 }
 
+static RUST_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_rust::LANGUAGE.into(),
+        r#"
+(use_declaration
+  argument: (scoped_identifier) @import.path)
+(use_declaration
+  argument: (scoped_use_list
+    path: (scoped_identifier) @import.path))
+(use_as_clause
+  path: (_) @import.path
+  alias: (identifier) @import.alias)
+"#,
+    )
+    .expect("Failed to parse Rust import query")
+});
+
+static RUST_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_rust::LANGUAGE.into(),
+        r#"
+(call_expression
+  function: (identifier) @reference.name)
+(call_expression
+  function: (scoped_identifier
+    name: (identifier) @reference.name))
+(call_expression
+  function: (field_expression
+    field: (field_identifier) @reference.name))
+(macro_invocation
+  macro: (identifier) @reference.name)
+"#,
+    )
+    .expect("Failed to parse Rust reference query")
+});
+
+fn rust_import_query() -> &'static tree_sitter::Query {
+    &RUST_IMPORT_QUERY
+}
+fn rust_reference_query() -> &'static tree_sitter::Query {
+    &RUST_REFERENCE_QUERY
+}
+
 pub const RUST_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["rs"],
     grammar_fn: || tree_sitter_rust::LANGUAGE.into(),
     query_fn: rust_query,
+    import_query_fn: rust_import_query,
+    reference_query_fn: rust_reference_query,
     class_like_parents: &["impl_item"],
     ancestor_visibility_rules: &[],
 };

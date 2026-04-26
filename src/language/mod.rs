@@ -65,6 +65,10 @@ pub struct LanguageSpec {
     pub extensions: &'static [&'static str],
     pub grammar_fn: fn() -> tree_sitter::Language,
     pub query_fn: fn() -> &'static Query,
+    // TODO(MVP): Add import_path_resolver: fn(&str, &Path) -> Option<PathBuf>
+    //             to LanguageSpec for per-language path normalization logic.
+    pub import_query_fn: fn() -> &'static Query,
+    pub reference_query_fn: fn() -> &'static Query,
     pub class_like_parents: &'static [&'static str],
     pub ancestor_visibility_rules: &'static [(&'static str, Visibility)],
 }
@@ -92,6 +96,23 @@ pub fn extract_symbols_for<'a>(
     source: &'a [u8],
 ) -> Vec<RawSymbol<'a>> {
     common::extract_with_spec(tree, source, spec_for(id))
+}
+
+pub fn extract_imports_for<'a>(
+    id: LangId,
+    tree: &'a tree_sitter::Tree,
+    source: &'a [u8],
+    file_path: &std::path::Path,
+) -> Vec<crate::model::UnresolvedImport> {
+    common::extract_imports_with_spec(tree, source, spec_for(id), file_path)
+}
+
+pub fn extract_references_for<'a>(
+    id: LangId,
+    tree: &'a tree_sitter::Tree,
+    source: &'a [u8],
+) -> Vec<crate::model::UnresolvedReference> {
+    common::extract_references_with_spec(tree, source, spec_for(id))
 }
 
 #[cfg(test)]

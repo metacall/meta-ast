@@ -40,10 +40,57 @@ fn python_query() -> &'static tree_sitter::Query {
     &PYTHON_QUERY
 }
 
+static PYTHON_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_python::LANGUAGE.into(),
+        r#"
+(import_statement
+  (dotted_name) @import.path)
+(import_statement
+  (aliased_import
+    name: (dotted_name) @import.path
+    alias: (identifier) @import.alias))
+(import_from_statement
+  module_name: (dotted_name) @import.path
+  name: (_) @import.symbol)
+(import_from_statement
+  module_name: (dotted_name) @import.path
+  (aliased_import name: (_) @import.symbol alias: (identifier) @import.alias))
+(import_from_statement
+  module_name: (dotted_name) @import.path
+  (wildcard_import) @import.star)
+"#,
+    )
+    .expect("Failed to parse Python import query")
+});
+
+static PYTHON_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_python::LANGUAGE.into(),
+        r#"
+(call
+  function: (identifier) @reference.name)
+(call
+  function: (attribute
+    attribute: (identifier) @reference.name))
+"#,
+    )
+    .expect("Failed to parse Python reference query")
+});
+
+fn python_import_query() -> &'static tree_sitter::Query {
+    &PYTHON_IMPORT_QUERY
+}
+fn python_reference_query() -> &'static tree_sitter::Query {
+    &PYTHON_REFERENCE_QUERY
+}
+
 pub const PYTHON_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["py", "pyi"],
     grammar_fn: || tree_sitter_python::LANGUAGE.into(),
     query_fn: python_query,
+    import_query_fn: python_import_query,
+    reference_query_fn: python_reference_query,
     class_like_parents: &["class_definition"],
     ancestor_visibility_rules: &[],
 };
