@@ -8,12 +8,12 @@
 - Incremental-by-design workflow for watch/update scenarios.
 
 ## 2. High-level pipeline
-
+ 
 1. Source discovery and language detection.
 2. Tree-sitter parse per file.
 3. Query-based symbol extraction per language pack.
 4. Intermediate symbol model normalization.
-5. Dependency graph construction.
+5. Dependency graph construction (Import edges from cross-file module resolution, Reference edges from scope-aware symbol resolution).
 6. SCC analysis (Tarjan) and deployability annotation.
 7. Output emission (JSON, YAML, or interactive HTML dashboard).
 

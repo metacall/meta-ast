@@ -136,21 +136,32 @@ var n=evt.target;
 var data=n.data();
 var sid=data.scc_index;
 var scc=(sid!==undefined&&DATA.sccs[sid])?DATA.sccs[sid]:null;
-var html="<b>Name:</b> "+(data.name||"(root)")+"<br>";
-html+="<b>Kind:</b> "+data.kind+"<br>";
-if(data.path)html+="<b>Path:</b> "+data.path+"<br>";
-if(data.symbol_kind)html+="<b>Symbol Kind:</b> "+data.symbol_kind+"<br>";
-if(data.visibility)html+="<b>Visibility:</b> "+data.visibility+"<br>";
-if(data.language)html+="<b>Language:</b> "+data.language+"<br>";
-if(scc){html+="<br><b>SCC #"+scc.index+"</b><br>";
-html+="<b>Size:</b> "+scc.size+"<br>";
-html+="<b>Cyclic:</b> "+(scc.is_cyclic?"Yes (refactor needed)":"No")+"<br>";
-html+="<b>Hint:</b> "+scc.hint+"<br>";}
-document.getElementById("details").innerHTML=html;
-document.getElementById("details").className="";
+var details=document.getElementById("details");
+details.textContent="";
+var lines=[];
+lines.push({b:"Name: ",t:data.name||"(root)"});
+lines.push({b:"Kind: ",t:data.kind});
+if(data.path)lines.push({b:"Path: ",t:data.path});
+if(data.symbol_kind)lines.push({b:"Symbol Kind: ",t:data.symbol_kind});
+if(data.visibility)lines.push({b:"Visibility: ",t:data.visibility});
+if(data.language)lines.push({b:"Language: ",t:data.language});
+if(scc){
+  lines.push({b:"",t:"",br:true});
+  lines.push({b:"SCC #"+scc.index,t:"",br:false});
+  lines.push({b:"Size: ",t:""+scc.size});
+  lines.push({b:"Cyclic: ",t:scc.is_cyclic?"Yes (refactor needed)":"No"});
+  lines.push({b:"Hint: ",t:scc.hint});
+}
+lines.forEach(function(l){
+  if(l.br){details.appendChild(document.createElement("br"));return;}
+  var b=document.createElement("b");b.textContent=l.b;details.appendChild(b);
+  var s=document.createTextNode(l.t);details.appendChild(s);
+  details.appendChild(document.createElement("br"));
+});
+details.className="";
 });
 cy.on("tap",function(evt){
-if(evt.target===cy){document.getElementById("details").innerHTML="Click a node to inspect";document.getElementById("details").className="empty";}
+if(evt.target===cy){document.getElementById("details").textContent="Click a node to inspect";document.getElementById("details").className="empty";}
 });
 window.cy=cy;
 });

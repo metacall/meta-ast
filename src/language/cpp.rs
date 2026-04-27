@@ -1,7 +1,7 @@
 use crate::language::LanguageSpec;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static CPP_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static CPP_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_cpp::LANGUAGE.into(),
         r#"
@@ -35,10 +35,57 @@ fn cpp_query() -> &'static tree_sitter::Query {
     &CPP_QUERY
 }
 
+const CPP_IMPORT_QUERY_STR: &str = r#"
+(preproc_include
+  path: (string_literal) @import.path)
+(preproc_include
+  path: (system_lib_string) @import.path)
+"#;
+
+static CPP_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(&tree_sitter_cpp::LANGUAGE.into(), CPP_IMPORT_QUERY_STR)
+        .expect("Failed to parse C++ import query")
+});
+
+const CPP_REFERENCE_QUERY_STR: &str = r#"
+(call_expression
+  function: (identifier) @reference.name)
+(call_expression
+  function: (field_expression
+    field: (field_identifier) @reference.name))
+"#;
+
+static CPP_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(&tree_sitter_cpp::LANGUAGE.into(), CPP_REFERENCE_QUERY_STR)
+        .expect("Failed to parse C++ reference query")
+});
+
+fn cpp_import_query() -> &'static tree_sitter::Query {
+    &CPP_IMPORT_QUERY
+}
+fn cpp_reference_query() -> &'static tree_sitter::Query {
+    &CPP_REFERENCE_QUERY
+}
+
+static CPP_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_cpp::LANGUAGE.into(),
+        &format!("{}\n{}", CPP_IMPORT_QUERY_STR, CPP_REFERENCE_QUERY_STR),
+    )
+    .expect("Failed to parse C++ combined import+ref query")
+});
+
+fn cpp_import_ref_query() -> &'static tree_sitter::Query {
+    &CPP_IMPORT_REF_QUERY
+}
+
 pub const CPP_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["cc", "cpp", "cxx"],
     grammar_fn: || tree_sitter_cpp::LANGUAGE.into(),
     query_fn: cpp_query,
+    import_query_fn: cpp_import_query,
+    reference_query_fn: cpp_reference_query,
+    import_ref_query_fn: cpp_import_ref_query,
     class_like_parents: &["class_specifier"],
     ancestor_visibility_rules: &[],
 };

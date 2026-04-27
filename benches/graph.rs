@@ -382,7 +382,13 @@ fn bench_full_pipeline_small(c: &mut Criterion) {
                 let result = meta_ast::extractor::extract(black_box(&files));
 
                 // Add symbols - must use black_box to prevent optimization
-                for symbol in black_box(&result.symbols) {
+                for symbol in black_box(
+                    &result
+                        .files
+                        .iter()
+                        .flat_map(|f| &f.symbols)
+                        .collect::<Vec<_>>(),
+                ) {
                     builder.add_symbol(symbol);
                 }
 

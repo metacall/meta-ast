@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use clap::Parser;
+use meta_ast::graph::resolver;
 use meta_ast::graph::{GraphBuilder, SccAnalysis};
 use meta_ast::interface::args::Cli;
 use meta_ast::model::SnapshotId;
@@ -12,17 +15,24 @@ fn main() -> anyhow::Result<()> {
 
             let result = meta_ast::extractor::extract(&files);
 
-            for diag in &result.diagnostics {
-                eprintln!(
-                    "[{:?}] {}: {}",
-                    diag.severity,
-                    diag.path.display(),
-                    diag.message
-                );
+            let symbols: Vec<_> = result
+                .files
+                .iter()
+                .flat_map(|f| f.symbols.iter().cloned())
+                .collect();
+
+            for file in &result.files {
+                for diag in &file.diagnostics {
+                    eprintln!(
+                        "[{:?}] {}: {}",
+                        diag.severity,
+                        diag.path.display(),
+                        diag.message
+                    );
+                }
             }
 
-            let content =
-                meta_ast::output::inspect::serialize_inspect(&result.symbols, &args.format)?;
+            let content = meta_ast::output::inspect::serialize_inspect(&symbols, &args.format)?;
 
             match args.output {
                 Some(path) => std::fs::write(&path, &content)?,
@@ -34,9 +44,7 @@ fn main() -> anyhow::Result<()> {
 
         Cli::Graph(args) => {
             let files = meta_ast::input::discover_files(&args.path, None)?;
-
             let snapshot_id = SnapshotId(1);
-
             let mut builder = GraphBuilder::new(snapshot_id);
 
             for (path, lang) in &files {
@@ -45,17 +53,66 @@ fn main() -> anyhow::Result<()> {
 
             let result = meta_ast::extractor::extract(&files);
 
-            for diag in &result.diagnostics {
-                eprintln!(
-                    "[{:?}] {}: {}",
-                    diag.severity,
-                    diag.path.display(),
-                    diag.message
-                );
+            for file in &result.files {
+                for diag in &file.diagnostics {
+                    eprintln!(
+                        "[{:?}] {}: {}",
+                        diag.severity,
+                        diag.path.display(),
+                        diag.message
+                    );
+                }
             }
 
-            for symbol in &result.symbols {
-                builder.add_symbol(symbol);
+            // Pass 2: add symbols and import edges
+            for file in &result.files {
+                for symbol in &file.symbols {
+                    builder.add_symbol(symbol);
+                }
+            }
+
+            // Resolve import edges: convert UnresolvedImport → builder.add_import
+            let mut path_to_file_id: HashMap<std::path::PathBuf, meta_ast::model::FileId> =
+                HashMap::new();
+            for file in &result.files {
+                if let Some(fid) = builder.file_id_for_path(&file.path) {
+                    path_to_file_id.insert(file.path.clone(), fid);
+                }
+            }
+
+            for file in &result.files {
+                let Some(&source_fid) = path_to_file_id.get(&file.path) else {
+                    continue;
+                };
+                for import in &file.imports {
+                    if let Some(dir) = file.path.parent()
+                        && let Some(target) =
+                            resolver::normalize_import_path(dir, &import.namespace, file.lang)
+                    {
+                        builder.add_import(source_fid, target);
+                    }
+                }
+            }
+
+            // Pass 3: build scope cache and resolve references
+            let symbol_index = resolver::build_symbol_index(&result.files, &path_to_file_id);
+            let import_adjacency = builder.import_adjacency();
+            let file_languages: HashMap<_, _> = result
+                .files
+                .iter()
+                .filter_map(|f| Some((path_to_file_id.get(&f.path)?.to_owned(), f.lang)))
+                .collect();
+            let scope_cache = resolver::FlattenedScopeCache::build(
+                &symbol_index,
+                &import_adjacency,
+                &file_languages,
+            );
+            let ref_edges =
+                resolver::resolve_all_references(&result.files, &path_to_file_id, &scope_cache);
+
+            // Pass 4: add reference edges
+            for (from, to) in ref_edges {
+                builder.add_reference(from, to);
             }
 
             let graph = builder.build();

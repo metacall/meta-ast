@@ -25,6 +25,7 @@ Exit gates:
 
 1. SCC results match fixture expectations.
 2. Cross-file dependency mapping validated on mixed-language samples.
+3. ReferenceEdges appear in graph output with confidence scores in cross-file resolution tests.
 
 ## Phase 3 - Datagraph & optional sink
 
@@ -56,7 +57,7 @@ Exit gates:
 5. C ABI smoke tests pass.
 6. Incremental performance target evidence captured.
 
-## Phase 5 — Validation and delivery
+## Phase 5 - Validation and delivery
 
 Goals:
 

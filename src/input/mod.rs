@@ -1,11 +1,16 @@
+//! File discovery and language detection.
+//!
+//! Walks a directory tree, maps file extensions to `LangId` via a
+//! pre-computed extension map, and returns sorted file lists.
+
 use std::path::Path;
 
 use crate::language::{LangId, spec_for};
 
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
-static EXT_MAP: Lazy<HashMap<&'static str, LangId>> = Lazy::new(|| {
+static EXT_MAP: LazyLock<HashMap<&'static str, LangId>> = LazyLock::new(|| {
     LangId::all()
         .iter()
         .flat_map(|&id| {

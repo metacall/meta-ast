@@ -2,14 +2,14 @@ use std::path::PathBuf;
 
 use crate::model::SourceRange;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[non_exhaustive]
 pub enum Severity {
     Warning,
     Error,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Diagnostic {
     pub path: PathBuf,
     pub severity: Severity,

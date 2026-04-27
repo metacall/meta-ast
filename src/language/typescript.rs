@@ -1,6 +1,6 @@
 use crate::language::LanguageSpec;
 use crate::model::Visibility;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 pub const TS_FAMILY_QUERY: &str = r#"
 (function_declaration
@@ -67,7 +67,7 @@ pub const TS_FAMILY_QUERY: &str = r#"
 )
 "#;
 
-static TS_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static TS_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         TS_FAMILY_QUERY,
@@ -75,14 +75,79 @@ static TS_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     .expect("Failed to parse TypeScript query")
 });
 
+pub const TS_FAMILY_IMPORT_QUERY: &str = r#"
+(import_statement
+  source: (string) @import.path)
+(import_statement
+  (import_clause
+    (named_imports
+      (import_specifier
+        name: (identifier) @import.symbol
+        alias: (identifier)? @import.alias))))
+(import_statement
+  (import_clause
+    (identifier) @import.symbol))
+(import_statement
+  (import_clause
+    (namespace_import
+      (identifier) @import.symbol)))
+"#;
+
+pub const TS_FAMILY_REFERENCE_QUERY: &str = r#"
+(call_expression
+  function: (identifier) @reference.name)
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @reference.name))
+"#;
+
+static TS_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        TS_FAMILY_IMPORT_QUERY,
+    )
+    .expect("Failed to parse TypeScript import query")
+});
+
+static TS_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        TS_FAMILY_REFERENCE_QUERY,
+    )
+    .expect("Failed to parse TypeScript reference query")
+});
+
+static TS_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        &format!("{}\n{}", TS_FAMILY_IMPORT_QUERY, TS_FAMILY_REFERENCE_QUERY),
+    )
+    .expect("Failed to parse TypeScript combined import+ref query")
+});
+
+fn ts_import_ref_query() -> &'static tree_sitter::Query {
+    &TS_IMPORT_REF_QUERY
+}
+
 fn ts_query() -> &'static tree_sitter::Query {
     &TS_QUERY
+}
+
+fn ts_import_query() -> &'static tree_sitter::Query {
+    &TS_IMPORT_QUERY
+}
+
+fn ts_reference_query() -> &'static tree_sitter::Query {
+    &TS_REFERENCE_QUERY
 }
 
 pub const TS_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["ts", "cts", "mts"],
     grammar_fn: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
     query_fn: ts_query,
+    import_query_fn: ts_import_query,
+    reference_query_fn: ts_reference_query,
+    import_ref_query_fn: ts_import_ref_query,
     class_like_parents: &["class_declaration", "class"],
     ancestor_visibility_rules: &[("export_statement", Visibility::Public)],
 };
@@ -128,6 +193,43 @@ mod tests {
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Dir");
         assert!(matches!(symbols[0].kind, SymbolKind::Enum));
+    }
+
+    #[test]
+    fn extract_ts_named_imports() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"import { Component, OnInit } from '@angular/core';";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::TypeScript,
+            &tree,
+            src,
+            &std::path::PathBuf::from("test.ts"),
+        );
+        let named: Vec<_> = imports.iter().filter(|i| i.symbol.is_some()).collect();
+        assert_eq!(named.len(), 2);
+        for imp in &named {
+            assert_eq!(imp.namespace, "'@angular/core'");
+        }
+        assert_eq!(named[0].symbol.as_deref(), Some("Component"));
+        assert_eq!(named[1].symbol.as_deref(), Some("OnInit"));
+    }
+
+    #[test]
+    fn extract_ts_default_import() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"import React from 'react';";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::TypeScript,
+            &tree,
+            src,
+            &std::path::PathBuf::from("test.ts"),
+        );
+        let named: Vec<_> = imports.iter().filter(|i| i.symbol.is_some()).collect();
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].namespace, "'react'");
+        assert_eq!(named[0].symbol.as_deref(), Some("React"));
     }
 
     #[test]

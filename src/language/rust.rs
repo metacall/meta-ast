@@ -1,7 +1,7 @@
 use crate::language::LanguageSpec;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static RUST_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static RUST_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_rust::LANGUAGE.into(),
         r#"
@@ -55,10 +55,66 @@ fn rust_query() -> &'static tree_sitter::Query {
     &RUST_QUERY
 }
 
+const RUST_IMPORT_QUERY_STR: &str = r#"
+(use_declaration
+  argument: (scoped_identifier) @import.path)
+(use_declaration
+  argument: (scoped_use_list
+    path: (scoped_identifier) @import.path))
+(use_as_clause
+  path: (_) @import.path
+  alias: (identifier) @import.alias)
+"#;
+
+static RUST_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(&tree_sitter_rust::LANGUAGE.into(), RUST_IMPORT_QUERY_STR)
+        .expect("Failed to parse Rust import query")
+});
+
+const RUST_REFERENCE_QUERY_STR: &str = r#"
+(call_expression
+  function: (identifier) @reference.name)
+(call_expression
+  function: (scoped_identifier
+    name: (identifier) @reference.name))
+(call_expression
+  function: (field_expression
+    field: (field_identifier) @reference.name))
+(macro_invocation
+  macro: (identifier) @reference.name)
+"#;
+
+static RUST_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(&tree_sitter_rust::LANGUAGE.into(), RUST_REFERENCE_QUERY_STR)
+        .expect("Failed to parse Rust reference query")
+});
+
+fn rust_import_query() -> &'static tree_sitter::Query {
+    &RUST_IMPORT_QUERY
+}
+fn rust_reference_query() -> &'static tree_sitter::Query {
+    &RUST_REFERENCE_QUERY
+}
+
+static RUST_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_rust::LANGUAGE.into(),
+        &format!("{}\n{}", RUST_IMPORT_QUERY_STR, RUST_REFERENCE_QUERY_STR),
+    )
+    .expect("Failed to parse Rust combined import+ref query")
+});
+
+fn rust_import_ref_query() -> &'static tree_sitter::Query {
+    &RUST_IMPORT_REF_QUERY
+}
+
 pub const RUST_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["rs"],
     grammar_fn: || tree_sitter_rust::LANGUAGE.into(),
     query_fn: rust_query,
+    import_query_fn: rust_import_query,
+    reference_query_fn: rust_reference_query,
+    import_ref_query_fn: rust_import_ref_query,
     class_like_parents: &["impl_item"],
     ancestor_visibility_rules: &[],
 };

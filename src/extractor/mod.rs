@@ -1,52 +1,37 @@
+//! Parallel file extraction orchestration.
+//!
+//! Uses rayon `par_iter` to read, parse, and extract symbols/imports/
+//! references across files concurrently. Each file is processed
+//! independently; errors are accumulated as diagnostics per file.
+
 use rayon::prelude::*;
 
-use crate::error::{Diagnostic, Error, Severity};
+// TODO(MVP): Add a config flag to skip import/reference extraction when only
+//symbol listing is needed (performance optimization for inspect mode).
+
+use crate::error::{Diagnostic, Severity};
 use crate::language::LangId;
 use crate::model::{IdGenerator, Symbol, SymbolId};
 use crate::parser;
 
+pub use crate::model::FileExtraction;
+
 pub struct ExtractionResult {
-    pub symbols: Vec<Symbol>,
-    pub diagnostics: Vec<Diagnostic>,
+    pub files: Vec<FileExtraction>,
 }
 
 pub fn extract(files: &[(std::path::PathBuf, LangId)]) -> ExtractionResult {
     let id_gen = IdGenerator::<SymbolId>::new();
-    let mut diagnostics = Vec::new();
 
-    let results: Vec<_> = files
+    let mut file_extractions: Vec<_> = files
         .par_iter()
-        .filter_map(
-            |(path, lang)| match extract_single_file(path, lang, &id_gen) {
-                Ok((symbols, diags)) => Some((path.clone(), *lang, symbols, diags)),
-                Err(e) => {
-                    let diag = Diagnostic {
-                        path: path.clone(),
-                        severity: Severity::Error,
-                        message: e.to_string(),
-                        source_range: None,
-                    };
-                    Some((path.clone(), *lang, Vec::new(), vec![diag]))
-                }
-            },
-        )
+        .map(|(path, lang)| extract_single_file(path, lang, &id_gen))
         .collect();
 
-    let mut symbols = Vec::new();
-    for (_path, _lang, mut file_symbols, mut diags) in results {
-        diagnostics.append(&mut diags);
-        symbols.append(&mut file_symbols);
-    }
-
-    symbols.sort_by(|a, b| {
-        a.file_path
-            .cmp(&b.file_path)
-            .then(a.source_range.byte_start.cmp(&b.source_range.byte_start))
-    });
+    file_extractions.sort_by(|a, b| a.path.cmp(&b.path));
 
     ExtractionResult {
-        symbols,
-        diagnostics,
+        files: file_extractions,
     }
 }
 
@@ -54,9 +39,44 @@ fn extract_single_file(
     path: &std::path::Path,
     lang: &LangId,
     id_gen: &IdGenerator<SymbolId>,
-) -> Result<(Vec<Symbol>, Vec<Diagnostic>), Error> {
-    let source = std::fs::read(path)?;
-    let tree = parser::parse_tree(*lang, &source)?;
+) -> FileExtraction {
+    let source = match std::fs::read(path) {
+        Ok(s) => s,
+        Err(e) => {
+            return FileExtraction {
+                path: path.to_path_buf(),
+                lang: *lang,
+                symbols: Vec::new(),
+                imports: Vec::new(),
+                references: Vec::new(),
+                diagnostics: vec![Diagnostic {
+                    path: path.to_path_buf(),
+                    severity: Severity::Error,
+                    message: format!("failed to read file: {e}"),
+                    source_range: None,
+                }],
+            };
+        }
+    };
+
+    let tree = match crate::parser::parse_tree(*lang, &source) {
+        Ok(t) => t,
+        Err(e) => {
+            return FileExtraction {
+                path: path.to_path_buf(),
+                lang: *lang,
+                symbols: Vec::new(),
+                imports: Vec::new(),
+                references: Vec::new(),
+                diagnostics: vec![Diagnostic {
+                    path: path.to_path_buf(),
+                    severity: Severity::Error,
+                    message: e.to_string(),
+                    source_range: None,
+                }],
+            };
+        }
+    };
 
     let ratio = parser::error_ratio(&tree, &source);
     let mut diags = Vec::new();
@@ -74,7 +94,6 @@ fn extract_single_file(
     }
 
     let raw_symbols = crate::language::extract_symbols_for(*lang, &tree, &source);
-
     let symbols = raw_symbols
         .into_iter()
         .map(|raw| Symbol {
@@ -91,7 +110,17 @@ fn extract_single_file(
         })
         .collect();
 
-    Ok((symbols, diags))
+    let (imports, references) =
+        crate::language::extract_imports_and_references_for(*lang, &tree, &source, path);
+
+    FileExtraction {
+        path: path.to_path_buf(),
+        lang: *lang,
+        symbols,
+        imports,
+        references,
+        diagnostics: diags,
+    }
 }
 
 #[cfg(test)]
@@ -115,9 +144,14 @@ mod tests {
     fn extract_single_python_file() {
         let path = write_temp("single.py", b"def hello(): pass\n");
         let result = extract(&[(path.clone(), LangId::Python)]);
-        assert!(!result.symbols.is_empty());
-        assert!(result.diagnostics.is_empty());
-        let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(result.files.len(), 1);
+        assert!(!result.files[0].symbols.is_empty());
+        assert!(result.files[0].diagnostics.is_empty());
+        let names: Vec<&str> = result.files[0]
+            .symbols
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
         assert!(names.contains(&"hello"));
     }
 
@@ -133,11 +167,15 @@ mod tests {
             (p3.clone(), LangId::Python),
         ];
         let result = extract(&files);
-        let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
-        assert!(names.contains(&"alpha"), "missing alpha: {names:?}");
-        assert!(names.contains(&"beta"), "missing beta: {names:?}");
-        assert!(names.contains(&"gamma"), "missing gamma: {names:?}");
-        assert!(names.contains(&"Delta"), "missing Delta: {names:?}");
+        let all_names: Vec<&str> = result
+            .files
+            .iter()
+            .flat_map(|f| f.symbols.iter().map(|s| s.name.as_str()))
+            .collect();
+        assert!(all_names.contains(&"alpha"), "missing alpha: {all_names:?}");
+        assert!(all_names.contains(&"beta"), "missing beta: {all_names:?}");
+        assert!(all_names.contains(&"gamma"), "missing gamma: {all_names:?}");
+        assert!(all_names.contains(&"Delta"), "missing Delta: {all_names:?}");
     }
 
     #[test]
@@ -145,7 +183,7 @@ mod tests {
         let path = test_dir().join("nonexistent_broken.py");
         let _ = std::fs::remove_file(&path);
         let result = extract(&[(path, LangId::Python)]);
-        assert!(!result.diagnostics.is_empty());
+        assert!(!result.files[0].diagnostics.is_empty());
     }
 
     #[test]
@@ -156,7 +194,11 @@ mod tests {
             b"def broken(\n   # missing close paren and colon\n",
         );
         let result = extract(&[(valid.clone(), LangId::Python), (broken, LangId::Python)]);
-        let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
+        let names: Vec<&str> = result
+            .files
+            .iter()
+            .flat_map(|f| f.symbols.iter().map(|s| s.name.as_str()))
+            .collect();
         assert!(
             names.contains(&"works"),
             "valid file symbols should be present: {names:?}"
@@ -171,8 +213,16 @@ mod tests {
         let r1 = extract(&files);
         let r2 = extract(&files);
 
-        let names1: Vec<String> = r1.symbols.iter().map(|s| s.name.clone()).collect();
-        let names2: Vec<String> = r2.symbols.iter().map(|s| s.name.clone()).collect();
+        let names1: Vec<String> = r1
+            .files
+            .iter()
+            .flat_map(|f| f.symbols.iter().map(|s| s.name.clone()))
+            .collect();
+        let names2: Vec<String> = r2
+            .files
+            .iter()
+            .flat_map(|f| f.symbols.iter().map(|s| s.name.clone()))
+            .collect();
         assert_eq!(names1, names2);
     }
 
@@ -180,9 +230,11 @@ mod tests {
     fn symbols_assigned_ids() {
         let path = write_temp("ids.py", b"def a(): pass\ndef b(): pass\ndef c(): pass\n");
         let result = extract(&[(path, LangId::Python)]);
-        assert!(!result.symbols.is_empty());
-
-        let ids: Vec<u32> = result.symbols.iter().map(|s| s.id.to_raw()).collect();
+        let ids: Vec<u32> = result.files[0]
+            .symbols
+            .iter()
+            .map(|s| s.id.to_raw())
+            .collect();
         let mut sorted_ids = ids.clone();
         sorted_ids.sort();
         assert_eq!(ids, sorted_ids, "IDs should be sequential");
@@ -192,6 +244,10 @@ mod tests {
         }
 
         let unique: std::collections::HashSet<u32> = ids.iter().copied().collect();
-        assert_eq!(unique.len(), result.symbols.len(), "all IDs must be unique");
+        assert_eq!(
+            unique.len(),
+            result.files[0].symbols.len(),
+            "all IDs must be unique"
+        );
     }
 }

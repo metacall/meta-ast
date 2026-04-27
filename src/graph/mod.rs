@@ -33,6 +33,7 @@
 pub mod builder;
 pub mod edge;
 pub mod node;
+pub mod resolver;
 pub mod scc;
 
 use std::collections::HashMap;

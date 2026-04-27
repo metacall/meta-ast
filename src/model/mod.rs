@@ -1,3 +1,10 @@
+//! Canonical symbol model and IR types.
+//!
+//! Defines `Symbol`, `UnresolvedImport`, `UnresolvedReference`,
+//! `FileExtraction`, and supporting types (`SymbolKind`, `Visibility`,
+//! `SourceRange`, `LineColumn`). This is the core data model with
+//! zero knowledge of parsing, I/O, or language specifics.
+
 pub mod ids;
 pub mod output;
 
@@ -8,6 +15,31 @@ pub use output::{ClassEntry, FuncEntry, InspectOutput, ObjectEntry};
 
 use crate::language::LangId;
 use serde::Serialize;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UnresolvedImport {
+    pub namespace: String,
+    pub alias: Option<String>,
+    pub symbol: Option<String>,
+    pub star: bool,
+    pub range: SourceRange,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UnresolvedReference {
+    pub name: String,
+    pub range: SourceRange,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FileExtraction {
+    pub path: PathBuf,
+    pub lang: LangId,
+    pub symbols: Vec<Symbol>,
+    pub imports: Vec<UnresolvedImport>,
+    pub references: Vec<UnresolvedReference>,
+    pub diagnostics: Vec<crate::error::Diagnostic>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct LineColumn {

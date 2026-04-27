@@ -1,9 +1,11 @@
 use crate::language::LanguageSpec;
-use crate::language::typescript::TS_FAMILY_QUERY;
+use crate::language::typescript::{
+    TS_FAMILY_IMPORT_QUERY, TS_FAMILY_QUERY, TS_FAMILY_REFERENCE_QUERY,
+};
 use crate::model::Visibility;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static TSX_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static TSX_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_typescript::LANGUAGE_TSX.into(),
         TS_FAMILY_QUERY,
@@ -11,14 +13,51 @@ static TSX_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     .expect("Failed to parse TSX query")
 });
 
+static TSX_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_typescript::LANGUAGE_TSX.into(),
+        TS_FAMILY_IMPORT_QUERY,
+    )
+    .expect("Failed to parse TSX import query")
+});
+
+static TSX_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_typescript::LANGUAGE_TSX.into(),
+        TS_FAMILY_REFERENCE_QUERY,
+    )
+    .expect("Failed to parse TSX reference query")
+});
+
+static TSX_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_typescript::LANGUAGE_TSX.into(),
+        &format!("{}\n{}", TS_FAMILY_IMPORT_QUERY, TS_FAMILY_REFERENCE_QUERY),
+    )
+    .expect("Failed to parse TSX combined import+ref query")
+});
+
+fn tsx_import_ref_query() -> &'static tree_sitter::Query {
+    &TSX_IMPORT_REF_QUERY
+}
+
 fn tsx_query() -> &'static tree_sitter::Query {
     &TSX_QUERY
+}
+fn tsx_import_query() -> &'static tree_sitter::Query {
+    &TSX_IMPORT_QUERY
+}
+fn tsx_reference_query() -> &'static tree_sitter::Query {
+    &TSX_REFERENCE_QUERY
 }
 
 pub const TSX_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["tsx"],
     grammar_fn: || tree_sitter_typescript::LANGUAGE_TSX.into(),
     query_fn: tsx_query,
+    import_query_fn: tsx_import_query,
+    reference_query_fn: tsx_reference_query,
+    import_ref_query_fn: tsx_import_ref_query,
     class_like_parents: &["class_declaration", "class"],
     ancestor_visibility_rules: &[("export_statement", Visibility::Public)],
 };

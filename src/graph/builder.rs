@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeRef;
 
 use crate::graph::CodeGraph;
 use crate::graph::edge::{EdgeData, EdgeKind};
@@ -184,6 +185,36 @@ impl GraphBuilder {
         };
 
         self.graph.add_edge(source, target, edge_data);
+    }
+
+    /// Returns the FileId for a given file path, if registered.
+    pub fn file_id_for_path(&self, path: &std::path::PathBuf) -> Option<FileId> {
+        self.path_to_file.get(path).copied()
+    }
+
+    // TODO(MVP): Handle ExternalImportFlag - some imports should add a
+    //             placeholder external node instead of being silently dropped.
+
+    /// Builds and returns an adjacency map from FileId to the FileIds it imports.
+    ///
+    /// Walks all Import edges in the graph to produce the relationship.
+    pub fn import_adjacency(&self) -> HashMap<FileId, Vec<FileId>> {
+        let mut adjacency: HashMap<FileId, Vec<FileId>> = HashMap::new();
+        let mut index_to_file: HashMap<NodeIndex, FileId> = HashMap::new();
+        for (&file_id, &idx) in &self.file_to_index {
+            index_to_file.insert(idx, file_id);
+        }
+        for edge in self.graph.edge_references() {
+            if edge.weight().kind == EdgeKind::Import
+                && let (Some(&from_id), Some(&to_id)) = (
+                    index_to_file.get(&edge.source()),
+                    index_to_file.get(&edge.target()),
+                )
+            {
+                adjacency.entry(from_id).or_default().push(to_id);
+            }
+        }
+        adjacency
     }
 
     /// Finalizes the graph and returns the constructed CodeGraph.

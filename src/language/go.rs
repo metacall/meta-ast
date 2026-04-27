@@ -1,7 +1,7 @@
 use crate::language::LanguageSpec;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static GO_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static GO_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_go::LANGUAGE.into(),
         r#"
@@ -56,14 +56,61 @@ static GO_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     .expect("Failed to parse Go query")
 });
 
+const GO_IMPORT_QUERY_STR: &str = r#"
+(import_spec
+  name: (_)? @import.alias
+  path: (interpreted_string_literal) @import.path)
+"#;
+
+static GO_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(&tree_sitter_go::LANGUAGE.into(), GO_IMPORT_QUERY_STR)
+        .expect("Failed to parse Go import query")
+});
+
+const GO_REFERENCE_QUERY_STR: &str = r#"
+(call_expression
+  function: (identifier) @reference.name)
+(call_expression
+  function: (selector_expression
+    field: (field_identifier) @reference.name))
+"#;
+
+static GO_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(&tree_sitter_go::LANGUAGE.into(), GO_REFERENCE_QUERY_STR)
+        .expect("Failed to parse Go reference query")
+});
+
 fn go_query() -> &'static tree_sitter::Query {
     &GO_QUERY
+}
+
+fn go_import_query() -> &'static tree_sitter::Query {
+    &GO_IMPORT_QUERY
+}
+
+fn go_reference_query() -> &'static tree_sitter::Query {
+    &GO_REFERENCE_QUERY
+}
+
+static GO_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_go::LANGUAGE.into(),
+        &format!("{}\n{}", GO_IMPORT_QUERY_STR, GO_REFERENCE_QUERY_STR),
+    )
+    .expect("Failed to parse Go combined import+ref query")
+});
+
+fn go_import_ref_query() -> &'static tree_sitter::Query {
+    &GO_IMPORT_REF_QUERY
 }
 
 pub const GO_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["go"],
     grammar_fn: || tree_sitter_go::LANGUAGE.into(),
     query_fn: go_query,
+    import_query_fn: go_import_query,
+    reference_query_fn: go_reference_query,
+    import_ref_query_fn: go_import_ref_query,
     class_like_parents: &[],
     ancestor_visibility_rules: &[],
 };
@@ -107,6 +154,62 @@ mod tests {
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Area");
         assert!(matches!(symbols[0].kind, SymbolKind::Method));
+    }
+
+    #[test]
+    fn extract_import_no_alias() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"package main\n\nimport \"fmt\"\n";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::Go,
+            &tree,
+            src,
+            &std::path::PathBuf::from("test.go"),
+        );
+        assert_eq!(
+            imports.len(),
+            1,
+            "expected 1 import record for non-aliased import"
+        );
+        assert_eq!(imports[0].namespace, "\"fmt\"");
+        assert!(imports[0].alias.is_none());
+    }
+
+    #[test]
+    fn extract_aliased_import_no_duplicates() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"package main\n\nimport alias \"fmt\"\n";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::Go,
+            &tree,
+            src,
+            &std::path::PathBuf::from("test.go"),
+        );
+        assert_eq!(
+            imports.len(),
+            1,
+            "expected 1 import record, not 2 (CR-03 regression check)"
+        );
+        assert_eq!(imports[0].namespace, "\"fmt\"");
+        assert_eq!(imports[0].alias.as_deref(), Some("alias"));
+    }
+
+    #[test]
+    fn extract_multiple_named_imports_no_aliases() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::Go,
+            &tree,
+            src,
+            &std::path::PathBuf::from("test.go"),
+        );
+        assert_eq!(imports.len(), 2, "expected 2 import records for fmt and os");
+        assert_eq!(imports[0].namespace, "\"fmt\"");
+        assert_eq!(imports[1].namespace, "\"os\"");
     }
 
     #[test]
