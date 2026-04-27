@@ -52,10 +52,7 @@ fn js_query() -> &'static tree_sitter::Query {
     &JS_QUERY
 }
 
-static JS_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
-    tree_sitter::Query::new(
-        &tree_sitter_javascript::LANGUAGE.into(),
-        r#"
+const JS_IMPORT_QUERY_STR: &str = r#"
 (import_statement
   source: (string) @import.path)
 (import_statement
@@ -67,21 +64,28 @@ static JS_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
 (import_statement
   (import_clause
     (identifier) @import.symbol))
-"#,
+"#;
+
+static JS_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_javascript::LANGUAGE.into(),
+        JS_IMPORT_QUERY_STR,
     )
     .expect("Failed to parse JavaScript import query")
 });
 
-static JS_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
-    tree_sitter::Query::new(
-        &tree_sitter_javascript::LANGUAGE.into(),
-        r#"
+const JS_REFERENCE_QUERY_STR: &str = r#"
 (call_expression
   function: (identifier) @reference.name)
 (call_expression
   function: (member_expression
     property: (property_identifier) @reference.name))
-"#,
+"#;
+
+static JS_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_javascript::LANGUAGE.into(),
+        JS_REFERENCE_QUERY_STR,
     )
     .expect("Failed to parse JavaScript reference query")
 });
@@ -93,12 +97,25 @@ fn js_reference_query() -> &'static tree_sitter::Query {
     &JS_REFERENCE_QUERY
 }
 
+static JS_IMPORT_REF_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_javascript::LANGUAGE.into(),
+        &format!("{}\n{}", JS_IMPORT_QUERY_STR, JS_REFERENCE_QUERY_STR),
+    )
+    .expect("Failed to parse JavaScript combined import+ref query")
+});
+
+fn js_import_ref_query() -> &'static tree_sitter::Query {
+    &JS_IMPORT_REF_QUERY
+}
+
 pub const JS_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["js", "mjs", "cjs"],
     grammar_fn: || tree_sitter_javascript::LANGUAGE.into(),
     query_fn: js_query,
     import_query_fn: js_import_query,
     reference_query_fn: js_reference_query,
+    import_ref_query_fn: js_import_ref_query,
     class_like_parents: &["class_declaration", "class"],
     ancestor_visibility_rules: &[("export_statement", Visibility::Public)],
 };

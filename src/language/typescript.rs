@@ -113,6 +113,18 @@ static TS_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     .expect("Failed to parse TypeScript reference query")
 });
 
+static TS_IMPORT_REF_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        &format!("{}\n{}", TS_FAMILY_IMPORT_QUERY, TS_FAMILY_REFERENCE_QUERY),
+    )
+    .expect("Failed to parse TypeScript combined import+ref query")
+});
+
+fn ts_import_ref_query() -> &'static tree_sitter::Query {
+    &TS_IMPORT_REF_QUERY
+}
+
 fn ts_query() -> &'static tree_sitter::Query {
     &TS_QUERY
 }
@@ -131,6 +143,7 @@ pub const TS_SPEC: LanguageSpec = LanguageSpec {
     query_fn: ts_query,
     import_query_fn: ts_import_query,
     reference_query_fn: ts_reference_query,
+    import_ref_query_fn: ts_import_ref_query,
     class_like_parents: &["class_declaration", "class"],
     ancestor_visibility_rules: &[("export_statement", Visibility::Public)],
 };
