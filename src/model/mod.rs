@@ -1,3 +1,10 @@
+//! Canonical symbol model and IR types.
+//!
+//! Defines `Symbol`, `UnresolvedImport`, `UnresolvedReference`,
+//! `FileExtraction`, and supporting types (`SymbolKind`, `Visibility`,
+//! `SourceRange`, `LineColumn`). This is the core data model with
+//! zero knowledge of parsing, I/O, or language specifics.
+
 pub mod ids;
 pub mod output;
 

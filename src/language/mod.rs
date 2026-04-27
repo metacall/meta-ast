@@ -1,3 +1,10 @@
+//! Language system: compile-time enum dispatch over 8 language packs.
+//!
+//! `LangId` enum selects a `LanguageSpec` via exhaustive `match`.
+//! Each `LanguageSpec` bundles a grammar constructor, tree-sitter query
+//! constructors (symbols, imports, references), and language-specific
+//! extraction heuristics.
+
 pub mod c;
 pub(crate) mod common;
 pub mod cpp;
@@ -69,6 +76,7 @@ pub struct LanguageSpec {
     //             to LanguageSpec for per-language path normalization logic.
     pub import_query_fn: fn() -> &'static Query,
     pub reference_query_fn: fn() -> &'static Query,
+    pub import_ref_query_fn: fn() -> &'static Query,
     pub class_like_parents: &'static [&'static str],
     pub ancestor_visibility_rules: &'static [(&'static str, Visibility)],
 }
@@ -113,6 +121,18 @@ pub fn extract_references_for<'a>(
     source: &'a [u8],
 ) -> Vec<crate::model::UnresolvedReference> {
     common::extract_references_with_spec(tree, source, spec_for(id))
+}
+
+pub fn extract_imports_and_references_for<'a>(
+    id: LangId,
+    tree: &'a tree_sitter::Tree,
+    source: &'a [u8],
+    file_path: &std::path::Path,
+) -> (
+    Vec<crate::model::UnresolvedImport>,
+    Vec<crate::model::UnresolvedReference>,
+) {
+    common::extract_imports_and_references_with_spec(tree, source, spec_for(id), file_path)
 }
 
 #[cfg(test)]

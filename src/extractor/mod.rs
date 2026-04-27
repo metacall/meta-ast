@@ -1,3 +1,9 @@
+//! Parallel file extraction orchestration.
+//!
+//! Uses rayon `par_iter` to read, parse, and extract symbols/imports/
+//! references across files concurrently. Each file is processed
+//! independently; errors are accumulated as diagnostics per file.
+
 use rayon::prelude::*;
 
 // TODO(MVP): Add a config flag to skip import/reference extraction when only
