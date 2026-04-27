@@ -1,3 +1,9 @@
+//! Tree-sitter parser lifecycle and parse quality metrics.
+//!
+//! Maintains a thread-local pool of `Parser` instances (one per
+//! language) to avoid re-initializing grammars. Provides `parse_tree`
+//! for single-file parsing and `error_ratio` for parse quality estimation.
+
 use std::cell::RefCell;
 
 use tree_sitter::Parser;
@@ -27,7 +33,9 @@ fn get_or_init_parser(
             .map_err(|e| Error::Config(format!("failed to set language: {e}")))?;
         parsers[idx] = Some(parser);
     }
-    Ok(unsafe { parsers[idx].as_mut().unwrap_unchecked() })
+    Ok(parsers[idx]
+        .as_mut()
+        .expect("parser slot was just initialized"))
 }
 
 pub fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tree, Error> {
