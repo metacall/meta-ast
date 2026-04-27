@@ -38,7 +38,7 @@ impl<T> IdGenerator<T> {
     where
         T: From<u32>,
     {
-        let val = self.counter.fetch_add(1, Ordering::Relaxed);
+        let val = self.counter.fetch_add(1, Ordering::SeqCst);
         T::from(val)
     }
 }
