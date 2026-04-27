@@ -1,7 +1,7 @@
 use crate::language::LanguageSpec;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static PYTHON_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static PYTHON_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_python::LANGUAGE.into(),
         r#"
@@ -40,10 +40,7 @@ fn python_query() -> &'static tree_sitter::Query {
     &PYTHON_QUERY
 }
 
-static PYTHON_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
-    tree_sitter::Query::new(
-        &tree_sitter_python::LANGUAGE.into(),
-        r#"
+const PYTHON_IMPORT_QUERY_STR: &str = r#"
 (import_statement
   (dotted_name) @import.path)
 (import_statement
@@ -59,21 +56,28 @@ static PYTHON_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
 (import_from_statement
   module_name: (dotted_name) @import.path
   (wildcard_import) @import.star)
-"#,
+"#;
+
+static PYTHON_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_python::LANGUAGE.into(),
+        PYTHON_IMPORT_QUERY_STR,
     )
     .expect("Failed to parse Python import query")
 });
 
-static PYTHON_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
-    tree_sitter::Query::new(
-        &tree_sitter_python::LANGUAGE.into(),
-        r#"
+const PYTHON_REFERENCE_QUERY_STR: &str = r#"
 (call
   function: (identifier) @reference.name)
 (call
   function: (attribute
     attribute: (identifier) @reference.name))
-"#,
+"#;
+
+static PYTHON_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_python::LANGUAGE.into(),
+        PYTHON_REFERENCE_QUERY_STR,
     )
     .expect("Failed to parse Python reference query")
 });
@@ -85,12 +89,28 @@ fn python_reference_query() -> &'static tree_sitter::Query {
     &PYTHON_REFERENCE_QUERY
 }
 
+static PYTHON_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_python::LANGUAGE.into(),
+        &format!(
+            "{}\n{}",
+            PYTHON_IMPORT_QUERY_STR, PYTHON_REFERENCE_QUERY_STR
+        ),
+    )
+    .expect("Failed to parse Python combined import+ref query")
+});
+
+fn python_import_ref_query() -> &'static tree_sitter::Query {
+    &PYTHON_IMPORT_REF_QUERY
+}
+
 pub const PYTHON_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["py", "pyi"],
     grammar_fn: || tree_sitter_python::LANGUAGE.into(),
     query_fn: python_query,
     import_query_fn: python_import_query,
     reference_query_fn: python_reference_query,
+    import_ref_query_fn: python_import_ref_query,
     class_like_parents: &["class_definition"],
     ancestor_visibility_rules: &[],
 };

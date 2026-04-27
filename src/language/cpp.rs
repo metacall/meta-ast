@@ -1,7 +1,7 @@
 use crate::language::LanguageSpec;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static CPP_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static CPP_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_cpp::LANGUAGE.into(),
         r#"
@@ -42,7 +42,7 @@ const CPP_IMPORT_QUERY_STR: &str = r#"
   path: (system_lib_string) @import.path)
 "#;
 
-static CPP_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static CPP_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(&tree_sitter_cpp::LANGUAGE.into(), CPP_IMPORT_QUERY_STR)
         .expect("Failed to parse C++ import query")
 });
@@ -55,7 +55,7 @@ const CPP_REFERENCE_QUERY_STR: &str = r#"
     field: (field_identifier) @reference.name))
 "#;
 
-static CPP_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static CPP_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(&tree_sitter_cpp::LANGUAGE.into(), CPP_REFERENCE_QUERY_STR)
         .expect("Failed to parse C++ reference query")
 });
@@ -67,7 +67,7 @@ fn cpp_reference_query() -> &'static tree_sitter::Query {
     &CPP_REFERENCE_QUERY
 }
 
-static CPP_IMPORT_REF_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static CPP_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_cpp::LANGUAGE.into(),
         &format!("{}\n{}", CPP_IMPORT_QUERY_STR, CPP_REFERENCE_QUERY_STR),

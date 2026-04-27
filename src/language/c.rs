@@ -1,7 +1,7 @@
 use crate::language::LanguageSpec;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static C_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static C_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_c::LANGUAGE.into(),
         r#"
@@ -40,7 +40,7 @@ const C_IMPORT_QUERY_STR: &str = r#"
   path: (system_lib_string) @import.path)
 "#;
 
-static C_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static C_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(&tree_sitter_c::LANGUAGE.into(), C_IMPORT_QUERY_STR)
         .expect("Failed to parse C import query")
 });
@@ -53,7 +53,7 @@ const C_REFERENCE_QUERY_STR: &str = r#"
     field: (field_identifier) @reference.name))
 "#;
 
-static C_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static C_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(&tree_sitter_c::LANGUAGE.into(), C_REFERENCE_QUERY_STR)
         .expect("Failed to parse C reference query")
 });
@@ -70,7 +70,7 @@ fn c_reference_query() -> &'static tree_sitter::Query {
     &C_REFERENCE_QUERY
 }
 
-static C_IMPORT_REF_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static C_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_c::LANGUAGE.into(),
         &format!("{}\n{}", C_IMPORT_QUERY_STR, C_REFERENCE_QUERY_STR),
