@@ -1,8 +1,8 @@
 use crate::language::LanguageSpec;
 use crate::model::Visibility;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static JS_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static JS_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_javascript::LANGUAGE.into(),
         r#"
@@ -64,9 +64,13 @@ const JS_IMPORT_QUERY_STR: &str = r#"
 (import_statement
   (import_clause
     (identifier) @import.symbol))
+(import_statement
+  (import_clause
+    (namespace_import
+      (identifier) @import.symbol)))
 "#;
 
-static JS_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static JS_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_javascript::LANGUAGE.into(),
         JS_IMPORT_QUERY_STR,
@@ -82,7 +86,7 @@ const JS_REFERENCE_QUERY_STR: &str = r#"
     property: (property_identifier) @reference.name))
 "#;
 
-static JS_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static JS_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_javascript::LANGUAGE.into(),
         JS_REFERENCE_QUERY_STR,
@@ -97,7 +101,7 @@ fn js_reference_query() -> &'static tree_sitter::Query {
     &JS_REFERENCE_QUERY
 }
 
-static JS_IMPORT_REF_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+static JS_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
         &tree_sitter_javascript::LANGUAGE.into(),
         &format!("{}\n{}", JS_IMPORT_QUERY_STR, JS_REFERENCE_QUERY_STR),
@@ -173,6 +177,63 @@ mod tests {
         let symbols = extract_symbols_for(LangId::JavaScript, &tree, src);
         let class = symbols.iter().find(|s| s.name == "Foo").unwrap();
         assert_eq!(class.visibility, Some(Visibility::Public));
+    }
+
+    #[test]
+    fn extract_named_imports() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"import { foo, bar } from 'utils';";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::JavaScript,
+            &tree,
+            src,
+            &std::path::PathBuf::from("test.js"),
+        );
+        let named: Vec<_> = imports.iter().filter(|i| i.symbol.is_some()).collect();
+        assert_eq!(
+            named.len(),
+            2,
+            "expected 2 named import records for foo and bar"
+        );
+        for imp in &named {
+            assert_eq!(imp.namespace, "'utils'");
+        }
+        assert_eq!(named[0].symbol.as_deref(), Some("foo"));
+        assert_eq!(named[1].symbol.as_deref(), Some("bar"));
+    }
+
+    #[test]
+    fn extract_default_import() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"import React from 'react';";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::JavaScript,
+            &tree,
+            src,
+            &std::path::PathBuf::from("test.js"),
+        );
+        let named: Vec<_> = imports.iter().filter(|i| i.symbol.is_some()).collect();
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].namespace, "'react'");
+        assert_eq!(named[0].symbol.as_deref(), Some("React"));
+    }
+
+    #[test]
+    fn extract_side_effect_import() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"import 'styles.css';";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::JavaScript,
+            &tree,
+            src,
+            &std::path::PathBuf::from("test.js"),
+        );
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].namespace, "'styles.css'");
+        assert!(imports[0].symbol.is_none());
     }
 
     #[test]
