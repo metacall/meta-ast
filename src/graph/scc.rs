@@ -1,10 +1,9 @@
 //! SCC (Strongly Connected Components) analysis for dependency graphs.
 //!
 //! This module implements Tarjan's SCC algorithm on the dependency subgraph
-//! (excluding ownership edges per graph-model.md invariants).
-
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeFiltered;
 use std::collections::HashMap;
 
 use crate::graph::edge::{EdgeData, EdgeKind};
@@ -61,60 +60,57 @@ impl SccAnalysis {
     ///
     /// Ownership edges are excluded from SCC computation per graph-model.md.
     /// The dependency subgraph includes Import and Reference edge kinds.
+    ///
+    /// Uses an `EdgeFiltered` view instead of cloning the graph - zero-cost,
+    /// no allocation for the subgraph.
     pub fn analyze(graph: &DiGraph<NodeData, EdgeData>) -> Self {
-        // Build dependency subgraph by filtering out ownership edges
-        let dependency_graph = Self::build_dependency_subgraph(graph);
+        // Zero-cost view that excludes ownership edges - no graph cloning.
+        let dep_view = EdgeFiltered::from_fn(
+            graph,
+            |edge: petgraph::graph::EdgeReference<'_, EdgeData>| {
+                edge.weight().kind != EdgeKind::Ownership
+            },
+        );
 
-        // Run Tarjan SCC algorithm
-        let scc_groups = tarjan_scc(&dependency_graph);
+        // Run Tarjan SCC algorithm on the view.
+        // The returned NodeIndex values ARE the original graph's indices.
+        let scc_groups = tarjan_scc(&dep_view);
 
-        // Build components with metadata
         let mut components = Vec::with_capacity(scc_groups.len());
         let mut node_to_component = HashMap::new();
 
         for (index, nodes) in scc_groups.into_iter().enumerate() {
-            // Map dependency graph indices back to original graph indices
-            let original_nodes: Vec<NodeIndex> = nodes
-                .iter()
-                .filter_map(|&dep_idx| Self::map_to_original(graph, &dependency_graph, dep_idx))
-                .collect();
-
-            // Check for self-loops in the original graph
-            let has_self_loop = original_nodes.iter().any(|&node| {
+            let has_self_loop = nodes.iter().any(|&node| {
                 graph
                     .neighbors_directed(node, petgraph::Direction::Outgoing)
                     .any(|neighbor| neighbor == node)
             });
 
-            let is_cyclic = original_nodes.len() > 1 || has_self_loop;
+            let is_cyclic = nodes.len() > 1 || has_self_loop;
 
-            // Determine deployability hint
-            let hint = if original_nodes.len() > 1 {
+            let hint = if nodes.len() > 1 {
                 DeployabilityHint::CyclicCluster
             } else if has_self_loop {
                 DeployabilityHint::SelfLoop
-            } else if original_nodes.len() == 1 {
-                // Check if it has dependencies to other components
+            } else if nodes.len() == 1 {
                 DeployabilityHint::AcyclicDependency
             } else {
                 DeployabilityHint::Independent
             };
 
-            // Record node mappings
-            for &node in &original_nodes {
+            for &node in &nodes {
                 node_to_component.insert(node, index);
             }
 
             components.push(Scc {
                 index,
-                nodes: original_nodes,
+                nodes,
                 is_cyclic,
                 hint,
             });
         }
 
-        // Update hints for independent units (no external dependencies)
-        Self::classify_independence(&dependency_graph, &mut components);
+        Self::classify_independence(graph, &mut components);
 
         Self {
             components,
@@ -122,70 +118,17 @@ impl SccAnalysis {
         }
     }
 
-    /// Build a subgraph containing only dependency edges (Import, Reference).
-    /// Ownership edges are excluded from SCC computation.
-    fn build_dependency_subgraph(
-        original: &DiGraph<NodeData, EdgeData>,
-    ) -> DiGraph<NodeData, EdgeData> {
-        let mut subgraph = DiGraph::with_capacity(original.node_count(), original.edge_count());
+    /// Classify components as Independent if they have no outgoing dependencies
+    /// to other components.
+    fn classify_independence(graph: &DiGraph<NodeData, EdgeData>, components: &mut [Scc]) {
+        let mut component_deps: HashMap<usize, Vec<usize>> = HashMap::new();
 
-        // Copy all nodes
-        let mut node_map: HashMap<NodeIndex, NodeIndex> = HashMap::new();
-        for idx in original.node_indices() {
-            let weight = original.node_weight(idx).cloned().unwrap_or_else(|| {
-                // This should never happen with valid petgraph usage
-                panic!("Node index {idx:?} has no weight in original graph")
-            });
-            let new_idx = subgraph.add_node(weight);
-            node_map.insert(idx, new_idx);
-        }
-
-        // Copy only dependency edges (exclude Ownership)
-        for edge_idx in original.edge_indices() {
-            let (source, target) = original
-                .edge_endpoints(edge_idx)
-                .expect("Edge index must be valid");
-            let weight = original
-                .edge_weight(edge_idx)
-                .expect("Edge index must have weight");
-
-            // Skip ownership edges - they don't participate in SCC
+        for edge_idx in graph.edge_indices() {
+            let weight = graph.edge_weight(edge_idx).expect("Edge must exist");
             if weight.kind == EdgeKind::Ownership {
                 continue;
             }
-
-            if let (Some(&new_source), Some(&new_target)) =
-                (node_map.get(&source), node_map.get(&target))
-            {
-                subgraph.add_edge(new_source, new_target, weight.clone());
-            }
-        }
-
-        subgraph
-    }
-
-    /// Map a node from the dependency subgraph back to the original graph.
-    fn map_to_original(
-        original: &DiGraph<NodeData, EdgeData>,
-        _subgraph: &DiGraph<NodeData, EdgeData>,
-        dep_idx: NodeIndex,
-    ) -> Option<NodeIndex> {
-        // The subgraph preserves node order from original
-        if dep_idx.index() < original.node_count() {
-            Some(NodeIndex::new(dep_idx.index()))
-        } else {
-            None
-        }
-    }
-
-    /// Classify components as Independent if they have no outgoing dependencies
-    /// to other components.
-    fn classify_independence(dep_graph: &DiGraph<NodeData, EdgeData>, components: &mut [Scc]) {
-        // Build component-level dependency graph
-        let mut component_deps: HashMap<usize, Vec<usize>> = HashMap::new();
-
-        for edge_idx in dep_graph.edge_indices() {
-            let (source, target) = dep_graph.edge_endpoints(edge_idx).expect("Edge must exist");
+            let (source, target) = graph.edge_endpoints(edge_idx).expect("Edge must exist");
             let source_comp = Self::find_component_for_node(components, source);
             let target_comp = Self::find_component_for_node(components, target);
 
