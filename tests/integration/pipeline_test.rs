@@ -430,7 +430,7 @@ fn edge_star_import_extracts_star_field() {
     let star_import = result
         .files
         .iter()
-        .find(|f| f.path.to_string_lossy().contains("edge_star/main"));
+        .find(|f| f.path.ends_with("edge_star/main.py"));
     assert!(star_import.is_some(), "should find main.py in edge_star");
 
     if let Some(main) = star_import {
@@ -450,7 +450,7 @@ fn edge_alias_captures_alias_field() {
     let main = result
         .files
         .iter()
-        .find(|f| f.path.to_string_lossy().contains("edge_alias/main"));
+        .find(|f| f.path.ends_with("edge_alias/main.py"));
     assert!(main.is_some(), "should find main.py in edge_alias");
 
     if let Some(m) = main {
@@ -612,7 +612,7 @@ fn edge_multiple_imports_per_file() {
     let main = result
         .files
         .iter()
-        .find(|f| f.path.to_string_lossy().contains("edge_multi_import/main"));
+        .find(|f| f.path.ends_with("edge_multi_import/main.py"));
     assert!(main.is_some(), "should find main.py");
 
     if let Some(m) = main {
@@ -633,7 +633,7 @@ fn edge_unresolved_ref_creates_no_edges() {
     let main = result
         .files
         .iter()
-        .find(|f| f.path.to_string_lossy().contains("edge_unresolved/main"));
+        .find(|f| f.path.ends_with("edge_unresolved/main.py"));
     assert!(main.is_some(), "should find main.py");
 
     if let Some(m) = main {
