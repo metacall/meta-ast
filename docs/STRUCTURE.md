@@ -13,12 +13,12 @@ src/
 ├── error.rs                  Error + Diagnostic types (thiserror)
 │
 ├── model/
-│   ├── mod.rs                Symbol, SymbolKind, SourceRange, Visibility, LineColumn
+│   ├── mod.rs                Symbol, SymbolKind, SourceRange, UnresolvedImport, UnresolvedReference, FileExtraction
 │   ├── ids.rs                FileId, SymbolId, SnapshotId (newtyped u32)
-│   └── output.rs             InspectOutput, FuncEntry, ClassEntry, ObjectEntry (serde)
+│   └── output.rs             InspectOutput, FuncEntry, ClassEntry, ObjectEntry
 │
 ├── language/
-│   ├── mod.rs                LangId enum, LanguagePack trait, impl_language! macro, dispatch
+│   ├── mod.rs                LangId enum, LanguagePack trait
 │   ├── python.rs             Python queries + extraction
 │   ├── javascript.rs         JavaScript queries + extraction
 │   ├── typescript.rs         TypeScript queries + extraction
@@ -35,14 +35,15 @@ src/
 │   └── mod.rs                Tree-sitter parser lifecycle, parse function
 │
 ├── extractor/
-│   └── mod.rs                Pipeline orchestration: parallel parse + extract via rayon
+│   └── mod.rs                Pipeline orchestration: parallel parse + extract per-file (symbols + imports + references)
 │
 ├── graph/
-│   ├── mod.rs                DiGraph construction, node/edge types
+│   ├── mod.rs                DiGraph construction, node/edge types, re-exports
 │   ├── node.rs               NodeData enum (File / Symbol)
-│   ├── edge.rs               EdgeKind enum (Ownership / Import / Reference)
-│   ├── builder.rs            GraphBuilder, EdgeNormalizer
-│   └── scc.rs                Tarjan SCC + DeployabilityHint
+│   ├── edge.rs               EdgeKind enum (Ownership / Import / Reference) with confidence
+│   ├── builder.rs            GraphBuilder, EdgeNormalizer, import_adjacency
+│   ├── scc.rs                Tarjan SCC + DeployabilityHint
+│   └── resolver.rs           FlattenedScopeCache + resolve_all_references (RFC 0009)
 │
 ├── output/
 │   ├── mod.rs                OutputFormat enum (Json / Yaml) with serialize dispatch

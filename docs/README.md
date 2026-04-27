@@ -30,6 +30,8 @@ The structure is intentionally traceable: proposal → specs → architecture �
 - `rfcs/0005-output-contract-policy.md`
 - `rfcs/0006-type-inference-scope.md`
 - `rfcs/0007-dgraph-integration-scope.md`
+- `rfcs/0008-graph-module.md`
+- `rfcs/0009-cross-file-dependency-mapping.md`
 
 ## Scope policy
 
