@@ -9,6 +9,31 @@ pub use output::{ClassEntry, FuncEntry, InspectOutput, ObjectEntry};
 use crate::language::LangId;
 use serde::Serialize;
 
+#[derive(Debug, Clone, Serialize)]
+pub struct UnresolvedImport {
+    pub namespace: String,
+    pub alias: Option<String>,
+    pub symbol: Option<String>,
+    pub star: bool,
+    pub range: SourceRange,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UnresolvedReference {
+    pub name: String,
+    pub range: SourceRange,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FileExtraction {
+    pub path: PathBuf,
+    pub lang: LangId,
+    pub symbols: Vec<Symbol>,
+    pub imports: Vec<UnresolvedImport>,
+    pub references: Vec<UnresolvedReference>,
+    pub diagnostics: Vec<crate::error::Diagnostic>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct LineColumn {
     pub line: usize,
