@@ -56,32 +56,30 @@ static GO_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
     .expect("Failed to parse Go query")
 });
 
-static GO_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
-    tree_sitter::Query::new(
-        &tree_sitter_go::LANGUAGE.into(),
-        r#"
+const GO_IMPORT_QUERY_STR: &str = r#"
 (import_spec
   path: (interpreted_string_literal) @import.path)
 (import_spec
   name: (_) @import.alias
   path: (interpreted_string_literal) @import.path)
-"#,
-    )
-    .expect("Failed to parse Go import query")
+"#;
+
+static GO_IMPORT_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(&tree_sitter_go::LANGUAGE.into(), GO_IMPORT_QUERY_STR)
+        .expect("Failed to parse Go import query")
 });
 
-static GO_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
-    tree_sitter::Query::new(
-        &tree_sitter_go::LANGUAGE.into(),
-        r#"
+const GO_REFERENCE_QUERY_STR: &str = r#"
 (call_expression
   function: (identifier) @reference.name)
 (call_expression
   function: (selector_expression
     field: (field_identifier) @reference.name))
-"#,
-    )
-    .expect("Failed to parse Go reference query")
+"#;
+
+static GO_REFERENCE_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(&tree_sitter_go::LANGUAGE.into(), GO_REFERENCE_QUERY_STR)
+        .expect("Failed to parse Go reference query")
 });
 
 fn go_query() -> &'static tree_sitter::Query {
@@ -96,12 +94,25 @@ fn go_reference_query() -> &'static tree_sitter::Query {
     &GO_REFERENCE_QUERY
 }
 
+static GO_IMPORT_REF_QUERY: Lazy<tree_sitter::Query> = Lazy::new(|| {
+    tree_sitter::Query::new(
+        &tree_sitter_go::LANGUAGE.into(),
+        &format!("{}\n{}", GO_IMPORT_QUERY_STR, GO_REFERENCE_QUERY_STR),
+    )
+    .expect("Failed to parse Go combined import+ref query")
+});
+
+fn go_import_ref_query() -> &'static tree_sitter::Query {
+    &GO_IMPORT_REF_QUERY
+}
+
 pub const GO_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["go"],
     grammar_fn: || tree_sitter_go::LANGUAGE.into(),
     query_fn: go_query,
     import_query_fn: go_import_query,
     reference_query_fn: go_reference_query,
+    import_ref_query_fn: go_import_ref_query,
     class_like_parents: &[],
     ancestor_visibility_rules: &[],
 };
