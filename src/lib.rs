@@ -11,7 +11,9 @@ pub mod parser;
 pub use error::{Diagnostic, Error, Severity};
 pub use input::detect_language;
 pub use language::{LangId, LanguageSpec};
-pub use model::{Symbol, SymbolId, SymbolKind, Visibility};
+pub use model::{
+    FileExtraction, Symbol, SymbolId, SymbolKind, UnresolvedImport, UnresolvedReference, Visibility,
+};
 
 // Graph module re-exports
 pub use graph::{
