@@ -71,7 +71,7 @@ fn bench_graph_construction_linear(c: &mut Criterion) {
                 for i in 0..size {
                     let path = format!("src/file_{}.rs", i);
                     let symbol = create_test_symbol(i as u32, &format!("func_{}", i), &path);
-                    builder.add_symbol(&symbol);
+                    builder.add_symbol(&symbol).unwrap();
                 }
 
                 black_box(builder.build());
@@ -335,7 +335,7 @@ fn bench_node_lookup(c: &mut Criterion) {
 
             for i in 0..size {
                 let symbol = create_test_symbol(i as u32, &format!("func_{}", i), "main.rs");
-                builder.add_symbol(&symbol);
+                builder.add_symbol(&symbol).unwrap();
                 symbol_ids.push(SymbolId(i as u32));
             }
 
@@ -389,7 +389,7 @@ fn bench_full_pipeline_small(c: &mut Criterion) {
                         .flat_map(|f| &f.symbols)
                         .collect::<Vec<_>>(),
                 ) {
-                    builder.add_symbol(symbol);
+                    builder.add_symbol(symbol).unwrap();
                 }
 
                 // Build and analyze
@@ -427,7 +427,7 @@ fn bench_ownership_graph_only(c: &mut Criterion) {
                         &format!("func_{}", i),
                         &format!("src/module_{}.rs", file_idx),
                     );
-                    builder.add_symbol(&symbol);
+                    builder.add_symbol(&symbol).unwrap();
                 }
 
                 let graph = builder.build();

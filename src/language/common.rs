@@ -225,16 +225,22 @@ pub(crate) fn extract_imports_with_spec<'a>(
                 let rng = source_range_from_node(&capture.node);
                 namespace = Some((rng.byte_start, rng.byte_end));
                 node = Some(capture.node);
-            } else if alias_idx.is_some() && idx == alias_idx.unwrap() {
+            } else if let Some(alias_idx) = alias_idx
+                && idx == alias_idx
+            {
                 let rng = source_range_from_node(&capture.node);
                 alias = Some((rng.byte_start, rng.byte_end));
-            } else if symbol_idx.is_some() && idx == symbol_idx.unwrap() {
+            } else if let Some(symbol_idx) = symbol_idx
+                && idx == symbol_idx
+            {
                 let rng = source_range_from_node(&capture.node);
                 symbol = Some((rng.byte_start, rng.byte_end));
                 if node.is_none() {
                     node = Some(capture.node);
                 }
-            } else if star_idx.is_some() && idx == star_idx.unwrap() {
+            } else if let Some(star_idx) = star_idx
+                && idx == star_idx
+            {
                 star = true;
             }
         }
@@ -376,16 +382,22 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
                 let rng = source_range_from_node(&capture.node);
                 namespace = Some((rng.byte_start, rng.byte_end));
                 node = Some(capture.node);
-            } else if alias_idx.is_some() && idx == alias_idx.unwrap() {
+            } else if let Some(alias_idx) = alias_idx
+                && idx == alias_idx
+            {
                 let rng = source_range_from_node(&capture.node);
                 alias = Some((rng.byte_start, rng.byte_end));
-            } else if symbol_idx.is_some() && idx == symbol_idx.unwrap() {
+            } else if let Some(symbol_idx) = symbol_idx
+                && idx == symbol_idx
+            {
                 let rng = source_range_from_node(&capture.node);
                 symbol = Some((rng.byte_start, rng.byte_end));
                 if node.is_none() {
                     node = Some(capture.node);
                 }
-            } else if star_idx.is_some() && idx == star_idx.unwrap() {
+            } else if let Some(star_idx) = star_idx
+                && idx == star_idx
+            {
                 star = true;
             } else if idx == ref_idx {
                 ref_ranges.push(source_range_from_node(&capture.node));

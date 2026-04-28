@@ -163,7 +163,7 @@ fn cross_file_reference_resolution() {
     // Add symbols
     for file in &result.files {
         for sym in &file.symbols {
-            builder.add_symbol(sym);
+            builder.add_symbol(sym).unwrap();
         }
     }
 
@@ -281,7 +281,7 @@ fn cross_file_reference_rust_crate() {
 
     for file in &result.files {
         for sym in &file.symbols {
-            builder.add_symbol(sym);
+            builder.add_symbol(sym).unwrap();
         }
     }
 
@@ -364,7 +364,7 @@ fn cross_file_reference_typescript() {
 
     for file in &result.files {
         for sym in &file.symbols {
-            builder.add_symbol(sym);
+            builder.add_symbol(sym).unwrap();
         }
     }
 
@@ -479,7 +479,7 @@ fn edge_circular_does_not_infinite_loop() {
 
     for file in &result.files {
         for sym in &file.symbols {
-            builder.add_symbol(sym);
+            builder.add_symbol(sym).unwrap();
         }
     }
 
@@ -542,7 +542,7 @@ fn edge_transitive_resolution() {
 
     for file in &result.files {
         for sym in &file.symbols {
-            builder.add_symbol(sym);
+            builder.add_symbol(sym).unwrap();
         }
     }
 
@@ -661,7 +661,7 @@ fn edge_selfref_does_not_create_self_loop() {
 
     for file in &result.files {
         for sym in &file.symbols {
-            builder.add_symbol(sym);
+            builder.add_symbol(sym).unwrap();
         }
     }
 

@@ -67,7 +67,7 @@ fn main() -> anyhow::Result<()> {
             // Pass 2: add symbols and import edges
             for file in &result.files {
                 for symbol in &file.symbols {
-                    builder.add_symbol(symbol);
+                    builder.add_symbol(symbol)?;
                 }
             }
 

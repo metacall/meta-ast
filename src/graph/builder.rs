@@ -102,22 +102,22 @@ impl GraphBuilder {
     /// FileId parameter. The symbol's file_id must match a previously added file.
     ///
     /// Returns the NodeIndex for the symbol node.
-    pub fn add_symbol(&mut self, symbol: &Symbol) -> NodeIndex {
+    pub fn add_symbol(&mut self, symbol: &Symbol) -> Result<NodeIndex, crate::Error> {
         // Check if symbol already exists
         if let Some(&existing) = self.symbol_to_index.get(&symbol.id) {
-            return existing;
+            return Ok(existing);
         }
 
         // Look up the file by path
         let file_id = *self
             .path_to_file
             .get(&symbol.file_path)
-            .expect("file must be added before its symbols");
+            .ok_or_else(|| crate::Error::Graph("file must be added before its symbols".into()))?;
 
         let file_idx = *self
             .file_to_index
             .get(&file_id)
-            .expect("file index must exist");
+            .ok_or_else(|| crate::Error::Graph("file index must exist".into()))?;
 
         let node = SymbolNode {
             id: symbol.id,
@@ -134,7 +134,7 @@ impl GraphBuilder {
         // Add ownership edge: file -> symbol
         self.add_edge_internal(file_idx, sym_idx, EdgeKind::Ownership);
 
-        sym_idx
+        Ok(sym_idx)
     }
 
     /// Adds an import edge from one file to another.
@@ -290,7 +290,7 @@ mod tests {
         let file_id = builder.add_file(path.clone(), LangId::Python);
         let symbol = test_symbol(1, "hello", file_id.0);
 
-        let _sym_idx = builder.add_symbol(&symbol);
+        let _sym_idx = builder.add_symbol(&symbol).unwrap();
 
         assert_eq!(builder.node_count(), 2); // file + symbol
         assert_eq!(builder.edge_count(), 1); // ownership edge
@@ -341,7 +341,7 @@ mod tests {
         let file_id = builder.add_file(path, LangId::Python);
         let symbol = test_symbol(42, "func", file_id.0);
 
-        builder.add_symbol(&symbol);
+        builder.add_symbol(&symbol).unwrap();
 
         // Verify mappings exist
         assert!(builder.file_to_index.contains_key(&file_id));
