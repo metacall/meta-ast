@@ -33,9 +33,9 @@ fn get_or_init_parser(
             .map_err(|e| Error::Config(format!("failed to set language: {e}")))?;
         parsers[idx] = Some(parser);
     }
-    Ok(parsers[idx]
+    parsers[idx]
         .as_mut()
-        .expect("parser slot was just initialized"))
+        .ok_or_else(|| Error::Config("parser slot was not initialized".into()))
 }
 
 pub fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tree, Error> {

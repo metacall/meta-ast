@@ -33,6 +33,9 @@ pub enum Error {
 
     #[error("config: {0}")]
     Config(String),
+
+    #[error("graph error: {0}")]
+    Graph(String),
 }
 
 #[cfg(test)]
