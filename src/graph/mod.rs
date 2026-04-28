@@ -191,7 +191,7 @@ mod tests {
         let mut builder = GraphBuilder::new(SnapshotId(1));
         let file_id = builder.add_file(PathBuf::from("test.rs"), LangId::Rust);
         let symbol = test_symbol(1, "main");
-        let _sym_idx = builder.add_symbol(&symbol);
+        let _sym_idx = builder.add_symbol(&symbol).unwrap();
 
         let graph = builder.build();
 
@@ -228,8 +228,8 @@ mod tests {
         let _file_id = builder.add_file(PathBuf::from("test.rs"), LangId::Rust);
         let sym1 = test_symbol(1, "func_a");
         let sym2 = test_symbol(2, "func_b");
-        builder.add_symbol(&sym1);
-        builder.add_symbol(&sym2);
+        builder.add_symbol(&sym1).unwrap();
+        builder.add_symbol(&sym2).unwrap();
 
         let graph = builder.build();
         let symbols: Vec<_> = graph.symbols().collect();
