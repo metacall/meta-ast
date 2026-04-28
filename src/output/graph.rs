@@ -328,7 +328,7 @@ mod tests {
         let mut builder = GraphBuilder::new(SnapshotId(1));
         let _file_id = builder.add_file(PathBuf::from("src/main.rs"), LangId::Rust);
         let symbol = sample_symbol(1, "main", SymbolKind::Function, "src/main.rs");
-        let _sym_idx = builder.add_symbol(&symbol);
+        let _sym_idx = builder.add_symbol(&symbol).unwrap();
 
         let graph = builder.build();
         let scc_result = SccAnalysis::analyze(&graph.graph);
@@ -345,7 +345,7 @@ mod tests {
         let mut builder = GraphBuilder::new(SnapshotId(1));
         let _file_id = builder.add_file(PathBuf::from("src/lib.rs"), LangId::Rust);
         let symbol = sample_symbol(1, "lib_fn", SymbolKind::Function, "src/lib.rs");
-        let _sym_idx = builder.add_symbol(&symbol);
+        let _sym_idx = builder.add_symbol(&symbol).unwrap();
 
         let graph = builder.build();
         let scc_result = SccAnalysis::analyze(&graph.graph);
@@ -392,8 +392,8 @@ mod tests {
         let _file_id = builder.add_file(PathBuf::from("src/a.rs"), LangId::Rust);
         let sym1 = sample_symbol(1, "func_a", SymbolKind::Function, "src/a.rs");
         let sym2 = sample_symbol(2, "func_b", SymbolKind::Function, "src/a.rs");
-        builder.add_symbol(&sym1);
-        builder.add_symbol(&sym2);
+        builder.add_symbol(&sym1).unwrap();
+        builder.add_symbol(&sym2).unwrap();
 
         // Create a cycle via reference edges between the symbols
         builder.add_reference(sym1.id, sym2.id);
