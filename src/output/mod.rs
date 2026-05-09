@@ -16,7 +16,7 @@ impl OutputFormat {
     pub fn serialize<T: Serialize>(&self, value: &T) -> anyhow::Result<String> {
         match self {
             Self::Json => Ok(serde_json::to_string_pretty(value)?),
-            Self::Yaml => Ok(serde_yaml::to_string(value)?),
+            Self::Yaml => Ok(yaml_serde::to_string(value)?),
         }
     }
 }
