@@ -37,13 +37,8 @@ const C_IMPORT_QUERY_STR: &str = r#"
 (preproc_include
   path: (string_literal) @import.path)
 (preproc_include
-  path: (system_lib_string) @import.path)
+    path: (system_lib_string) @import.path)
 "#;
-
-static C_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(&tree_sitter_c::LANGUAGE.into(), C_IMPORT_QUERY_STR)
-        .expect("Failed to parse C import query")
-});
 
 const C_REFERENCE_QUERY_STR: &str = r#"
 (call_expression
@@ -53,21 +48,8 @@ const C_REFERENCE_QUERY_STR: &str = r#"
     field: (field_identifier) @reference.name))
 "#;
 
-static C_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(&tree_sitter_c::LANGUAGE.into(), C_REFERENCE_QUERY_STR)
-        .expect("Failed to parse C reference query")
-});
-
 fn c_query() -> &'static tree_sitter::Query {
     &C_QUERY
-}
-
-fn c_import_query() -> &'static tree_sitter::Query {
-    &C_IMPORT_QUERY
-}
-
-fn c_reference_query() -> &'static tree_sitter::Query {
-    &C_REFERENCE_QUERY
 }
 
 static C_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
@@ -86,8 +68,6 @@ pub const C_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["c"],
     grammar_fn: || tree_sitter_c::LANGUAGE.into(),
     query_fn: c_query,
-    import_query_fn: c_import_query,
-    reference_query_fn: c_reference_query,
     import_ref_query_fn: c_import_ref_query,
     class_like_parents: &[],
     ancestor_visibility_rules: &[],

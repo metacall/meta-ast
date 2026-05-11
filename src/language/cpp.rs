@@ -42,11 +42,6 @@ const CPP_IMPORT_QUERY_STR: &str = r#"
   path: (system_lib_string) @import.path)
 "#;
 
-static CPP_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(&tree_sitter_cpp::LANGUAGE.into(), CPP_IMPORT_QUERY_STR)
-        .expect("Failed to parse C++ import query")
-});
-
 const CPP_REFERENCE_QUERY_STR: &str = r#"
 (call_expression
   function: (identifier) @reference.name)
@@ -54,18 +49,6 @@ const CPP_REFERENCE_QUERY_STR: &str = r#"
   function: (field_expression
     field: (field_identifier) @reference.name))
 "#;
-
-static CPP_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(&tree_sitter_cpp::LANGUAGE.into(), CPP_REFERENCE_QUERY_STR)
-        .expect("Failed to parse C++ reference query")
-});
-
-fn cpp_import_query() -> &'static tree_sitter::Query {
-    &CPP_IMPORT_QUERY
-}
-fn cpp_reference_query() -> &'static tree_sitter::Query {
-    &CPP_REFERENCE_QUERY
-}
 
 static CPP_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
@@ -83,8 +66,6 @@ pub const CPP_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["cc", "cpp", "cxx"],
     grammar_fn: || tree_sitter_cpp::LANGUAGE.into(),
     query_fn: cpp_query,
-    import_query_fn: cpp_import_query,
-    reference_query_fn: cpp_reference_query,
     import_ref_query_fn: cpp_import_ref_query,
     class_like_parents: &["class_specifier"],
     ancestor_visibility_rules: &[],

@@ -58,14 +58,6 @@ const PYTHON_IMPORT_QUERY_STR: &str = r#"
   (wildcard_import) @import.star)
 "#;
 
-static PYTHON_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
-        &tree_sitter_python::LANGUAGE.into(),
-        PYTHON_IMPORT_QUERY_STR,
-    )
-    .expect("Failed to parse Python import query")
-});
-
 const PYTHON_REFERENCE_QUERY_STR: &str = r#"
 (call
   function: (identifier) @reference.name)
@@ -73,21 +65,6 @@ const PYTHON_REFERENCE_QUERY_STR: &str = r#"
   function: (attribute
     attribute: (identifier) @reference.name))
 "#;
-
-static PYTHON_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
-        &tree_sitter_python::LANGUAGE.into(),
-        PYTHON_REFERENCE_QUERY_STR,
-    )
-    .expect("Failed to parse Python reference query")
-});
-
-fn python_import_query() -> &'static tree_sitter::Query {
-    &PYTHON_IMPORT_QUERY
-}
-fn python_reference_query() -> &'static tree_sitter::Query {
-    &PYTHON_REFERENCE_QUERY
-}
 
 static PYTHON_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
@@ -108,8 +85,6 @@ pub const PYTHON_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["py", "pyi"],
     grammar_fn: || tree_sitter_python::LANGUAGE.into(),
     query_fn: python_query,
-    import_query_fn: python_import_query,
-    reference_query_fn: python_reference_query,
     import_ref_query_fn: python_import_ref_query,
     class_like_parents: &["class_definition"],
     ancestor_visibility_rules: &[],
