@@ -59,13 +59,8 @@ static GO_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
 const GO_IMPORT_QUERY_STR: &str = r#"
 (import_spec
   name: (_)? @import.alias
-  path: (interpreted_string_literal) @import.path)
+  path:     (interpreted_string_literal) @import.path)
 "#;
-
-static GO_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(&tree_sitter_go::LANGUAGE.into(), GO_IMPORT_QUERY_STR)
-        .expect("Failed to parse Go import query")
-});
 
 const GO_REFERENCE_QUERY_STR: &str = r#"
 (call_expression
@@ -75,21 +70,8 @@ const GO_REFERENCE_QUERY_STR: &str = r#"
     field: (field_identifier) @reference.name))
 "#;
 
-static GO_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(&tree_sitter_go::LANGUAGE.into(), GO_REFERENCE_QUERY_STR)
-        .expect("Failed to parse Go reference query")
-});
-
 fn go_query() -> &'static tree_sitter::Query {
     &GO_QUERY
-}
-
-fn go_import_query() -> &'static tree_sitter::Query {
-    &GO_IMPORT_QUERY
-}
-
-fn go_reference_query() -> &'static tree_sitter::Query {
-    &GO_REFERENCE_QUERY
 }
 
 static GO_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
@@ -108,8 +90,6 @@ pub const GO_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["go"],
     grammar_fn: || tree_sitter_go::LANGUAGE.into(),
     query_fn: go_query,
-    import_query_fn: go_import_query,
-    reference_query_fn: go_reference_query,
     import_ref_query_fn: go_import_ref_query,
     class_like_parents: &[],
     ancestor_visibility_rules: &[],

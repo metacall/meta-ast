@@ -1,7 +1,6 @@
 //! Shared extraction engine for all language packs.
 //!
-//! Provides `extract_with_spec` (symbols), `extract_imports_with_spec`,
-//! `extract_references_with_spec`, and the combined
+//! Provides `extract_with_spec` (symbols) and the combined
 //! `extract_imports_and_references_with_spec` that runs a single
 //! tree-sitter query traversal for both imports and references.
 
@@ -185,137 +184,8 @@ pub(crate) fn extract_with_spec<'a>(
     result
 }
 
-pub(crate) fn extract_imports_with_spec<'a>(
-    tree: &'a tree_sitter::Tree,
-    source: &'a [u8],
-    spec: &LanguageSpec,
-    _file_path: &std::path::Path,
-) -> Vec<crate::model::UnresolvedImport> {
-    let query = (spec.import_query_fn)();
-    let path_idx = query
-        .capture_index_for_name("import.path")
-        .expect("import.path capture must exist");
-    let alias_idx = query.capture_index_for_name("import.alias");
-    let symbol_idx = query.capture_index_for_name("import.symbol");
-    let star_idx = query.capture_index_for_name("import.star");
-
-    let mut query_cursor = tree_sitter::QueryCursor::new();
-    let mut matches = query_cursor.matches(query, tree.root_node(), source);
-
-    // Collect raw captures first - defer String allocation out of hot loop.
-    struct RawImport {
-        range: SourceRange,
-        namespace: Option<(usize, usize)>,
-        alias: Option<(usize, usize)>,
-        symbol: Option<(usize, usize)>,
-        star: bool,
-    }
-    let mut raw: Vec<RawImport> = Vec::new();
-
-    while let Some(m) = matches.next() {
-        let mut namespace: Option<(usize, usize)> = None;
-        let mut alias: Option<(usize, usize)> = None;
-        let mut symbol: Option<(usize, usize)> = None;
-        let mut star = false;
-        let mut node: Option<tree_sitter::Node<'a>> = None;
-
-        for capture in m.captures {
-            let idx = capture.index;
-            if idx == path_idx {
-                let rng = source_range_from_node(&capture.node);
-                namespace = Some((rng.byte_start, rng.byte_end));
-                node = Some(capture.node);
-            } else if let Some(alias_idx) = alias_idx
-                && idx == alias_idx
-            {
-                let rng = source_range_from_node(&capture.node);
-                alias = Some((rng.byte_start, rng.byte_end));
-            } else if let Some(symbol_idx) = symbol_idx
-                && idx == symbol_idx
-            {
-                let rng = source_range_from_node(&capture.node);
-                symbol = Some((rng.byte_start, rng.byte_end));
-                if node.is_none() {
-                    node = Some(capture.node);
-                }
-            } else if let Some(star_idx) = star_idx
-                && idx == star_idx
-            {
-                star = true;
-            }
-        }
-
-        if let Some(ns) = namespace {
-            let range = source_range_from_node(&node.unwrap_or_else(|| tree.root_node()));
-            raw.push(RawImport {
-                range,
-                namespace: Some(ns),
-                alias,
-                symbol,
-                star,
-            });
-        }
-    }
-
-    // Allocate Strings outside the hot loop, in a single pass.
-    let slice = |(s, e): (usize, usize)| -> String {
-        let s = &source[s..e];
-        std::str::from_utf8(s).unwrap_or("").to_string()
-    };
-    let mut imports: Vec<crate::model::UnresolvedImport> = Vec::with_capacity(raw.len());
-    for r in raw {
-        imports.push(crate::model::UnresolvedImport {
-            namespace: slice(r.namespace.expect("namespace is required")),
-            alias: r.alias.map(slice),
-            symbol: r.symbol.map(slice),
-            star: r.star,
-            range: r.range,
-        });
-    }
-
-    imports.sort_by_key(|i| i.range.byte_start);
-    imports
-}
-
 // TODO(MVP): Handle multi-line import statements where the statement spans
 //multiple lines (PEP 328, JS template literals).
-
-pub(crate) fn extract_references_with_spec<'a>(
-    tree: &'a tree_sitter::Tree,
-    source: &'a [u8],
-    spec: &LanguageSpec,
-) -> Vec<crate::model::UnresolvedReference> {
-    let query = (spec.reference_query_fn)();
-    let ref_idx = query
-        .capture_index_for_name("reference.name")
-        .expect("reference.name capture must exist");
-
-    let mut query_cursor = tree_sitter::QueryCursor::new();
-    let mut matches = query_cursor.matches(query, tree.root_node(), source);
-
-    // Collect byte ranges first - no String allocation in the hot loop.
-    let mut ranges: Vec<SourceRange> = Vec::new();
-
-    while let Some(m) = matches.next() {
-        for capture in m.captures {
-            if capture.index == ref_idx {
-                ranges.push(source_range_from_node(&capture.node));
-            }
-        }
-    }
-
-    // Allocate Strings once, in a linear pass after the cursor is done.
-    let mut references: Vec<crate::model::UnresolvedReference> = Vec::with_capacity(ranges.len());
-    for range in ranges {
-        let name = std::str::from_utf8(&source[range.byte_start..range.byte_end])
-            .unwrap_or("")
-            .to_string();
-        references.push(crate::model::UnresolvedReference { name, range });
-    }
-
-    references.sort_by_key(|r| r.range.byte_start);
-    references
-}
 
 fn resolve_import_path_from_symbol_node<'a>(
     node: tree_sitter::Node<'a>,

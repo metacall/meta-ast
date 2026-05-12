@@ -70,14 +70,6 @@ const JS_IMPORT_QUERY_STR: &str = r#"
       (identifier) @import.symbol)))
 "#;
 
-static JS_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
-        &tree_sitter_javascript::LANGUAGE.into(),
-        JS_IMPORT_QUERY_STR,
-    )
-    .expect("Failed to parse JavaScript import query")
-});
-
 const JS_REFERENCE_QUERY_STR: &str = r#"
 (call_expression
   function: (identifier) @reference.name)
@@ -85,21 +77,6 @@ const JS_REFERENCE_QUERY_STR: &str = r#"
   function: (member_expression
     property: (property_identifier) @reference.name))
 "#;
-
-static JS_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
-        &tree_sitter_javascript::LANGUAGE.into(),
-        JS_REFERENCE_QUERY_STR,
-    )
-    .expect("Failed to parse JavaScript reference query")
-});
-
-fn js_import_query() -> &'static tree_sitter::Query {
-    &JS_IMPORT_QUERY
-}
-fn js_reference_query() -> &'static tree_sitter::Query {
-    &JS_REFERENCE_QUERY
-}
 
 static JS_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
@@ -117,8 +94,6 @@ pub const JS_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["js", "mjs", "cjs"],
     grammar_fn: || tree_sitter_javascript::LANGUAGE.into(),
     query_fn: js_query,
-    import_query_fn: js_import_query,
-    reference_query_fn: js_reference_query,
     import_ref_query_fn: js_import_ref_query,
     class_like_parents: &["class_declaration", "class"],
     ancestor_visibility_rules: &[("export_statement", Visibility::Public)],

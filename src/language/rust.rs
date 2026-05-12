@@ -66,11 +66,6 @@ const RUST_IMPORT_QUERY_STR: &str = r#"
   alias: (identifier) @import.alias)
 "#;
 
-static RUST_IMPORT_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(&tree_sitter_rust::LANGUAGE.into(), RUST_IMPORT_QUERY_STR)
-        .expect("Failed to parse Rust import query")
-});
-
 const RUST_REFERENCE_QUERY_STR: &str = r#"
 (call_expression
   function: (identifier) @reference.name)
@@ -83,18 +78,6 @@ const RUST_REFERENCE_QUERY_STR: &str = r#"
 (macro_invocation
   macro: (identifier) @reference.name)
 "#;
-
-static RUST_REFERENCE_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(&tree_sitter_rust::LANGUAGE.into(), RUST_REFERENCE_QUERY_STR)
-        .expect("Failed to parse Rust reference query")
-});
-
-fn rust_import_query() -> &'static tree_sitter::Query {
-    &RUST_IMPORT_QUERY
-}
-fn rust_reference_query() -> &'static tree_sitter::Query {
-    &RUST_REFERENCE_QUERY
-}
 
 static RUST_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     tree_sitter::Query::new(
@@ -112,8 +95,6 @@ pub const RUST_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["rs"],
     grammar_fn: || tree_sitter_rust::LANGUAGE.into(),
     query_fn: rust_query,
-    import_query_fn: rust_import_query,
-    reference_query_fn: rust_reference_query,
     import_ref_query_fn: rust_import_ref_query,
     class_like_parents: &["impl_item"],
     ancestor_visibility_rules: &[],
