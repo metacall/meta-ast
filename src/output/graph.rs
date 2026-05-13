@@ -140,6 +140,7 @@ impl GraphOutput {
             match node_data {
                 NodeData::File(_) => file_count += 1,
                 NodeData::Symbol(_) => symbol_count += 1,
+                NodeData::External(_) => {}
             }
         }
 
@@ -168,6 +169,15 @@ impl GraphOutput {
         match node_data {
             NodeData::File(file_node) => Self::serialize_file_node(idx, file_node),
             NodeData::Symbol(symbol_node) => Self::serialize_symbol_node(idx, symbol_node),
+            NodeData::External(external_node) => SerializedNode {
+                id: idx.index(),
+                kind: "external".to_string(),
+                path: Some(external_node.raw_path.clone()),
+                language: Some(external_node.language.as_ref().to_string()),
+                name: None,
+                symbol_kind: None,
+                visibility: None,
+            },
         }
     }
 

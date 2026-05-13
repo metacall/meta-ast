@@ -16,6 +16,7 @@ use crate::model::{FileId, SnapshotId, SourceRange, SymbolId, SymbolKind, Visibi
 pub enum NodeData {
     File(FileNode),
     Symbol(SymbolNode),
+    External(ExternalNode),
 }
 
 impl NodeData {
@@ -24,6 +25,7 @@ impl NodeData {
         match self {
             NodeData::File(_) => "file",
             NodeData::Symbol(_) => "symbol",
+            NodeData::External(_) => "external",
         }
     }
 
@@ -40,6 +42,15 @@ impl NodeData {
     pub fn as_symbol(&self) -> Option<&SymbolNode> {
         if let NodeData::Symbol(s) = self {
             Some(s)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the ExternalNode if this is an ExternalNode.
+    pub fn as_external(&self) -> Option<&ExternalNode> {
+        if let NodeData::External(e) = self {
+            Some(e)
         } else {
             None
         }
@@ -67,6 +78,15 @@ pub struct FileNode {
     pub language: LangId,
     /// Snapshot identifier for versioning support.
     pub snapshot_id: SnapshotId,
+}
+
+/// Represents an external dependency (not in the project).
+#[derive(Debug, Clone)]
+pub struct ExternalNode {
+    /// Raw import path string (e.g., "react", "std::collections::HashMap")
+    pub raw_path: String,
+    /// Language of the importing file
+    pub language: LangId,
 }
 
 /// Represents an extracted symbol in the dependency graph.

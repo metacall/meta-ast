@@ -40,7 +40,7 @@ use std::collections::HashMap;
 
 pub use builder::GraphBuilder;
 pub use edge::{EdgeData, EdgeKind};
-pub use node::{FileNode, NodeData, SymbolNode};
+pub use node::{ExternalNode, FileNode, NodeData, SymbolNode};
 pub use scc::{DeployabilityHint, Scc, SccAnalysis};
 
 use crate::model::{FileId, SnapshotId, SymbolId};
@@ -58,6 +58,9 @@ pub struct CodeGraph {
     /// Map from SymbolId to graph node index for O(1) lookup.
     pub(crate) symbol_to_index: HashMap<SymbolId, NodeIndex>,
 
+    /// Map from external raw path to graph node index for O(1) lookup.
+    pub(crate) external_index: HashMap<String, NodeIndex>,
+
     /// Snapshot identifier for this graph as discussed before.
     pub snapshot_id: SnapshotId,
 }
@@ -69,6 +72,7 @@ impl CodeGraph {
             graph: DiGraph::new(),
             file_to_index: HashMap::new(),
             symbol_to_index: HashMap::new(),
+            external_index: HashMap::new(),
             snapshot_id,
         }
     }
@@ -93,6 +97,9 @@ impl CodeGraph {
     }
     pub fn symbol_count(&self) -> usize {
         self.symbol_to_index.len()
+    }
+    pub fn external_count(&self) -> usize {
+        self.external_index.len()
     }
     pub fn node_count(&self) -> usize {
         self.graph.node_count()
