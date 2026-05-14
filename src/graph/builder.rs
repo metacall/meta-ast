@@ -15,7 +15,7 @@ use petgraph::visit::EdgeRef;
 
 use crate::graph::CodeGraph;
 use crate::graph::edge::{EdgeData, EdgeKind};
-use crate::graph::node::{FileNode, NodeData, SymbolNode};
+use crate::graph::node::{ExternalNode, FileNode, NodeData, SymbolNode};
 use crate::language::LangId;
 use crate::model::{FileId, IdGenerator, SnapshotId, Symbol, SymbolId};
 
@@ -42,6 +42,9 @@ pub struct GraphBuilder {
 
     /// Counter for edge deduplication
     edge_normalizer: EdgeNormalizer,
+
+    /// Map from external raw path to graph node index
+    external_index: HashMap<String, NodeIndex>,
 }
 
 /// Tracks seen edges to prevent duplicates.
@@ -67,6 +70,7 @@ impl GraphBuilder {
             file_id_gen: IdGenerator::new(),
             snapshot_id,
             edge_normalizer: EdgeNormalizer::default(),
+            external_index: HashMap::new(),
         }
     }
 
@@ -139,21 +143,44 @@ impl GraphBuilder {
 
     /// Adds an import edge from one file to another.
     ///
-    /// Both source and target files must exist in the builder.
-    /// If the target file doesn't exist, this is a no-op (external dependency).
+    /// If the target file exists in the project, creates an import edge.
+    /// If the target is external (not in the project), creates an ExternalNode
+    /// placeholder and an import edge to it.
     pub fn add_import(&mut self, from: FileId, to: PathBuf) {
         let Some(&from_idx) = self.file_to_index.get(&from) else {
             return; // Source not in graph
         };
 
         // Resolve target path to file ID if it exists in our graph
-        let Some(&to_id) = self.path_to_file.get(&to) else {
-            // Target not in project - external dependency, skip for now
+        if let Some(&to_id) = self.path_to_file.get(&to) {
+            if let Some(&to_idx) = self.file_to_index.get(&to_id) {
+                self.add_edge_internal(from_idx, to_idx, EdgeKind::Import);
+            }
             return;
-        };
+        }
 
-        let Some(&to_idx) = self.file_to_index.get(&to_id) else {
-            return; // Should not happen if path_to_file is consistent
+        // External dependency: create or reuse external node
+        let raw_path = to.to_string_lossy().to_string();
+        let to_idx = if let Some(&idx) = self.external_index.get(&raw_path) {
+            idx
+        } else {
+            // Determine language from source file
+            let language = self
+                .path_to_file
+                .iter()
+                .find(|(_, id)| **id == from)
+                .map(|(p, _)| {
+                    crate::input::detect_language(p).unwrap_or(crate::language::LangId::Python)
+                })
+                .unwrap_or(crate::language::LangId::Python);
+
+            let node = ExternalNode {
+                raw_path: raw_path.clone(),
+                language,
+            };
+            let idx = self.graph.add_node(NodeData::External(node));
+            self.external_index.insert(raw_path, idx);
+            idx
         };
 
         self.add_edge_internal(from_idx, to_idx, EdgeKind::Import);
@@ -192,9 +219,6 @@ impl GraphBuilder {
         self.path_to_file.get(path).copied()
     }
 
-    // TODO(MVP): Handle ExternalImportFlag - some imports should add a
-    //             placeholder external node instead of being silently dropped.
-
     /// Builds and returns an adjacency map from FileId to the FileIds it imports.
     ///
     /// Walks all Import edges in the graph to produce the relationship.
@@ -223,6 +247,7 @@ impl GraphBuilder {
             graph: self.graph,
             file_to_index: self.file_to_index,
             symbol_to_index: self.symbol_to_index,
+            external_index: self.external_index,
             snapshot_id: self.snapshot_id,
         }
     }
@@ -235,6 +260,11 @@ impl GraphBuilder {
     /// Returns the number of edges in the graph so far.
     pub fn edge_count(&self) -> usize {
         self.graph.edge_count()
+    }
+
+    /// Returns the number of external dependency nodes.
+    pub fn external_count(&self) -> usize {
+        self.external_index.len()
     }
 }
 
@@ -317,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn builder_skips_external_imports() {
+    fn builder_creates_external_node_for_unknown_import() {
         let mut builder = GraphBuilder::new(SnapshotId(1));
         let path = PathBuf::from("main.py");
 
@@ -326,11 +356,13 @@ mod tests {
         // Import of external module not in our project
         builder.add_import(file_id, PathBuf::from("external_module.py"));
 
+        // Should create an external node and import edge
         assert_eq!(
             builder.edge_count(),
-            0,
-            "external imports should not create edges"
+            1,
+            "external import should create an edge"
         );
+        assert_eq!(builder.external_count(), 1, "should have one external node");
     }
 
     #[test]
