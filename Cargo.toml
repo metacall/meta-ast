@@ -2,74 +2,62 @@
 name = "meta-ast"
 version = "0.1.0"
 edition = "2024"
-license = "Apache-2.0"
 readme = "README.md"
+license = "Apache-2.0"
 
-[features]
-default = []
-embed-cytoscape = []
+[[bench]]
+harness = false
+name = "pipeline"
+
+[[bench]]
+harness = false
+name = "graph"
 
 [dependencies]
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
-webbrowser = "1.2"
 strum = { version = "0.28", features = ["derive"] }
+webbrowser = "1.2"
 
 # Error handling
 anyhow = "1.0"
 thiserror = "2.0"
 
+# Diagnostics
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
 # Tree-Sitter Dependencies
 tree-sitter = "0.26.3"
 tree-sitter-c = "0.24.1"
 tree-sitter-cpp = "0.23.4"
-tree-sitter-python = "0.25.0"
-tree-sitter-javascript = "0.25.0"
-tree-sitter-typescript = "0.23.2"
-tree-sitter-rust = "0.24.0"
 tree-sitter-go = "0.25.0"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.0"
+tree-sitter-typescript = "0.23.2"
 
 # Graph
 petgraph = "0.8.3"
 
 # Cli
-clap = { version = "4.6", features = ["derive", "env", "color"] }
+clap = { version = "4.6", features = ["color", "derive", "env"] }
 
 # Parallelism
 rayon = "1.10"
 
 # Filesystem
-walkdir = "2.5.0"
+ignore = "0.4"
 
 [dev-dependencies]
-insta = { version = "1.47", features = ["json"] }
 criterion = { version = "0.8", features = ["html_reports"] }
+insta = { version = "1.47", features = ["json"] }
 
-[[bench]]
-name = "pipeline"
-harness = false
-
-[[bench]]
-name = "graph"
-harness = false
-
-[profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = true
-
-[profile.test]
-opt-level = 1
-debug = true
-debug-assertions = true
-overflow-checks = true
-lto = false
-incremental = true
-codegen-units = 256
+[features]
+default = []
+embed-cytoscape = []
 
 [profile.bench]
 opt-level = 3
@@ -79,3 +67,19 @@ overflow-checks = false
 lto = true
 incremental = false
 codegen-units = 1
+
+[profile.release]
+opt-level = "z"
+strip = true
+lto = true
+panic = "abort"
+codegen-units = 1
+
+[profile.test]
+opt-level = 1
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+incremental = true
+codegen-units = 256
