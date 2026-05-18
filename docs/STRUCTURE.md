@@ -390,6 +390,18 @@ Diagnostics are accumulated in a `Vec<Diagnostic>` separate from the symbol mode
 3. If > 50% of a file's nodes are errors, the file is marked as unparseable but does not abort the pipeline.
 4. Fatal errors are reserved for invalid configuration or unrecoverable I/O failures.
 
+### 6.4 Query Compilation Failure Strategy
+
+Tree-sitter queries are hardcoded constants in each language pack. If a query fails to compile, it indicates a programmer bug in the shipped query text, not a runtime input error.
+
+**Strategy**: `compile_query` uses `panic!()` rather than `std::process::abort()` or `Result` propagation.
+
+**Why not `abort()`**: `panic!()` runs destructors, is propagated by rayon, and integrates with Rust's panic infrastructure. `abort()` skips all cleanup.
+
+**Why not `Result`**: Queries are compiled inside `LazyLock<T>::new()` closures which require `FnOnce() -> T` (infallible return). Threading `Result` through `LazyLock` -> `LanguageSpec.query_fn` -> `extract_with_spec` -> `extract_single_file` would touch 6+ functions across 4 modules for a failure mode that is a hardcoded-query bug.
+
+**Mitigation**: `language::validate_queries()` eagerly initializes all 16 `LazyLock` statics at startup, ensuring any query bug panics immediately rather than after processing files.
+
 ---
 
 ## 7. Rust Language Features Used

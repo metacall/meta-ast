@@ -16,11 +16,7 @@ pub(crate) fn compile_query(
     match tree_sitter::Query::new(lang, src) {
         Ok(q) => q,
         Err(e) => {
-            eprintln!(
-                "FATAL: query compilation failed for {}: {}. Aborting.",
-                label, e
-            );
-            std::process::abort()
+            panic!("query compilation failed for {label}: {e}");
         }
     }
 }
@@ -318,7 +314,9 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
 
     let slice = |(s, e): (usize, usize)| -> String {
         let s = &source[s..e];
-        std::str::from_utf8(s).unwrap_or("").to_string()
+        std::str::from_utf8(s)
+            .unwrap_or("<invalid-utf8>")
+            .to_string()
     };
     let mut imports: Vec<crate::model::UnresolvedImport> = Vec::with_capacity(raw_imports.len());
     for r in raw_imports {
@@ -338,7 +336,7 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
         Vec::with_capacity(ref_ranges.len());
     for range in ref_ranges {
         let name = std::str::from_utf8(&source[range.byte_start..range.byte_end])
-            .unwrap_or("")
+            .unwrap_or("<invalid-utf8>")
             .to_string();
         references.push(crate::model::UnresolvedReference { name, range });
     }
