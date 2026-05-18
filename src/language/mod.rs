@@ -20,6 +20,31 @@ use tree_sitter::Query;
 
 use crate::model::Visibility;
 
+/// Configuration for extracting doc comments from source code.
+///
+/// Used for languages where doc comments are tree-sitter extras
+/// (siblings of declarations, not children) and cannot be captured
+/// inline in queries.
+#[derive(Debug, Clone)]
+pub struct DocCommentConfig {
+    /// Line comment prefixes that indicate doc comments (e.g., `["///", "//!"]` for Rust).
+    pub line_prefixes: &'static [&'static str],
+    /// Block comment opening (e.g., `Some("/**")` for doxygen/JSDoc).
+    pub block_open: Option<&'static str>,
+    /// Block comment closing (e.g., `"*/"`).
+    pub block_close: &'static str,
+    /// Whether to strip leading `*` continuation markers in block comments.
+    pub strip_continuation_marker: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefaultVisibility {
+    /// When visibility is None, treat the symbol as public (Python, C functions).
+    PublicByDefault,
+    /// When visibility is None, treat the symbol as private (Rust, JS, TS, Go, C++).
+    PrivateByDefault,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, strum::Display, strum::AsRefStr)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
@@ -72,11 +97,18 @@ pub struct LanguageSpec {
     pub extensions: &'static [&'static str],
     pub grammar_fn: fn() -> tree_sitter::Language,
     pub query_fn: fn() -> &'static Query,
-    // TODO(MVP): Add import_path_resolver: fn(&str, &Path) -> Option<PathBuf>
-    //             to LanguageSpec for per-language path normalization logic.
+    pub import_path_resolver: fn(
+        raw: &str,
+        source_dir: &std::path::Path,
+        project_root: &std::path::Path,
+    ) -> Option<std::path::PathBuf>,
     pub import_ref_query_fn: fn() -> &'static Query,
     pub class_like_parents: &'static [&'static str],
     pub ancestor_visibility_rules: &'static [(&'static str, Visibility)],
+    pub visibility_from_name: Option<fn(&str) -> Option<Visibility>>,
+    pub import_statement_kinds: &'static [&'static str],
+    pub default_visibility: DefaultVisibility,
+    pub doc_comment_config: Option<DocCommentConfig>,
 }
 
 pub fn spec_for(id: LangId) -> &'static LanguageSpec {

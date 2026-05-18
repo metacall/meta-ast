@@ -4,11 +4,8 @@
 //! once, then resolves references with O(1) lookups instead of
 //! per-reference BFS.
 
-// TODO(MVP): Refactor path normalization to handle language-specific module resolution
-// (pip importlib, npm/node_modules, cargo crates, go modules) as we need something better.
-
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::error::{Diagnostic, Severity};
 use crate::language::LangId;
@@ -98,12 +95,21 @@ impl FlattenedScopeCache {
 
             if let Some(symbols) = ctx.symbol_index.get(&current) {
                 for (sym_id, name, sym_lang, visibility) in symbols {
-                    // TODO(MVP): Language-aware default visibility - Python/JS default
-                    //             public, Rust/C++ default private. Currently over-approximates
-                    //             by treating None as public.
+                    let default_vis = ctx
+                        .file_languages
+                        .get(&current)
+                        .map(|lang| lang.spec().default_visibility)
+                        .unwrap_or(crate::language::DefaultVisibility::PublicByDefault);
+
                     let is_public = match visibility {
-                        Some(Visibility::Public) | None => true,
+                        Some(Visibility::Public) => true,
                         Some(Visibility::Private) => current == file_id,
+                        None => {
+                            matches!(
+                                default_vis,
+                                crate::language::DefaultVisibility::PublicByDefault
+                            ) || current == file_id
+                        }
                     };
 
                     if !is_public {
@@ -183,92 +189,6 @@ impl FlattenedScopeCache {
     /// Returns true if the cache is empty.
     pub fn is_empty(&self) -> bool {
         self.scopes.is_empty()
-    }
-}
-
-/// Normalize an import path string to a project-relative PathBuf.
-///
-/// Handles:
-/// - Relative paths: "./utils", "../lib/foo" -> resolved against source dir
-/// - Bare filenames: "utils.py" -> relative to source dir
-/// - Dotted names: "os.path" -> skipped (return None = external)
-/// - C includes: "header.h" -> treated as bare filename
-///   We really need a better solution as i stated before, this is a band-aid to get something working for MVP, but ideally the normalizer should be language-aware and handle more complex patterns (npm packages, pip modules, cargo crates, go modules) and edge cases (index files, __init__.py, Rust inline modules).
-pub fn normalize_import_path(source_dir: &Path, raw: &str, source_lang: LangId) -> Option<PathBuf> {
-    let raw = raw.trim_matches(|c| c == '"' || c == '\'' || c == '<' || c == '>');
-
-    // System includes (angle brackets) are external
-    if raw.is_empty() {
-        return None;
-    }
-
-    // Skip language-specific external patterns
-    match source_lang {
-        LangId::C | LangId::Cpp => {
-            // "header.h" or <header.h> - latter is system include
-            let path = source_dir.join(raw);
-            // Only resolve if the file would be in the project
-            return Some(path);
-        }
-        LangId::Python => {
-            if !raw.starts_with('.') {
-                // Sibling module (no leading dot) - produce candidate, let builder resolve
-                return Some(source_dir.join(format!("{raw}.py")));
-            }
-        }
-        LangId::JavaScript | LangId::TypeScript | LangId::Tsx => {
-            // Only resolve relative imports
-            if !raw.starts_with('.') {
-                return None; // npm package
-            }
-        }
-        LangId::Rust => {
-            // "crate::..." is internal, "std::..." is external
-            if raw.starts_with("crate::") || raw.starts_with("super::") || raw.starts_with("self::")
-            {
-                let prefix = if raw.starts_with("crate::") {
-                    "crate::"
-                } else if raw.starts_with("super::") {
-                    "super::"
-                } else {
-                    "self::"
-                };
-                let rest = raw.strip_prefix(prefix).unwrap_or(raw);
-                let module_path = rest.split("::").next().unwrap_or(rest);
-                return Some(source_dir.join(format!("{module_path}.rs")));
-            }
-            // TODO(MVP): Handle Rust inline module declarations (mod foo; where foo is in the same file).
-            return None; // external crate
-        }
-        LangId::Go => {
-            // Go module paths - external unless starting with "."
-            if !raw.starts_with('.') {
-                // TODO(MVP): Support Go module paths with GOPATH/go.mod resolution.
-                return None;
-            }
-        }
-    }
-
-    let resolved = source_dir.join(raw);
-    // Try adding extension if missing
-    if resolved.extension().is_none() {
-        let ext = extension_for(source_lang);
-        Some(resolved.with_extension(ext))
-    } else {
-        Some(resolved)
-    }
-}
-
-fn extension_for(lang: LangId) -> &'static str {
-    match lang {
-        LangId::Python => "py",
-        LangId::JavaScript => "js",
-        LangId::TypeScript => "ts",
-        LangId::Tsx => "tsx",
-        LangId::C => "h",
-        LangId::Cpp => "hpp",
-        LangId::Rust => "rs",
-        LangId::Go => "go",
     }
 }
 
@@ -353,51 +273,6 @@ pub fn build_symbol_index(
 mod tests {
     use super::*;
     use std::path::PathBuf;
-
-    #[test]
-    fn normalize_bare_python_relative() {
-        let dir = Path::new("/project/src");
-        let result = normalize_import_path(dir, "./utils", LangId::Python);
-        assert_eq!(result, Some(PathBuf::from("/project/src/./utils.py")));
-    }
-
-    #[test]
-    fn skip_external_python_import() {
-        // MVP: bare module names produce a path candidate; the builder's
-        // path_to_file lookup filters out non-existent files.
-        // TODO
-        let dir = Path::new("/project/src");
-        let result = normalize_import_path(dir, "os.path", LangId::Python);
-        assert!(result.is_some(), "normalizer produces path for bare names");
-    }
-
-    #[test]
-    fn resolve_js_relative() {
-        let dir = Path::new("/project/src");
-        let result = normalize_import_path(dir, "./utils", LangId::JavaScript);
-        assert_eq!(result, Some(PathBuf::from("/project/src/./utils.js")));
-    }
-
-    #[test]
-    fn skip_npm_package() {
-        let dir = Path::new("/project/src");
-        let result = normalize_import_path(dir, "react", LangId::JavaScript);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn resolve_rust_crate_path() {
-        let dir = Path::new("/project/src");
-        let result = normalize_import_path(dir, "crate::foo::bar", LangId::Rust);
-        assert_eq!(result, Some(PathBuf::from("/project/src/foo.rs")));
-    }
-
-    #[test]
-    fn skip_external_rust_crate() {
-        let dir = Path::new("/project/src");
-        let result = normalize_import_path(dir, "std::collections::HashMap", LangId::Rust);
-        assert!(result.is_none());
-    }
 
     #[test]
     fn empty_cache() {
