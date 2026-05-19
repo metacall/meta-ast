@@ -38,6 +38,13 @@ pub fn discover_files(
         return Ok(results);
     }
 
+    if !root.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("path does not exist: {}", root.display()),
+        ));
+    }
+
     for entry in ignore::WalkBuilder::new(root)
         .build()
         .filter_map(|e| e.ok())
