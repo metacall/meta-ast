@@ -5,15 +5,15 @@
 //! constructors (symbols, imports, references), and language-specific
 //! extraction heuristics.
 
-pub mod c;
+pub(crate) mod c;
 pub(crate) mod common;
-pub mod cpp;
-pub mod go;
-pub mod javascript;
-pub mod python;
-pub mod rust;
-pub mod tsx;
-pub mod typescript;
+pub(crate) mod cpp;
+pub(crate) mod go;
+pub(crate) mod javascript;
+pub(crate) mod python;
+pub(crate) mod rust;
+pub(crate) mod tsx;
+pub(crate) mod typescript;
 
 use serde::Serialize;
 use tree_sitter::Query;
@@ -94,6 +94,15 @@ pub fn spec_for(id: LangId) -> &'static LanguageSpec {
 
 pub fn grammar_for(id: LangId) -> tree_sitter::Language {
     (spec_for(id).grammar_fn)()
+}
+
+/// Eagerly initialize all language query statics.
+/// Call at startup to fail fast on query compilation bugs.
+pub fn validate_queries() {
+    for id in LangId::all() {
+        let _ = (spec_for(id).query_fn)();
+        let _ = (spec_for(id).import_ref_query_fn)();
+    }
 }
 
 pub fn extract_symbols_for<'a>(
