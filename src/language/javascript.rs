@@ -1,6 +1,40 @@
-use crate::language::LanguageSpec;
+use crate::language::{DefaultVisibility, DocCommentConfig, LanguageSpec};
 use crate::model::Visibility;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+
+fn resolve_js_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
+    let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+    if raw.is_empty() {
+        return None;
+    }
+
+    if !raw.starts_with('.') && !raw.starts_with('/') {
+        return None;
+    }
+
+    let base = if raw.starts_with('/') {
+        PathBuf::from("/")
+    } else {
+        source_dir.to_path_buf()
+    };
+
+    let path = base.join(raw);
+
+    let extensions = ["", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"];
+    for ext in &extensions {
+        let candidate = if ext.is_empty() {
+            path.clone()
+        } else {
+            path.with_extension(ext.trim_start_matches('.'))
+        };
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    Some(path)
+}
 
 static JS_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
@@ -76,6 +110,9 @@ const JS_REFERENCE_QUERY_STR: &str = r#"
 (call_expression
   function: (member_expression
     property: (property_identifier) @reference.name))
+(call_expression
+  function: (member_expression
+    object: (identifier) @reference.name))
 "#;
 
 static JS_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
@@ -94,9 +131,19 @@ pub(crate) const JS_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["js", "mjs", "cjs"],
     grammar_fn: || tree_sitter_javascript::LANGUAGE.into(),
     query_fn: js_query,
+    import_path_resolver: resolve_js_import,
     import_ref_query_fn: js_import_ref_query,
     class_like_parents: &["class_declaration", "class"],
     ancestor_visibility_rules: &[("export_statement", Visibility::Public)],
+    visibility_from_name: None,
+    import_statement_kinds: &["import_statement"],
+    default_visibility: DefaultVisibility::PrivateByDefault,
+    doc_comment_config: Some(DocCommentConfig {
+        line_prefixes: &["//"],
+        block_open: Some("/**"),
+        block_close: "*/",
+        strip_continuation_marker: true,
+    }),
 };
 
 #[cfg(test)]
@@ -209,6 +256,16 @@ mod tests {
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].namespace, "'styles.css'");
         assert!(imports[0].symbol.is_none());
+    }
+
+    #[test]
+    fn js_docstring_extraction() {
+        let src = b"/** JSDoc comment. */\nfunction documented() {}";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::JavaScript, &tree, src);
+        let func = symbols.iter().find(|s| s.name == "documented").unwrap();
+        assert!(func.docstring.is_some(), "documented should have docstring");
+        assert!(func.docstring.as_ref().unwrap().contains("JSDoc comment"));
     }
 
     #[test]

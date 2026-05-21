@@ -1,5 +1,42 @@
-use crate::language::LanguageSpec;
+use crate::language::{DefaultVisibility, DocCommentConfig, LanguageSpec};
+use crate::model::Visibility;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+
+fn resolve_go_import(raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+    let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+    if raw.is_empty() {
+        return None;
+    }
+
+    if let Some(relative) = raw.strip_prefix('.') {
+        let path = source_dir.join(relative);
+        return Some(path.with_extension("go"));
+    }
+
+    let mut current = Some(project_root);
+    while let Some(dir) = current {
+        let go_mod = dir.join("go.mod");
+        if go_mod.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&go_mod) {
+                for line in content.lines() {
+                    let line = line.trim();
+                    if let Some(module) = line.strip_prefix("module ") {
+                        let module_name = module.trim().to_string();
+                        if raw.starts_with(&module_name) {
+                            let relative = raw[module_name.len()..].trim_start_matches('/');
+                            return Some(dir.join(relative).with_extension("go"));
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        current = dir.parent();
+    }
+
+    None
+}
 
 static GO_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
@@ -68,6 +105,9 @@ const GO_REFERENCE_QUERY_STR: &str = r#"
 (call_expression
   function: (selector_expression
     field: (field_identifier) @reference.name))
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @reference.name))
 "#;
 
 fn go_query() -> &'static tree_sitter::Query {
@@ -90,9 +130,22 @@ pub(crate) const GO_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["go"],
     grammar_fn: || tree_sitter_go::LANGUAGE.into(),
     query_fn: go_query,
+    import_path_resolver: resolve_go_import,
     import_ref_query_fn: go_import_ref_query,
     class_like_parents: &[],
     ancestor_visibility_rules: &[],
+    visibility_from_name: Some(|name| {
+        name.starts_with(|c: char| c.is_uppercase())
+            .then_some(Visibility::Public)
+    }),
+    import_statement_kinds: &["import_declaration"],
+    default_visibility: DefaultVisibility::PrivateByDefault,
+    doc_comment_config: Some(DocCommentConfig {
+        line_prefixes: &["//"],
+        block_open: None,
+        block_close: "",
+        strip_continuation_marker: false,
+    }),
 };
 
 #[cfg(test)]
@@ -190,6 +243,16 @@ mod tests {
         assert_eq!(imports.len(), 2, "expected 2 import records for fmt and os");
         assert_eq!(imports[0].namespace, "\"fmt\"");
         assert_eq!(imports[1].namespace, "\"os\"");
+    }
+
+    #[test]
+    fn go_docstring_extraction() {
+        let src = b"package main\n\n// Godoc comment.\nfunc Documented() {}";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Go, &tree, src);
+        let func = symbols.iter().find(|s| s.name == "Documented").unwrap();
+        assert!(func.docstring.is_some(), "Documented should have docstring");
+        assert!(func.docstring.as_ref().unwrap().contains("Godoc comment"));
     }
 
     #[test]

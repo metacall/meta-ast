@@ -1,5 +1,31 @@
-use crate::language::LanguageSpec;
+use crate::language::{DefaultVisibility, LanguageSpec};
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+
+fn resolve_python_import(raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+    let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+    if raw.is_empty() {
+        return None;
+    }
+
+    if raw.starts_with('.') {
+        let relative = raw.trim_start_matches('.');
+        if relative.is_empty() {
+            return Some(source_dir.join("__init__.py"));
+        }
+        let path = source_dir.join(relative.replace('.', std::path::MAIN_SEPARATOR_STR));
+        if path.join("__init__.py").exists() {
+            return Some(path.join("__init__.py"));
+        }
+        Some(path.with_extension("py"))
+    } else {
+        let path = project_root.join(raw.replace('.', std::path::MAIN_SEPARATOR_STR));
+        if path.join("__init__.py").exists() {
+            return Some(path.join("__init__.py"));
+        }
+        Some(path.with_extension("py"))
+    }
+}
 
 static PYTHON_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
@@ -85,9 +111,14 @@ pub(crate) const PYTHON_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["py", "pyi"],
     grammar_fn: || tree_sitter_python::LANGUAGE.into(),
     query_fn: python_query,
+    import_path_resolver: resolve_python_import,
     import_ref_query_fn: python_import_ref_query,
     class_like_parents: &["class_definition"],
     ancestor_visibility_rules: &[],
+    visibility_from_name: None,
+    import_statement_kinds: &["import_statement", "import_from_statement"],
+    default_visibility: DefaultVisibility::PublicByDefault,
+    doc_comment_config: None,
 };
 
 #[cfg(test)]

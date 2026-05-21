@@ -1,5 +1,20 @@
-use crate::language::LanguageSpec;
+use crate::language::{DefaultVisibility, DocCommentConfig, LanguageSpec};
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+
+fn resolve_c_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
+    let raw = raw.trim_matches(|c| c == '<' || c == '>' || c == '"' || c == '\'');
+    if raw.is_empty() {
+        return None;
+    }
+
+    let path = source_dir.join(raw);
+    if path.extension().is_none() {
+        Some(path.with_extension("h"))
+    } else {
+        Some(path)
+    }
+}
 
 static C_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
@@ -46,6 +61,9 @@ const C_REFERENCE_QUERY_STR: &str = r#"
 (call_expression
   function: (field_expression
     field: (field_identifier) @reference.name))
+(call_expression
+  function: (field_expression
+    argument: (identifier) @reference.name))
 "#;
 
 fn c_query() -> &'static tree_sitter::Query {
@@ -68,9 +86,19 @@ pub(crate) const C_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["c"],
     grammar_fn: || tree_sitter_c::LANGUAGE.into(),
     query_fn: c_query,
+    import_path_resolver: resolve_c_import,
     import_ref_query_fn: c_import_ref_query,
     class_like_parents: &[],
     ancestor_visibility_rules: &[],
+    visibility_from_name: None,
+    import_statement_kinds: &["preproc_include"],
+    default_visibility: DefaultVisibility::PublicByDefault,
+    doc_comment_config: Some(DocCommentConfig {
+        line_prefixes: &["//"],
+        block_open: Some("/**"),
+        block_close: "*/",
+        strip_continuation_marker: true,
+    }),
 };
 
 #[cfg(test)]
@@ -116,6 +144,16 @@ mod tests {
         let symbols = extract_symbols_for(LangId::C, &tree, src);
         let s = symbols.iter().find(|s| s.name == "Color").unwrap();
         assert!(matches!(s.kind, SymbolKind::Enum));
+    }
+
+    #[test]
+    fn c_docstring_extraction() {
+        let src = b"/** Doxygen comment. */\nint documented() {}";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::C, &tree, src);
+        let func = symbols.iter().find(|s| s.name == "documented").unwrap();
+        assert!(func.docstring.is_some(), "documented should have docstring");
+        assert!(func.docstring.as_ref().unwrap().contains("Doxygen comment"));
     }
 
     #[test]
