@@ -549,7 +549,7 @@ fn edge_circular_does_not_infinite_loop() {
     assert!(!scope_cache.is_empty(), "scope cache should not be empty");
     assert_eq!(scope_cache.len(), 2, "should have 2 file scopes");
 
-    // Verify circular import diagnostics are emitted
+    // A↔B mutual import cycle: at least one circular import diagnostic expected
     let circular_diags: Vec<_> = diagnostics
         .iter()
         .filter(|d| d.message.contains("circular import"))
@@ -558,6 +558,14 @@ fn edge_circular_does_not_infinite_loop() {
         !circular_diags.is_empty(),
         "should emit circular import diagnostics"
     );
+    // Each diagnostic should reference a file in the cycle
+    for d in &circular_diags {
+        let msg = &d.message;
+        assert!(
+            msg.contains("a.py") || msg.contains("b.py"),
+            "circular diagnostic should mention cycle files: {msg}"
+        );
+    }
 }
 
 #[test]

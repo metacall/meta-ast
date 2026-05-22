@@ -75,16 +75,6 @@ impl FlattenedScopeCache {
 
         while let Some((current, distance)) = queue.pop_front() {
             if !visited.insert(current) {
-                let path = file_paths
-                    .get(&current)
-                    .cloned()
-                    .unwrap_or_else(|| PathBuf::from("<unknown>"));
-                diagnostics.push(Diagnostic {
-                    path,
-                    severity: Severity::Warning,
-                    message: "circular import detected".to_string(),
-                    source_range: None,
-                });
                 continue;
             }
 
@@ -124,15 +114,19 @@ impl FlattenedScopeCache {
                 for &neighbor in neighbors {
                     if !visited.contains(&neighbor) {
                         queue.push_back((neighbor, distance + 1));
-                    } else {
+                    } else if neighbor == file_id {
                         let path = file_paths
                             .get(&current)
                             .cloned()
                             .unwrap_or_else(|| PathBuf::from("<unknown>"));
+                        let root_path = file_paths
+                            .get(&file_id)
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "<unknown>".to_string());
                         diagnostics.push(Diagnostic {
                             path,
                             severity: Severity::Warning,
-                            message: "circular import detected".to_string(),
+                            message: format!("circular import: {} -> {}", current.0, root_path),
                             source_range: None,
                         });
                     }
@@ -277,6 +271,7 @@ pub fn resolve_all_references(
             None => continue,
         };
 
+        let file_path = &file_ext.path;
         for ref_ in &file_ext.references {
             if let Some(matches) = scope_cache.resolve(file_id, &ref_.name) {
                 // Find the source symbol that contains this reference range
@@ -295,7 +290,7 @@ pub fn resolve_all_references(
                 }
             } else {
                 diagnostics.push(Diagnostic {
-                    path: file_ext.path.clone(),
+                    path: file_path.clone(),
                     severity: Severity::Warning,
                     message: format!("unresolved reference: '{}'", ref_.name),
                     source_range: Some(ref_.range.clone()),
