@@ -38,8 +38,8 @@ pub fn discover_files(
         return Ok(results);
     }
 
-    for entry in walkdir::WalkDir::new(root)
-        .into_iter()
+    for entry in ignore::WalkBuilder::new(root)
+        .build()
         .filter_map(|e| e.ok())
     {
         let path = entry.into_path();
@@ -195,6 +195,20 @@ mod tests {
         let files = discover_files(&path, None).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].1, LangId::Python);
+    }
+
+    #[test]
+    fn discover_files_respects_gitignore() {
+        let root = PathBuf::from("tests/fixtures/mixed");
+        let files = discover_files(&root, None).unwrap();
+        let paths: Vec<_> = files
+            .iter()
+            .map(|(p, _)| p.file_name().unwrap().to_str().unwrap())
+            .collect();
+        assert!(
+            !paths.contains(&"test.generated.py"),
+            "gitignored file should be excluded"
+        );
     }
 
     #[test]
