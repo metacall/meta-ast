@@ -202,14 +202,21 @@ fn cross_file_reference_resolution() {
         .iter()
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
+    let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
         &symbol_index,
         &import_adjacency,
         &file_languages,
+        &file_paths,
+        &mut Vec::new(),
     );
 
-    let ref_edges =
-        meta_ast::graph::resolver::resolve_all_references(&result.files, &path_map, &scope_cache);
+    let ref_edges = meta_ast::graph::resolver::resolve_all_references(
+        &result.files,
+        &path_map,
+        &scope_cache,
+        &mut Vec::new(),
+    );
 
     // Add reference edges and verify the graph has reference edges
     for (from, to) in &ref_edges {
@@ -316,13 +323,20 @@ fn cross_file_reference_rust_crate() {
         .iter()
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
+    let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
         &symbol_index,
         &import_adjacency,
         &file_languages,
+        &file_paths,
+        &mut Vec::new(),
     );
-    let ref_edges =
-        meta_ast::graph::resolver::resolve_all_references(&result.files, &path_map, &scope_cache);
+    let ref_edges = meta_ast::graph::resolver::resolve_all_references(
+        &result.files,
+        &path_map,
+        &scope_cache,
+        &mut Vec::new(),
+    );
 
     for (from, to) in &ref_edges {
         builder.add_reference(*from, *to);
@@ -399,13 +413,20 @@ fn cross_file_reference_typescript() {
         .iter()
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
+    let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
         &symbol_index,
         &import_adjacency,
         &file_languages,
+        &file_paths,
+        &mut Vec::new(),
     );
-    let ref_edges =
-        meta_ast::graph::resolver::resolve_all_references(&result.files, &path_map, &scope_cache);
+    let ref_edges = meta_ast::graph::resolver::resolve_all_references(
+        &result.files,
+        &path_map,
+        &scope_cache,
+        &mut Vec::new(),
+    );
 
     for (from, to) in &ref_edges {
         builder.add_reference(*from, *to);
@@ -514,15 +535,29 @@ fn edge_circular_does_not_infinite_loop() {
         .iter()
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
+    let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
+    let mut diagnostics: Vec<meta_ast::error::Diagnostic> = Vec::new();
 
     // Should complete without panic (cycle handled by visited set)
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
         &symbol_index,
         &import_adjacency,
         &file_languages,
+        &file_paths,
+        &mut diagnostics,
     );
     assert!(!scope_cache.is_empty(), "scope cache should not be empty");
     assert_eq!(scope_cache.len(), 2, "should have 2 file scopes");
+
+    // Verify circular import diagnostics are emitted
+    let circular_diags: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("circular import"))
+        .collect();
+    assert!(
+        !circular_diags.is_empty(),
+        "should emit circular import diagnostics"
+    );
 }
 
 #[test]
@@ -577,13 +612,20 @@ fn edge_transitive_resolution() {
         .iter()
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
+    let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
         &symbol_index,
         &import_adjacency,
         &file_languages,
+        &file_paths,
+        &mut Vec::new(),
     );
-    let ref_edges =
-        meta_ast::graph::resolver::resolve_all_references(&result.files, &path_map, &scope_cache);
+    let ref_edges = meta_ast::graph::resolver::resolve_all_references(
+        &result.files,
+        &path_map,
+        &scope_cache,
+        &mut Vec::new(),
+    );
 
     for (from, to) in &ref_edges {
         builder.add_reference(*from, *to);
@@ -644,6 +686,73 @@ fn edge_unresolved_ref_creates_no_edges() {
         );
         assert_eq!(m.references[0].name, "nonexistent_function");
     }
+
+    // Build full graph and resolve references; verify zero edges and diagnostic emitted
+    let snapshot_id = meta_ast::model::SnapshotId(1);
+    let mut builder = GraphBuilder::new(snapshot_id);
+
+    for (path, lang) in &files {
+        builder.add_file(path.clone(), *lang);
+    }
+
+    for file in &result.files {
+        for sym in &file.symbols {
+            builder.add_symbol(sym).unwrap();
+        }
+    }
+
+    let mut path_map: HashMap<std::path::PathBuf, meta_ast::model::FileId> = HashMap::new();
+    for file in &result.files {
+        if let Some(fid) = builder.file_id_for_path(&file.path) {
+            path_map.insert(file.path.clone(), fid);
+        }
+    }
+
+    let symbol_index = meta_ast::graph::resolver::build_symbol_index(&result.files, &path_map);
+    let import_adjacency = builder.import_adjacency();
+    let file_languages: HashMap<_, _> = result
+        .files
+        .iter()
+        .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
+        .collect();
+    let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
+    let mut diagnostics: Vec<meta_ast::error::Diagnostic> = Vec::new();
+    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
+        &symbol_index,
+        &import_adjacency,
+        &file_languages,
+        &file_paths,
+        &mut diagnostics,
+    );
+    let ref_edges = meta_ast::graph::resolver::resolve_all_references(
+        &result.files,
+        &path_map,
+        &scope_cache,
+        &mut diagnostics,
+    );
+
+    // Zero edges: unresolved references don't produce edges
+    assert_eq!(
+        ref_edges.len(),
+        0,
+        "unresolved references should produce zero edges"
+    );
+
+    // Diagnostic emitted for unresolved reference
+    let unresolved_diags: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("unresolved reference"))
+        .collect();
+    assert!(
+        !unresolved_diags.is_empty(),
+        "should emit diagnostic for unresolved reference"
+    );
+    assert!(
+        unresolved_diags
+            .iter()
+            .any(|d| d.message.contains("nonexistent_function")),
+        "diagnostic should mention the unresolved name"
+    );
 }
 
 #[test]
@@ -679,13 +788,20 @@ fn edge_selfref_does_not_create_self_loop() {
         .iter()
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
+    let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
         &symbol_index,
         &import_adjacency,
         &file_languages,
+        &file_paths,
+        &mut Vec::new(),
     );
-    let ref_edges =
-        meta_ast::graph::resolver::resolve_all_references(&result.files, &path_map, &scope_cache);
+    let ref_edges = meta_ast::graph::resolver::resolve_all_references(
+        &result.files,
+        &path_map,
+        &scope_cache,
+        &mut Vec::new(),
+    );
 
     for (from, to) in &ref_edges {
         builder.add_reference(*from, *to);

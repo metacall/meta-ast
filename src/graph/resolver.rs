@@ -10,6 +10,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
+use crate::error::{Diagnostic, Severity};
 use crate::language::LangId;
 use crate::model::{FileExtraction, FileId, SymbolId, Visibility};
 
@@ -37,12 +38,20 @@ impl FlattenedScopeCache {
         symbol_index: &SymbolIndex,
         import_adjacency: &HashMap<FileId, Vec<FileId>>,
         file_languages: &HashMap<FileId, LangId>,
+        file_paths: &HashMap<FileId, PathBuf>,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> Self {
         let mut scopes: HashMap<FileId, ScopeMap> = HashMap::new();
 
         for &file_id in symbol_index.keys() {
-            let scope =
-                Self::compute_scope(file_id, symbol_index, import_adjacency, file_languages);
+            let scope = Self::compute_scope(
+                file_id,
+                symbol_index,
+                import_adjacency,
+                file_languages,
+                file_paths,
+                diagnostics,
+            );
             scopes.insert(file_id, scope);
         }
 
@@ -54,6 +63,8 @@ impl FlattenedScopeCache {
         symbol_index: &SymbolIndex,
         import_adjacency: &HashMap<FileId, Vec<FileId>>,
         file_languages: &HashMap<FileId, LangId>,
+        file_paths: &HashMap<FileId, PathBuf>,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> ScopeMap {
         let source_lang = file_languages.get(&file_id).copied();
         let mut scope: ScopeMap = HashMap::new();
@@ -64,9 +75,17 @@ impl FlattenedScopeCache {
 
         while let Some((current, distance)) = queue.pop_front() {
             if !visited.insert(current) {
-                // TODO(MVP): Add cycle-detection diagnostics - log which files form circular
-                // import chains so the user can see them.
-                continue; // handle cycles
+                let path = file_paths
+                    .get(&current)
+                    .cloned()
+                    .unwrap_or_else(|| PathBuf::from("<unknown>"));
+                diagnostics.push(Diagnostic {
+                    path,
+                    severity: Severity::Warning,
+                    message: "circular import detected".to_string(),
+                    source_range: None,
+                });
+                continue;
             }
 
             if let Some(symbols) = symbol_index.get(&current) {
@@ -105,6 +124,17 @@ impl FlattenedScopeCache {
                 for &neighbor in neighbors {
                     if !visited.contains(&neighbor) {
                         queue.push_back((neighbor, distance + 1));
+                    } else {
+                        let path = file_paths
+                            .get(&current)
+                            .cloned()
+                            .unwrap_or_else(|| PathBuf::from("<unknown>"));
+                        diagnostics.push(Diagnostic {
+                            path,
+                            severity: Severity::Warning,
+                            message: "circular import detected".to_string(),
+                            source_range: None,
+                        });
                     }
                 }
             }
@@ -231,12 +261,13 @@ fn extension_for(lang: LangId) -> &'static str {
 /// Resolve all references across extracted files.
 ///
 /// Returns a list of (source_symbol_id, target_symbol_id) pairs
-/// representing ReferenceEdges to add. Unresolved references are silently
-/// skipped (caller should emit diagnostics if desired).
+/// representing ReferenceEdges to add. Warnings for unresolved references
+/// are appended to `diagnostics`.
 pub fn resolve_all_references(
     extractions: &[FileExtraction],
     path_to_file_id: &HashMap<PathBuf, FileId>,
     scope_cache: &FlattenedScopeCache,
+    diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<(SymbolId, SymbolId)> {
     let mut edges = Vec::new();
 
@@ -258,14 +289,17 @@ pub fn resolve_all_references(
                     for &(target_id, _confidence) in matches {
                         // Don't add self-references (symbol to itself)
                         if source.id != target_id {
-                            // TODO(MVP): Emit a Warning diagnostic for unresolved references instead of
-                            //             silently skipping them.
-                            // intended behavior for now to avoid noise, but we can add diagnostics later by returning a richer result type from this function as this is not the last design of reslover.
-                            // and it may take A LOT of work to get the normalizer and builder to a point where we can resolve most references, so we want to be able to iterate on that without being overwhelmed by diagnostics for the MVP and may take a complete PR.
                             edges.push((source.id, target_id));
                         }
                     }
                 }
+            } else {
+                diagnostics.push(Diagnostic {
+                    path: file_ext.path.clone(),
+                    severity: Severity::Warning,
+                    message: format!("unresolved reference: '{}'", ref_.name),
+                    source_range: Some(ref_.range.clone()),
+                });
             }
         }
     }
@@ -371,8 +405,15 @@ mod tests {
         let import_adjacency: HashMap<FileId, Vec<FileId>> = HashMap::new();
         let mut file_languages = HashMap::new();
         file_languages.insert(FileId(0), LangId::Python);
+        let file_paths: HashMap<FileId, PathBuf> = HashMap::new();
 
-        let cache = FlattenedScopeCache::build(&symbol_index, &import_adjacency, &file_languages);
+        let cache = FlattenedScopeCache::build(
+            &symbol_index,
+            &import_adjacency,
+            &file_languages,
+            &file_paths,
+            &mut Vec::new(),
+        );
         let result = cache.resolve(FileId(0), "main");
         assert!(result.is_some());
         let matches = result.unwrap();
@@ -401,8 +442,15 @@ mod tests {
         let mut file_languages = HashMap::new();
         file_languages.insert(FileId(0), LangId::Python);
         file_languages.insert(FileId(1), LangId::Python);
+        let file_paths: HashMap<FileId, PathBuf> = HashMap::new();
 
-        let cache = FlattenedScopeCache::build(&symbol_index, &import_adjacency, &file_languages);
+        let cache = FlattenedScopeCache::build(
+            &symbol_index,
+            &import_adjacency,
+            &file_languages,
+            &file_paths,
+            &mut Vec::new(),
+        );
         let result = cache.resolve(FileId(0), "helper");
         assert!(result.is_some());
         let matches = result.unwrap();
@@ -422,8 +470,15 @@ mod tests {
         let import_adjacency = HashMap::new();
         let mut file_languages = HashMap::new();
         file_languages.insert(FileId(0), LangId::Python);
+        let file_paths: HashMap<FileId, PathBuf> = HashMap::new();
 
-        let cache = FlattenedScopeCache::build(&symbol_index, &import_adjacency, &file_languages);
+        let cache = FlattenedScopeCache::build(
+            &symbol_index,
+            &import_adjacency,
+            &file_languages,
+            &file_paths,
+            &mut Vec::new(),
+        );
         assert!(cache.resolve(FileId(0), "bar").is_none());
     }
 
@@ -457,8 +512,15 @@ mod tests {
         let mut file_languages = HashMap::new();
         file_languages.insert(FileId(0), LangId::Python);
         file_languages.insert(FileId(1), LangId::Python);
+        let file_paths: HashMap<FileId, PathBuf> = HashMap::new();
 
-        let cache = FlattenedScopeCache::build(&symbol_index, &import_adjacency, &file_languages);
+        let cache = FlattenedScopeCache::build(
+            &symbol_index,
+            &import_adjacency,
+            &file_languages,
+            &file_paths,
+            &mut Vec::new(),
+        );
         // Should not infinite loop
         assert!(cache.resolve(FileId(0), "b").is_some());
         assert!(cache.resolve(FileId(1), "a").is_some());
@@ -484,8 +546,15 @@ mod tests {
         let mut file_languages = HashMap::new();
         file_languages.insert(FileId(0), LangId::Python);
         file_languages.insert(FileId(1), LangId::Rust);
+        let file_paths: HashMap<FileId, PathBuf> = HashMap::new();
 
-        let cache = FlattenedScopeCache::build(&symbol_index, &import_adjacency, &file_languages);
+        let cache = FlattenedScopeCache::build(
+            &symbol_index,
+            &import_adjacency,
+            &file_languages,
+            &file_paths,
+            &mut Vec::new(),
+        );
         let result = cache.resolve(FileId(0), "util");
         assert!(result.is_some());
         assert_eq!(result.unwrap()[0].1, 0.6);
@@ -543,7 +612,7 @@ mod tests {
 
         let cache = FlattenedScopeCache { scopes };
 
-        let edges = resolve_all_references(&[file], &path_to_file_id, &cache);
+        let edges = resolve_all_references(&[file], &path_to_file_id, &cache, &mut Vec::new());
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0], (SymbolId(1), SymbolId(99)));
     }

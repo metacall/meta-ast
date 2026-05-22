@@ -102,13 +102,33 @@ fn main() -> anyhow::Result<()> {
                 .iter()
                 .filter_map(|f| Some((path_to_file_id.get(&f.path)?.to_owned(), f.lang)))
                 .collect();
+            let file_paths: HashMap<_, _> = path_to_file_id
+                .iter()
+                .map(|(path, &fid)| (fid, path.clone()))
+                .collect();
+            let mut diagnostics: Vec<meta_ast::error::Diagnostic> = Vec::new();
             let scope_cache = resolver::FlattenedScopeCache::build(
                 &symbol_index,
                 &import_adjacency,
                 &file_languages,
+                &file_paths,
+                &mut diagnostics,
             );
-            let ref_edges =
-                resolver::resolve_all_references(&result.files, &path_to_file_id, &scope_cache);
+            let ref_edges = resolver::resolve_all_references(
+                &result.files,
+                &path_to_file_id,
+                &scope_cache,
+                &mut diagnostics,
+            );
+
+            for diag in &diagnostics {
+                eprintln!(
+                    "[{:?}] {}: {}",
+                    diag.severity,
+                    diag.path.display(),
+                    diag.message
+                );
+            }
 
             // Pass 4: add reference edges
             for (from, to) in ref_edges {
