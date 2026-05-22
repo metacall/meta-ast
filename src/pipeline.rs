@@ -61,11 +61,10 @@ pub fn analyze_graph(
         let Some(&source_fid) = path_to_file_id.get(&file.path) else {
             continue;
         };
+        let source_dir = file.path.parent().unwrap_or(std::path::Path::new("."));
         for import in &file.imports {
-            if let Some(dir) = file.path.parent()
-                && let Some(target) =
-                    crate::graph::resolver::normalize_import_path(dir, &import.namespace, file.lang)
-            {
+            let resolver = file.lang.spec().import_path_resolver;
+            if let Some(target) = resolver(&import.namespace, source_dir, root) {
                 builder.add_import(source_fid, target);
             }
         }
