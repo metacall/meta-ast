@@ -121,10 +121,7 @@ mod tests {
 
         let all_ids: Vec<SymbolId> = handles
             .into_iter()
-            .flat_map(|h| match h.join() {
-                Ok(ids) => ids,
-                Err(_) => Vec::new(),
-            })
+            .flat_map(|h| h.join().unwrap_or_default())
             .collect();
 
         let unique: HashSet<SymbolId> = all_ids.iter().copied().collect();
