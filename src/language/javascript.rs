@@ -3,7 +3,7 @@ use crate::model::Visibility;
 use std::sync::LazyLock;
 
 static JS_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_javascript::LANGUAGE.into(),
         r#"
 (function_declaration
@@ -44,8 +44,8 @@ static JS_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
   ]
 )
 "#,
+        "JavaScript",
     )
-    .expect("Failed to parse JavaScript query")
 });
 
 fn js_query() -> &'static tree_sitter::Query {
@@ -79,11 +79,11 @@ const JS_REFERENCE_QUERY_STR: &str = r#"
 "#;
 
 static JS_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_javascript::LANGUAGE.into(),
         &format!("{}\n{}", JS_IMPORT_QUERY_STR, JS_REFERENCE_QUERY_STR),
+        "JavaScript combined import+ref",
     )
-    .expect("Failed to parse JavaScript combined import+ref query")
 });
 
 fn js_import_ref_query() -> &'static tree_sitter::Query {

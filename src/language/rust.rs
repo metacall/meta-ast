@@ -2,7 +2,7 @@ use crate::language::LanguageSpec;
 use std::sync::LazyLock;
 
 static RUST_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_rust::LANGUAGE.into(),
         r#"
 (function_item
@@ -47,8 +47,8 @@ static RUST_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
   name: (identifier) @name
 ) @kind.module
 "#,
+        "Rust",
     )
-    .expect("Failed to parse Rust query")
 });
 
 fn rust_query() -> &'static tree_sitter::Query {
@@ -80,11 +80,11 @@ const RUST_REFERENCE_QUERY_STR: &str = r#"
 "#;
 
 static RUST_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_rust::LANGUAGE.into(),
         &format!("{}\n{}", RUST_IMPORT_QUERY_STR, RUST_REFERENCE_QUERY_STR),
+        "Rust combined import+ref",
     )
-    .expect("Failed to parse Rust combined import+ref query")
 });
 
 fn rust_import_ref_query() -> &'static tree_sitter::Query {

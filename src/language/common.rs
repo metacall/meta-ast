@@ -8,6 +8,23 @@ use super::{LanguageSpec, RawSymbol};
 use crate::model::{LineColumn, SourceRange, SymbolKind, Visibility};
 use tree_sitter::StreamingIterator;
 
+pub(crate) fn compile_query(
+    lang: &tree_sitter::Language,
+    src: &str,
+    label: &str,
+) -> tree_sitter::Query {
+    match tree_sitter::Query::new(lang, src) {
+        Ok(q) => q,
+        Err(e) => {
+            eprintln!(
+                "FATAL: query compilation failed for {}: {}. Aborting.",
+                label, e
+            );
+            std::process::abort()
+        }
+    }
+}
+
 #[inline]
 pub(super) fn source_range_from_node(node: &tree_sitter::Node) -> SourceRange {
     SourceRange {
@@ -216,15 +233,15 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     Vec<crate::model::UnresolvedReference>,
 ) {
     let query = (spec.import_ref_query_fn)();
-    let path_idx = query
-        .capture_index_for_name("import.path")
-        .expect("import.path capture must exist");
+    let Some(path_idx) = query.capture_index_for_name("import.path") else {
+        return (Vec::new(), Vec::new());
+    };
     let alias_idx = query.capture_index_for_name("import.alias");
     let symbol_idx = query.capture_index_for_name("import.symbol");
     let star_idx = query.capture_index_for_name("import.star");
-    let ref_idx = query
-        .capture_index_for_name("reference.name")
-        .expect("reference.name capture must exist");
+    let Some(ref_idx) = query.capture_index_for_name("reference.name") else {
+        return (Vec::new(), Vec::new());
+    };
 
     let mut query_cursor = tree_sitter::QueryCursor::new();
     let mut matches = query_cursor.matches(query, tree.root_node(), source);
@@ -306,7 +323,10 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     let mut imports: Vec<crate::model::UnresolvedImport> = Vec::with_capacity(raw_imports.len());
     for r in raw_imports {
         imports.push(crate::model::UnresolvedImport {
-            namespace: slice(r.namespace.expect("namespace is required")),
+            namespace: match r.namespace {
+                Some(ns) => slice(ns),
+                None => continue,
+            },
             alias: r.alias.map(slice),
             symbol: r.symbol.map(slice),
             star: r.star,

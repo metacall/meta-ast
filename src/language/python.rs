@@ -2,7 +2,7 @@ use crate::language::LanguageSpec;
 use std::sync::LazyLock;
 
 static PYTHON_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_python::LANGUAGE.into(),
         r#"
 (function_definition
@@ -32,8 +32,8 @@ static PYTHON_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
   ]
 )
 "#,
+        "Python",
     )
-    .expect("Failed to parse Python query")
 });
 
 fn python_query() -> &'static tree_sitter::Query {
@@ -67,14 +67,14 @@ const PYTHON_REFERENCE_QUERY_STR: &str = r#"
 "#;
 
 static PYTHON_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_python::LANGUAGE.into(),
         &format!(
             "{}\n{}",
             PYTHON_IMPORT_QUERY_STR, PYTHON_REFERENCE_QUERY_STR
         ),
+        "Python combined import+ref",
     )
-    .expect("Failed to parse Python combined import+ref query")
 });
 
 fn python_import_ref_query() -> &'static tree_sitter::Query {

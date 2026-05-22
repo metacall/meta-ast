@@ -6,19 +6,19 @@ use crate::model::Visibility;
 use std::sync::LazyLock;
 
 static TSX_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_typescript::LANGUAGE_TSX.into(),
         TS_FAMILY_QUERY,
+        "TSX",
     )
-    .expect("Failed to parse TSX query")
 });
 
 static TSX_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_typescript::LANGUAGE_TSX.into(),
         &format!("{}\n{}", TS_FAMILY_IMPORT_QUERY, TS_FAMILY_REFERENCE_QUERY),
+        "TSX combined import+ref",
     )
-    .expect("Failed to parse TSX combined import+ref query")
 });
 
 fn tsx_import_ref_query() -> &'static tree_sitter::Query {

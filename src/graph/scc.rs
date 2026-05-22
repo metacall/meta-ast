@@ -124,11 +124,15 @@ impl SccAnalysis {
         let mut component_deps: HashMap<usize, Vec<usize>> = HashMap::new();
 
         for edge_idx in graph.edge_indices() {
-            let weight = graph.edge_weight(edge_idx).expect("Edge must exist");
+            let Some(weight) = graph.edge_weight(edge_idx) else {
+                continue;
+            };
             if weight.kind == EdgeKind::Ownership {
                 continue;
             }
-            let (source, target) = graph.edge_endpoints(edge_idx).expect("Edge must exist");
+            let Some((source, target)) = graph.edge_endpoints(edge_idx) else {
+                continue;
+            };
             let source_comp = Self::find_component_for_node(components, source);
             let target_comp = Self::find_component_for_node(components, target);
 

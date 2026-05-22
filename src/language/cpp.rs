@@ -2,7 +2,7 @@ use crate::language::LanguageSpec;
 use std::sync::LazyLock;
 
 static CPP_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_cpp::LANGUAGE.into(),
         r#"
         (function_definition
@@ -27,8 +27,8 @@ static CPP_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
         (type_definition
             declarator: (type_identifier) @name) @kind.type_alias
         "#,
+        "C++",
     )
-    .expect("Failed to parse C++ query")
 });
 
 fn cpp_query() -> &'static tree_sitter::Query {
@@ -51,11 +51,11 @@ const CPP_REFERENCE_QUERY_STR: &str = r#"
 "#;
 
 static CPP_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_cpp::LANGUAGE.into(),
         &format!("{}\n{}", CPP_IMPORT_QUERY_STR, CPP_REFERENCE_QUERY_STR),
+        "C++ combined import+ref",
     )
-    .expect("Failed to parse C++ combined import+ref query")
 });
 
 fn cpp_import_ref_query() -> &'static tree_sitter::Query {

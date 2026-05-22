@@ -68,11 +68,11 @@ pub const TS_FAMILY_QUERY: &str = r#"
 "#;
 
 static TS_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         TS_FAMILY_QUERY,
+        "TypeScript",
     )
-    .expect("Failed to parse TypeScript query")
 });
 
 pub const TS_FAMILY_IMPORT_QUERY: &str = r#"
@@ -102,11 +102,11 @@ pub const TS_FAMILY_REFERENCE_QUERY: &str = r#"
 "#;
 
 static TS_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         &format!("{}\n{}", TS_FAMILY_IMPORT_QUERY, TS_FAMILY_REFERENCE_QUERY),
+        "TypeScript combined import+ref",
     )
-    .expect("Failed to parse TypeScript combined import+ref query")
 });
 
 fn ts_import_ref_query() -> &'static tree_sitter::Query {

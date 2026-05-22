@@ -2,7 +2,7 @@ use crate::language::LanguageSpec;
 use std::sync::LazyLock;
 
 static GO_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_go::LANGUAGE.into(),
         r#"
 (function_declaration
@@ -52,8 +52,8 @@ static GO_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
   name: (identifier) @name
 ) @kind.object
 "#,
+        "Go",
     )
-    .expect("Failed to parse Go query")
 });
 
 const GO_IMPORT_QUERY_STR: &str = r#"
@@ -75,11 +75,11 @@ fn go_query() -> &'static tree_sitter::Query {
 }
 
 static GO_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
-    tree_sitter::Query::new(
+    crate::language::common::compile_query(
         &tree_sitter_go::LANGUAGE.into(),
         &format!("{}\n{}", GO_IMPORT_QUERY_STR, GO_REFERENCE_QUERY_STR),
+        "Go combined import+ref",
     )
-    .expect("Failed to parse Go combined import+ref query")
 });
 
 fn go_import_ref_query() -> &'static tree_sitter::Query {
