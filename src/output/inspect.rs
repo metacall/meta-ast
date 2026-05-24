@@ -35,6 +35,7 @@ pub fn symbols_to_inspect_output(symbols: &[Symbol]) -> InspectOutput {
             }
             SymbolKind::Object
             | SymbolKind::Constant
+            | SymbolKind::Static
             | SymbolKind::Module
             | SymbolKind::Namespace
             | SymbolKind::TypeAlias => {

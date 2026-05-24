@@ -116,4 +116,18 @@ mod tests {
         let v = [Severity::Warning, Severity::Error];
         assert_eq!(v.len(), 2);
     }
+
+    #[test]
+    fn graph_error_display_format() {
+        let err = Error::Graph("cycle detected".into());
+        let displayed = err.to_string();
+        assert!(displayed.starts_with("graph error:"), "{displayed}");
+        assert!(displayed.contains("cycle detected"), "{displayed}");
+    }
+
+    #[test]
+    fn graph_error_matches() {
+        let err = Error::Graph("test".into());
+        assert!(matches!(err, Error::Graph(_)));
+    }
 }
