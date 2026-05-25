@@ -36,27 +36,26 @@ pub(super) fn source_range_from_node(node: &tree_sitter::Node) -> SourceRange {
         },
     }
 }
-// TODO! Handle multi-line docstrings and different quoting styles more robustly.
-// we need to extract all utils to a one cetnralized place, and make them available for all languages. This is one of them.
 fn clean_docstring(text: &str) -> &str {
-    let s = text.trim_start();
-    let prefix_len = if s.starts_with("\"\"\"") || s.starts_with("'''") {
-        3
-    } else if s.starts_with('\"') || s.starts_with('\'') {
-        1
-    } else {
-        return text.trim();
-    };
-
-    let content_start = prefix_len;
-    let trimmed_end = text.trim_end();
-    let content_end = trimmed_end.len().saturating_sub(prefix_len);
-
-    if content_end <= content_start {
+    let s = text.trim();
+    if s.is_empty() {
         return "";
     }
-
-    trimmed_end[content_start..content_end].trim()
+    for delim in ["\"\"\"", "'''"] {
+        if let Some(inner) = s.strip_prefix(delim)
+            && let Some(inner) = inner.strip_suffix(delim)
+        {
+            return inner.trim();
+        }
+    }
+    for delim in ["\"", "'"] {
+        if let Some(inner) = s.strip_prefix(delim)
+            && let Some(inner) = inner.strip_suffix(delim)
+        {
+            return inner.trim();
+        }
+    }
+    s
 }
 
 #[cfg(test)]
@@ -129,6 +128,7 @@ pub(crate) fn extract_with_spec<'a>(
                         "trait" => SymbolKind::Trait,
                         "enum" => SymbolKind::Enum,
                         "constant" => SymbolKind::Constant,
+                        "static" => SymbolKind::Static,
                         "module" => SymbolKind::Module,
                         "namespace" => SymbolKind::Namespace,
                         "type_alias" => SymbolKind::TypeAlias,
@@ -172,6 +172,12 @@ pub(crate) fn extract_with_spec<'a>(
                 }
             }
 
+            if visibility.is_none()
+                && let Some(f) = spec.visibility_from_name
+            {
+                visibility = f(&name);
+            }
+
             let symbol = RawSymbol {
                 name,
                 kind,
@@ -193,20 +199,161 @@ pub(crate) fn extract_with_spec<'a>(
     }
 
     let mut result: Vec<_> = symbols_map.into_values().map(|(s, _)| s).collect();
+    associate_docstrings(&mut result, source, tree, spec);
     result.sort_by_key(|s| s.source_range.byte_start);
     result
 }
 
-// TODO(MVP): Handle multi-line import statements where the statement spans
-//multiple lines (PEP 328, JS template literals).
+/// Associate doc comments with symbols via post-processing.
+///
+/// For languages where doc comments are tree-sitter extras (Rust, JS/TS, etc.),
+/// this function scans the source for comment nodes and associates them with
+/// the nearest following symbol based on proximity.
+pub(crate) fn associate_docstrings<'a>(
+    symbols: &mut Vec<RawSymbol<'a>>,
+    source: &'a [u8],
+    tree: &'a tree_sitter::Tree,
+    spec: &LanguageSpec,
+) {
+    let Some(config) = &spec.doc_comment_config else {
+        return;
+    };
+
+    let comments = collect_comment_nodes(tree, source, config);
+
+    for sym in symbols.iter_mut() {
+        if sym.docstring.is_some() {
+            continue;
+        }
+        let sym_start = sym.source_range.byte_start;
+        let doc = find_preceding_docstring(sym_start, &comments, source, config);
+        if let Some(text) = doc {
+            sym.docstring = Some(std::borrow::Cow::Owned(text));
+        }
+    }
+}
+
+fn collect_comment_nodes<'a>(
+    tree: &'a tree_sitter::Tree,
+    source: &'a [u8],
+    config: &super::DocCommentConfig,
+) -> Vec<(usize, usize, bool)> {
+    let mut result = Vec::new();
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+
+    loop {
+        let node = cursor.node();
+        let kind = node.kind();
+        if (kind == "comment" || kind == "line_comment" || kind == "block_comment")
+            && let Ok(text) = node.utf8_text(source)
+        {
+            let is_doc = config.line_prefixes.iter().any(|p| text.starts_with(p))
+                || config.block_open.is_some_and(|o| text.starts_with(o));
+            result.push((node.start_byte(), node.end_byte(), is_doc));
+        }
+
+        if cursor.goto_first_child() {
+            continue;
+        }
+        if cursor.goto_next_sibling() {
+            continue;
+        }
+        loop {
+            if !cursor.goto_parent() {
+                return result;
+            }
+            if cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+}
+
+fn find_preceding_docstring(
+    symbol_start: usize,
+    comments: &[(usize, usize, bool)],
+    source: &[u8],
+    config: &super::DocCommentConfig,
+) -> Option<String> {
+    let mut doc_comments: Vec<&str> = Vec::new();
+    let mut reference_point = symbol_start;
+
+    for &(start, end, is_doc) in comments.iter().rev() {
+        if end > symbol_start {
+            continue;
+        }
+        if end < reference_point {
+            let gap = &source[end..reference_point.min(source.len())];
+            let newline_count = gap.iter().filter(|&&b| b == b'\n').count();
+            if newline_count > 1 {
+                break;
+            }
+        }
+        if !is_doc {
+            break;
+        }
+        if let Ok(text) = std::str::from_utf8(&source[start..end]) {
+            doc_comments.push(text);
+        }
+        reference_point = start;
+    }
+
+    if doc_comments.is_empty() {
+        return None;
+    }
+
+    doc_comments.reverse();
+    let raw = doc_comments.join("\n");
+    Some(clean_comment_docstring(&raw, config))
+}
+
+fn clean_comment_docstring(text: &str, config: &super::DocCommentConfig) -> String {
+    let mut result = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let mut stripped = line;
+
+        for prefix in config.line_prefixes {
+            if let Some(rest) = stripped.strip_prefix(prefix) {
+                stripped = rest.trim_start();
+                break;
+            }
+        }
+
+        if let Some(o) = config.block_open
+            && let Some(rest) = stripped.strip_prefix(o)
+        {
+            stripped = rest.trim_start();
+        }
+        if !config.block_close.is_empty() && stripped.ends_with(config.block_close) {
+            let end = stripped.len() - config.block_close.len();
+            stripped = stripped[..end].trim_end();
+        }
+
+        if config.strip_continuation_marker
+            && stripped.starts_with('*')
+            && !stripped.starts_with("**")
+        {
+            stripped = stripped[1..].trim_start();
+        }
+
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str(stripped);
+    }
+    result
+}
 
 fn resolve_import_path_from_symbol_node<'a>(
     node: tree_sitter::Node<'a>,
     source: &'a [u8],
+    spec: &LanguageSpec,
 ) -> Option<(usize, usize)> {
     let mut ancestor = node;
     loop {
-        if ancestor.kind() == "import_statement" {
+        if spec.import_statement_kinds.contains(&ancestor.kind()) {
             if let Some(source_node) = ancestor.child_by_field_name("source")
                 && source_node.utf8_text(source).is_ok()
             {
@@ -299,7 +446,7 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
         } else if symbol_idx.is_some()
             && (symbol.is_some() || star)
             && let Some(capture_node) = node
-            && let Some(ns) = resolve_import_path_from_symbol_node(capture_node, source)
+            && let Some(ns) = resolve_import_path_from_symbol_node(capture_node, source, spec)
         {
             let range = source_range_from_node(&capture_node);
             raw_imports.push(RawImport {
@@ -347,16 +494,13 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     (imports, references)
 }
 
-// TODO(MVP): Capture references inside attribute chains (obj.method().field)
-//             and destructuring patterns.
-
 #[cfg(test)]
 mod tests {
     use tree_sitter::Parser;
 
     use crate::language::LangId;
 
-    use super::{field_text, source_range_from_node};
+    use super::{clean_docstring, field_text, source_range_from_node};
 
     #[test]
     fn source_range_tracks_node_positions() {
@@ -389,5 +533,62 @@ mod tests {
 
         let name = field_text(&function, "name", source).unwrap();
         assert_eq!(name, "hello");
+    }
+
+    #[test]
+    fn clean_docstring_triple_double_quote() {
+        assert_eq!(clean_docstring(r#""""hello world""""#), "hello world");
+    }
+
+    #[test]
+    fn clean_docstring_triple_single_quote() {
+        assert_eq!(clean_docstring("'''hello world'''"), "hello world");
+    }
+
+    #[test]
+    fn clean_docstring_single_double_quote() {
+        assert_eq!(clean_docstring(r#""hello world""#), "hello world");
+    }
+
+    #[test]
+    fn clean_docstring_single_single_quote() {
+        assert_eq!(clean_docstring("'hello world'"), "hello world");
+    }
+
+    #[test]
+    fn clean_docstring_no_quotes() {
+        assert_eq!(clean_docstring("some bare text"), "some bare text");
+    }
+
+    #[test]
+    fn clean_docstring_empty() {
+        assert_eq!(clean_docstring(""), "");
+    }
+
+    #[test]
+    fn clean_docstring_empty_triple() {
+        assert_eq!(clean_docstring(r#""""""""#), "");
+    }
+
+    #[test]
+    fn clean_docstring_leading_whitespace() {
+        assert_eq!(clean_docstring(r#"  """  hello  """  "#), "hello");
+    }
+
+    #[test]
+    fn clean_docstring_multiline_content() {
+        assert_eq!(clean_docstring("line1\nline2"), "line1\nline2");
+    }
+
+    #[test]
+    fn clean_docstring_only_whitespace() {
+        let result = clean_docstring("   ");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn clean_docstring_mismatched_quotes() {
+        let result = clean_docstring(r#""""hello'"#);
+        assert_eq!(result, r#""""hello'"#);
     }
 }
