@@ -81,7 +81,7 @@ fn python_import_ref_query() -> &'static tree_sitter::Query {
     &PYTHON_IMPORT_REF_QUERY
 }
 
-pub const PYTHON_SPEC: LanguageSpec = LanguageSpec {
+pub(crate) const PYTHON_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["py", "pyi"],
     grammar_fn: || tree_sitter_python::LANGUAGE.into(),
     query_fn: python_query,

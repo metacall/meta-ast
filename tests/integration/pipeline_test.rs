@@ -203,13 +203,13 @@ fn cross_file_reference_resolution() {
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
     let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
-    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
-        &symbol_index,
-        &import_adjacency,
-        &file_languages,
-        &file_paths,
-        &mut Vec::new(),
-    );
+    let ctx = meta_ast::graph::resolver::ResolutionContext {
+        symbol_index,
+        import_adjacency,
+        file_languages,
+        file_paths,
+    };
+    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
 
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
         &result.files,
@@ -324,13 +324,13 @@ fn cross_file_reference_rust_crate() {
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
     let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
-    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
-        &symbol_index,
-        &import_adjacency,
-        &file_languages,
-        &file_paths,
-        &mut Vec::new(),
-    );
+    let ctx = meta_ast::graph::resolver::ResolutionContext {
+        symbol_index,
+        import_adjacency,
+        file_languages,
+        file_paths,
+    };
+    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
         &result.files,
         &path_map,
@@ -414,13 +414,13 @@ fn cross_file_reference_typescript() {
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
     let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
-    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
-        &symbol_index,
-        &import_adjacency,
-        &file_languages,
-        &file_paths,
-        &mut Vec::new(),
-    );
+    let ctx = meta_ast::graph::resolver::ResolutionContext {
+        symbol_index,
+        import_adjacency,
+        file_languages,
+        file_paths,
+    };
+    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
         &result.files,
         &path_map,
@@ -539,13 +539,13 @@ fn edge_circular_does_not_infinite_loop() {
     let mut diagnostics: Vec<meta_ast::error::Diagnostic> = Vec::new();
 
     // Should complete without panic (cycle handled by visited set)
-    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
-        &symbol_index,
-        &import_adjacency,
-        &file_languages,
-        &file_paths,
-        &mut diagnostics,
-    );
+    let ctx = meta_ast::graph::resolver::ResolutionContext {
+        symbol_index,
+        import_adjacency,
+        file_languages,
+        file_paths,
+    };
+    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut diagnostics);
     assert!(!scope_cache.is_empty(), "scope cache should not be empty");
     assert_eq!(scope_cache.len(), 2, "should have 2 file scopes");
 
@@ -621,13 +621,13 @@ fn edge_transitive_resolution() {
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
     let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
-    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
-        &symbol_index,
-        &import_adjacency,
-        &file_languages,
-        &file_paths,
-        &mut Vec::new(),
-    );
+    let ctx = meta_ast::graph::resolver::ResolutionContext {
+        symbol_index,
+        import_adjacency,
+        file_languages,
+        file_paths,
+    };
+    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
         &result.files,
         &path_map,
@@ -725,13 +725,13 @@ fn edge_unresolved_ref_creates_no_edges() {
         .collect();
     let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
     let mut diagnostics: Vec<meta_ast::error::Diagnostic> = Vec::new();
-    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
-        &symbol_index,
-        &import_adjacency,
-        &file_languages,
-        &file_paths,
-        &mut diagnostics,
-    );
+    let ctx = meta_ast::graph::resolver::ResolutionContext {
+        symbol_index,
+        import_adjacency,
+        file_languages,
+        file_paths,
+    };
+    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
         &result.files,
         &path_map,
@@ -797,13 +797,13 @@ fn edge_selfref_does_not_create_self_loop() {
         .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
         .collect();
     let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
-    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(
-        &symbol_index,
-        &import_adjacency,
-        &file_languages,
-        &file_paths,
-        &mut Vec::new(),
-    );
+    let ctx = meta_ast::graph::resolver::ResolutionContext {
+        symbol_index,
+        import_adjacency,
+        file_languages,
+        file_paths,
+    };
+    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
         &result.files,
         &path_map,

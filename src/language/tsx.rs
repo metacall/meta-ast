@@ -29,7 +29,7 @@ fn tsx_query() -> &'static tree_sitter::Query {
     &TSX_QUERY
 }
 
-pub const TSX_SPEC: LanguageSpec = LanguageSpec {
+pub(crate) const TSX_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["tsx"],
     grammar_fn: || tree_sitter_typescript::LANGUAGE_TSX.into(),
     query_fn: tsx_query,

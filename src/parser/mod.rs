@@ -15,7 +15,8 @@ thread_local! {
     static PARSERS: RefCell<[Option<Parser>; LangId::COUNT]> = const { RefCell::new([const { None }; LangId::COUNT]) };
 }
 
-pub struct ParsedFile {
+#[allow(dead_code)]
+pub(crate) struct ParsedFile {
     pub tree: tree_sitter::Tree,
     pub source: Vec<u8>,
 }
@@ -38,7 +39,7 @@ fn get_or_init_parser(
         .ok_or_else(|| Error::Config("parser slot was not initialized".into()))
 }
 
-pub fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tree, Error> {
+pub(crate) fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tree, Error> {
     PARSERS.with(|cache| {
         let parsers = &mut *cache.borrow_mut();
         let parser = get_or_init_parser(parsers, lang)?;
@@ -49,7 +50,8 @@ pub fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tree, Erro
     })
 }
 
-pub fn parse(lang: LangId, source: &[u8]) -> Result<ParsedFile, Error> {
+#[allow(dead_code)]
+pub(crate) fn parse(lang: LangId, source: &[u8]) -> Result<ParsedFile, Error> {
     let tree = parse_tree(lang, source)?;
     Ok(ParsedFile {
         tree,
@@ -57,7 +59,7 @@ pub fn parse(lang: LangId, source: &[u8]) -> Result<ParsedFile, Error> {
     })
 }
 
-pub fn error_ratio(tree: &tree_sitter::Tree, source: &[u8]) -> f64 {
+pub(crate) fn error_ratio(tree: &tree_sitter::Tree, source: &[u8]) -> f64 {
     if source.is_empty() {
         return 0.0;
     }

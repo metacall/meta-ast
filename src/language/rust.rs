@@ -91,7 +91,7 @@ fn rust_import_ref_query() -> &'static tree_sitter::Query {
     &RUST_IMPORT_REF_QUERY
 }
 
-pub const RUST_SPEC: LanguageSpec = LanguageSpec {
+pub(crate) const RUST_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["rs"],
     grammar_fn: || tree_sitter_rust::LANGUAGE.into(),
     query_fn: rust_query,
