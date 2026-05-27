@@ -90,7 +90,7 @@ fn js_import_ref_query() -> &'static tree_sitter::Query {
     &JS_IMPORT_REF_QUERY
 }
 
-pub const JS_SPEC: LanguageSpec = LanguageSpec {
+pub(crate) const JS_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["js", "mjs", "cjs"],
     grammar_fn: || tree_sitter_javascript::LANGUAGE.into(),
     query_fn: js_query,

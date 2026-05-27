@@ -15,8 +15,42 @@ use crate::language::LangId;
 use crate::model::{FileExtraction, FileId, SymbolId, Visibility};
 
 type ScopeMap = HashMap<String, Vec<(SymbolId, f32)>>;
-type SymbolIndexEntry = (SymbolId, String, LangId, Option<Visibility>);
-type SymbolIndex = HashMap<FileId, Vec<SymbolIndexEntry>>;
+pub(crate) type SymbolIndexEntry = (SymbolId, String, LangId, Option<Visibility>);
+pub(crate) type SymbolIndex = HashMap<FileId, Vec<SymbolIndexEntry>>;
+
+/// Bundles the data needed for scope resolution across files.
+pub struct ResolutionContext {
+    pub symbol_index: SymbolIndex,
+    pub import_adjacency: HashMap<FileId, Vec<FileId>>,
+    pub file_languages: HashMap<FileId, LangId>,
+    pub file_paths: HashMap<FileId, PathBuf>,
+}
+
+impl ResolutionContext {
+    /// Build a ResolutionContext from extraction results and graph data.
+    pub fn from_extractions(
+        extractions: &[FileExtraction],
+        path_to_file_id: &HashMap<PathBuf, FileId>,
+        import_adjacency: HashMap<FileId, Vec<FileId>>,
+    ) -> Self {
+        let symbol_index = build_symbol_index(extractions, path_to_file_id);
+        let file_languages: HashMap<_, _> = extractions
+            .iter()
+            .filter_map(|f| Some((path_to_file_id.get(&f.path)?.to_owned(), f.lang)))
+            .collect();
+        let file_paths: HashMap<_, _> = path_to_file_id
+            .iter()
+            .map(|(path, &fid)| (fid, path.clone()))
+            .collect();
+
+        Self {
+            symbol_index,
+            import_adjacency,
+            file_languages,
+            file_paths,
+        }
+    }
+}
 
 /// Pre-computed visible scope for each file.
 ///
@@ -34,24 +68,11 @@ impl FlattenedScopeCache {
     /// - 1.0: own file or direct import, same language
     /// - 0.8: transitive import, same language
     /// - 0.6: cross-language imports
-    pub fn build(
-        symbol_index: &SymbolIndex,
-        import_adjacency: &HashMap<FileId, Vec<FileId>>,
-        file_languages: &HashMap<FileId, LangId>,
-        file_paths: &HashMap<FileId, PathBuf>,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> Self {
+    pub fn build(ctx: &ResolutionContext, diagnostics: &mut Vec<Diagnostic>) -> Self {
         let mut scopes: HashMap<FileId, ScopeMap> = HashMap::new();
 
-        for &file_id in symbol_index.keys() {
-            let scope = Self::compute_scope(
-                file_id,
-                symbol_index,
-                import_adjacency,
-                file_languages,
-                file_paths,
-                diagnostics,
-            );
+        for &file_id in ctx.symbol_index.keys() {
+            let scope = Self::compute_scope(file_id, ctx, diagnostics);
             scopes.insert(file_id, scope);
         }
 
@@ -60,13 +81,10 @@ impl FlattenedScopeCache {
 
     fn compute_scope(
         file_id: FileId,
-        symbol_index: &SymbolIndex,
-        import_adjacency: &HashMap<FileId, Vec<FileId>>,
-        file_languages: &HashMap<FileId, LangId>,
-        file_paths: &HashMap<FileId, PathBuf>,
+        ctx: &ResolutionContext,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> ScopeMap {
-        let source_lang = file_languages.get(&file_id).copied();
+        let source_lang = ctx.file_languages.get(&file_id).copied();
         let mut scope: ScopeMap = HashMap::new();
         let mut visited: HashSet<FileId> = HashSet::new();
         let mut queue: VecDeque<(FileId, usize)> = VecDeque::new();
@@ -78,7 +96,7 @@ impl FlattenedScopeCache {
                 continue;
             }
 
-            if let Some(symbols) = symbol_index.get(&current) {
+            if let Some(symbols) = ctx.symbol_index.get(&current) {
                 for (sym_id, name, sym_lang, visibility) in symbols {
                     // TODO(MVP): Language-aware default visibility - Python/JS default
                     //             public, Rust/C++ default private. Currently over-approximates
@@ -110,16 +128,18 @@ impl FlattenedScopeCache {
                 }
             }
 
-            if let Some(neighbors) = import_adjacency.get(&current) {
+            if let Some(neighbors) = ctx.import_adjacency.get(&current) {
                 for &neighbor in neighbors {
                     if !visited.contains(&neighbor) {
                         queue.push_back((neighbor, distance + 1));
                     } else if neighbor == file_id {
-                        let path = file_paths
+                        let path = ctx
+                            .file_paths
                             .get(&current)
                             .cloned()
                             .unwrap_or_else(|| PathBuf::from("<unknown>"));
-                        let root_path = file_paths
+                        let root_path = ctx
+                            .file_paths
                             .get(&file_id)
                             .map(|p| p.display().to_string())
                             .unwrap_or_else(|| "<unknown>".to_string());
@@ -397,18 +417,14 @@ mod tests {
             vec![(SymbolId(10), "main".into(), LangId::Python, None)],
         );
 
-        let import_adjacency: HashMap<FileId, Vec<FileId>> = HashMap::new();
-        let mut file_languages = HashMap::new();
-        file_languages.insert(FileId(0), LangId::Python);
-        let file_paths: HashMap<FileId, PathBuf> = HashMap::new();
+        let ctx = ResolutionContext {
+            symbol_index,
+            import_adjacency: HashMap::new(),
+            file_languages: HashMap::from([(FileId(0), LangId::Python)]),
+            file_paths: HashMap::new(),
+        };
 
-        let cache = FlattenedScopeCache::build(
-            &symbol_index,
-            &import_adjacency,
-            &file_languages,
-            &file_paths,
-            &mut Vec::new(),
-        );
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
         let result = cache.resolve(FileId(0), "main");
         assert!(result.is_some());
         let matches = result.unwrap();
@@ -431,21 +447,17 @@ mod tests {
             )],
         );
 
-        let mut import_adjacency = HashMap::new();
-        import_adjacency.insert(FileId(0), vec![FileId(1)]);
+        let ctx = ResolutionContext {
+            symbol_index,
+            import_adjacency: HashMap::from([(FileId(0), vec![FileId(1)])]),
+            file_languages: HashMap::from([
+                (FileId(0), LangId::Python),
+                (FileId(1), LangId::Python),
+            ]),
+            file_paths: HashMap::new(),
+        };
 
-        let mut file_languages = HashMap::new();
-        file_languages.insert(FileId(0), LangId::Python);
-        file_languages.insert(FileId(1), LangId::Python);
-        let file_paths: HashMap<FileId, PathBuf> = HashMap::new();
-
-        let cache = FlattenedScopeCache::build(
-            &symbol_index,
-            &import_adjacency,
-            &file_languages,
-            &file_paths,
-            &mut Vec::new(),
-        );
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
         let result = cache.resolve(FileId(0), "helper");
         assert!(result.is_some());
         let matches = result.unwrap();
@@ -462,18 +474,14 @@ mod tests {
             vec![(SymbolId(10), "foo".into(), LangId::Python, None)],
         );
 
-        let import_adjacency = HashMap::new();
-        let mut file_languages = HashMap::new();
-        file_languages.insert(FileId(0), LangId::Python);
-        let file_paths: HashMap<FileId, PathBuf> = HashMap::new();
+        let ctx = ResolutionContext {
+            symbol_index,
+            import_adjacency: HashMap::new(),
+            file_languages: HashMap::from([(FileId(0), LangId::Python)]),
+            file_paths: HashMap::new(),
+        };
 
-        let cache = FlattenedScopeCache::build(
-            &symbol_index,
-            &import_adjacency,
-            &file_languages,
-            &file_paths,
-            &mut Vec::new(),
-        );
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
         assert!(cache.resolve(FileId(0), "bar").is_none());
     }
 
@@ -500,22 +508,20 @@ mod tests {
         );
 
         // Cycle: 0 -> 1 -> 0
-        let mut import_adjacency = HashMap::new();
-        import_adjacency.insert(FileId(0), vec![FileId(1)]);
-        import_adjacency.insert(FileId(1), vec![FileId(0)]);
+        let ctx = ResolutionContext {
+            symbol_index,
+            import_adjacency: HashMap::from([
+                (FileId(0), vec![FileId(1)]),
+                (FileId(1), vec![FileId(0)]),
+            ]),
+            file_languages: HashMap::from([
+                (FileId(0), LangId::Python),
+                (FileId(1), LangId::Python),
+            ]),
+            file_paths: HashMap::new(),
+        };
 
-        let mut file_languages = HashMap::new();
-        file_languages.insert(FileId(0), LangId::Python);
-        file_languages.insert(FileId(1), LangId::Python);
-        let file_paths: HashMap<FileId, PathBuf> = HashMap::new();
-
-        let cache = FlattenedScopeCache::build(
-            &symbol_index,
-            &import_adjacency,
-            &file_languages,
-            &file_paths,
-            &mut Vec::new(),
-        );
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
         // Should not infinite loop
         assert!(cache.resolve(FileId(0), "b").is_some());
         assert!(cache.resolve(FileId(1), "a").is_some());
@@ -535,21 +541,14 @@ mod tests {
             )],
         );
 
-        let mut import_adjacency = HashMap::new();
-        import_adjacency.insert(FileId(0), vec![FileId(1)]);
+        let ctx = ResolutionContext {
+            symbol_index,
+            import_adjacency: HashMap::from([(FileId(0), vec![FileId(1)])]),
+            file_languages: HashMap::from([(FileId(0), LangId::Python), (FileId(1), LangId::Rust)]),
+            file_paths: HashMap::new(),
+        };
 
-        let mut file_languages = HashMap::new();
-        file_languages.insert(FileId(0), LangId::Python);
-        file_languages.insert(FileId(1), LangId::Rust);
-        let file_paths: HashMap<FileId, PathBuf> = HashMap::new();
-
-        let cache = FlattenedScopeCache::build(
-            &symbol_index,
-            &import_adjacency,
-            &file_languages,
-            &file_paths,
-            &mut Vec::new(),
-        );
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
         let result = cache.resolve(FileId(0), "util");
         assert!(result.is_some());
         assert_eq!(result.unwrap()[0].1, 0.6);

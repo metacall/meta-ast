@@ -7,6 +7,7 @@ pub mod language;
 pub mod model;
 pub mod output;
 pub mod parser;
+pub mod pipeline;
 
 pub use error::{Diagnostic, Error, Severity};
 pub use input::detect_language;

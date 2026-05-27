@@ -62,7 +62,7 @@ fn cpp_import_ref_query() -> &'static tree_sitter::Query {
     &CPP_IMPORT_REF_QUERY
 }
 
-pub const CPP_SPEC: LanguageSpec = LanguageSpec {
+pub(crate) const CPP_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["cc", "cpp", "cxx"],
     grammar_fn: || tree_sitter_cpp::LANGUAGE.into(),
     query_fn: cpp_query,

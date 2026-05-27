@@ -2,7 +2,7 @@ use crate::language::LanguageSpec;
 use crate::model::Visibility;
 use std::sync::LazyLock;
 
-pub const TS_FAMILY_QUERY: &str = r#"
+pub(crate) const TS_FAMILY_QUERY: &str = r#"
 (function_declaration
   "async"? @async
   name: (identifier) @name
@@ -75,7 +75,7 @@ static TS_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     )
 });
 
-pub const TS_FAMILY_IMPORT_QUERY: &str = r#"
+pub(crate) const TS_FAMILY_IMPORT_QUERY: &str = r#"
 (import_statement
   source: (string) @import.path)
 (import_statement
@@ -93,7 +93,7 @@ pub const TS_FAMILY_IMPORT_QUERY: &str = r#"
       (identifier) @import.symbol)))
 "#;
 
-pub const TS_FAMILY_REFERENCE_QUERY: &str = r#"
+pub(crate) const TS_FAMILY_REFERENCE_QUERY: &str = r#"
 (call_expression
   function: (identifier) @reference.name)
 (call_expression
@@ -117,7 +117,7 @@ fn ts_query() -> &'static tree_sitter::Query {
     &TS_QUERY
 }
 
-pub const TS_SPEC: LanguageSpec = LanguageSpec {
+pub(crate) const TS_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["ts", "cts", "mts"],
     grammar_fn: || tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
     query_fn: ts_query,

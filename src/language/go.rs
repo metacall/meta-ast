@@ -86,7 +86,7 @@ fn go_import_ref_query() -> &'static tree_sitter::Query {
     &GO_IMPORT_REF_QUERY
 }
 
-pub const GO_SPEC: LanguageSpec = LanguageSpec {
+pub(crate) const GO_SPEC: LanguageSpec = LanguageSpec {
     extensions: &["go"],
     grammar_fn: || tree_sitter_go::LANGUAGE.into(),
     query_fn: go_query,
