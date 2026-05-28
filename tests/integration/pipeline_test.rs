@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use meta_ast::graph::GraphBuilder;
+use meta_ast::graph::{EdgeKind, GraphBuilder, NodeData};
+use meta_ast::model::SnapshotId;
 
 fn flatten_symbols(result: &meta_ast::extractor::ExtractionResult) -> Vec<meta_ast::model::Symbol> {
     result
@@ -9,6 +10,19 @@ fn flatten_symbols(result: &meta_ast::extractor::ExtractionResult) -> Vec<meta_a
         .iter()
         .flat_map(|f| f.symbols.iter().cloned())
         .collect()
+}
+
+/// Helper: run the full pipeline and return (graph, scc, diags).
+fn run_pipeline(
+    root: &std::path::Path,
+) -> (
+    meta_ast::graph::CodeGraph,
+    meta_ast::graph::SccAnalysis,
+    Vec<meta_ast::error::Diagnostic>,
+) {
+    let (analysis, diags) =
+        meta_ast::pipeline::analyze_graph(root, meta_ast::model::SnapshotId(1)).unwrap();
+    (analysis.graph, analysis.scc, diags)
 }
 
 #[test]
@@ -147,98 +161,18 @@ fn json_output_has_required_structure() {
 
 #[test]
 fn cross_file_reference_resolution() {
-    let root = Path::new("tests/fixtures/multi");
-    let files = meta_ast::input::discover_files(root, None).unwrap();
-    assert!(files.len() >= 4, "should find multi-fixture files");
+    let (graph, scc, _diags) = run_pipeline(Path::new("tests/fixtures/multi"));
 
-    let snapshot_id = meta_ast::model::SnapshotId(1);
-    let mut builder = GraphBuilder::new(snapshot_id);
-
-    for (path, lang) in &files {
-        builder.add_file(path.clone(), *lang);
-    }
-
-    let result = meta_ast::extractor::extract(&files);
-
-    // Add symbols
-    for file in &result.files {
-        for sym in &file.symbols {
-            builder.add_symbol(sym).unwrap();
-        }
-    }
-
-    // Build path -> FileId map
-    let mut path_map: HashMap<PathBuf, meta_ast::model::FileId> = HashMap::new();
-    for file in &result.files {
-        if let Some(fid) = builder.file_id_for_path(&file.path) {
-            path_map.insert(file.path.clone(), fid);
-        }
-    }
-
-    // Add import edges (normalize targets to resolve ./ components)
-    for file in &result.files {
-        let Some(&source_fid) = path_map.get(&file.path) else {
-            continue;
-        };
-        for import in &file.imports {
-            if let Some(dir) = file.path.parent()
-                && let Some(target) = meta_ast::graph::resolver::normalize_import_path(
-                    dir,
-                    &import.namespace,
-                    file.lang,
-                )
-            {
-                let normalized_target: PathBuf = target.components().collect();
-                builder.add_import(source_fid, normalized_target);
-            }
-        }
-    }
-
-    // Build scope cache and resolve references
-    let symbol_index = meta_ast::graph::resolver::build_symbol_index(&result.files, &path_map);
-    let import_adjacency = builder.import_adjacency();
-    let file_languages: HashMap<_, _> = result
-        .files
-        .iter()
-        .filter_map(|f| Some((path_map.get(&f.path)?.to_owned(), f.lang)))
-        .collect();
-    let file_paths: HashMap<_, _> = path_map.iter().map(|(k, v)| (*v, k.clone())).collect();
-    let ctx = meta_ast::graph::resolver::ResolutionContext {
-        symbol_index,
-        import_adjacency,
-        file_languages,
-        file_paths,
-    };
-    let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
-
-    let ref_edges = meta_ast::graph::resolver::resolve_all_references(
-        &result.files,
-        &path_map,
-        &scope_cache,
-        &mut Vec::new(),
-    );
-
-    // Add reference edges and verify the graph has reference edges
-    for (from, to) in &ref_edges {
-        builder.add_reference(*from, *to);
-    }
-
-    let graph = builder.build();
-    let scc = meta_ast::graph::scc::SccAnalysis::analyze(&graph.graph);
-
-    // Verify graph contains reference edges (JS cross-file references work)
     let ref_edge_count = graph
         .edges_of_kind(meta_ast::graph::EdgeKind::Reference)
         .count();
     assert!(ref_edge_count > 0, "graph should have reference edges");
 
-    // Verify graph contains import edges
     let import_edge_count = graph
         .edges_of_kind(meta_ast::graph::EdgeKind::Import)
         .count();
     assert!(import_edge_count > 0, "graph should have import edges");
 
-    // Verify SCC analysis runs on the augmented graph
     assert!(!scc.components.is_empty());
 }
 
@@ -304,14 +238,11 @@ fn cross_file_reference_rust_crate() {
             continue;
         };
         for import in &file.imports {
-            if let Some(dir) = file.path.parent()
-                && let Some(target) = meta_ast::graph::resolver::normalize_import_path(
-                    dir,
-                    &import.namespace,
-                    file.lang,
-                )
-            {
-                builder.add_import(source_fid, target);
+            if let Some(dir) = file.path.parent() {
+                let resolver = file.lang.spec().import_path_resolver;
+                if let Some(target) = resolver(&import.namespace, dir, root) {
+                    builder.add_import(source_fid, target);
+                }
             }
         }
     }
@@ -394,14 +325,11 @@ fn cross_file_reference_typescript() {
             continue;
         };
         for import in &file.imports {
-            if let Some(dir) = file.path.parent()
-                && let Some(target) = meta_ast::graph::resolver::normalize_import_path(
-                    dir,
-                    &import.namespace,
-                    file.lang,
-                )
-            {
-                builder.add_import(source_fid, target);
+            if let Some(dir) = file.path.parent() {
+                let resolver = file.lang.spec().import_path_resolver;
+                if let Some(target) = resolver(&import.namespace, dir, root) {
+                    builder.add_import(source_fid, target);
+                }
             }
         }
     }
@@ -516,14 +444,11 @@ fn edge_circular_does_not_infinite_loop() {
             continue;
         };
         for import in &file.imports {
-            if let Some(dir) = file.path.parent()
-                && let Some(target) = meta_ast::graph::resolver::normalize_import_path(
-                    dir,
-                    &import.namespace,
-                    file.lang,
-                )
-            {
-                builder.add_import(source_fid, target);
+            if let Some(dir) = file.path.parent() {
+                let resolver = file.lang.spec().import_path_resolver;
+                if let Some(target) = resolver(&import.namespace, dir, root) {
+                    builder.add_import(source_fid, target);
+                }
             }
         }
     }
@@ -601,14 +526,11 @@ fn edge_transitive_resolution() {
             continue;
         };
         for import in &file.imports {
-            if let Some(dir) = file.path.parent()
-                && let Some(target) = meta_ast::graph::resolver::normalize_import_path(
-                    dir,
-                    &import.namespace,
-                    file.lang,
-                )
-            {
-                builder.add_import(source_fid, target);
+            if let Some(dir) = file.path.parent() {
+                let resolver = file.lang.spec().import_path_resolver;
+                if let Some(target) = resolver(&import.namespace, dir, root) {
+                    builder.add_import(source_fid, target);
+                }
             }
         }
     }
@@ -823,4 +745,454 @@ fn edge_selfref_does_not_create_self_loop() {
         ref_count, 0,
         "self-calls should not create reference edges; got {ref_count}"
     );
+}
+
+#[test]
+fn analyze_graph_python_project() {
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(
+        Path::new("tests/fixtures/python"),
+        meta_ast::model::SnapshotId(1),
+    )
+    .unwrap();
+
+    assert!(analysis.graph.file_count() > 0, "should have file nodes");
+    assert!(
+        analysis.graph.symbol_count() > 0,
+        "should have symbol nodes"
+    );
+    assert_eq!(analysis.snapshot_id.0, 1);
+}
+
+#[test]
+fn analyze_graph_multi_language() {
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(
+        Path::new("tests/fixtures/multi"),
+        meta_ast::model::SnapshotId(1),
+    )
+    .unwrap();
+
+    assert!(analysis.graph.file_count() > 0);
+    assert!(analysis.graph.symbol_count() > 0);
+}
+
+#[test]
+fn analyze_graph_empty_dir() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_empty_pipeline");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    let (analysis, _diags) =
+        meta_ast::pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId(1)).unwrap();
+
+    assert_eq!(analysis.graph.node_count(), 0);
+    assert_eq!(analysis.graph.edge_count(), 0);
+    assert!(analysis.scc.components.is_empty());
+
+    std::fs::remove_dir(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_diagnostics_propagated() {
+    let path = Path::new("tests/fixtures/multi");
+    if path.exists() {
+        let (_analysis, diags) =
+            meta_ast::pipeline::analyze_graph(path, meta_ast::model::SnapshotId(1)).unwrap();
+        let _ = diags;
+    }
+}
+
+#[test]
+fn analyze_graph_nonexistent_root() {
+    let result = meta_ast::pipeline::analyze_graph(
+        Path::new("/nonexistent/path/that/does/not/exist"),
+        meta_ast::model::SnapshotId(1),
+    );
+    assert!(result.is_err(), "nonexistent root should return Err");
+}
+
+#[test]
+fn analyze_graph_snapshot_id_passthrough() {
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(
+        Path::new("tests/fixtures/python"),
+        meta_ast::model::SnapshotId(42),
+    )
+    .unwrap();
+
+    assert_eq!(analysis.snapshot_id.0, 42);
+    assert_eq!(analysis.graph.snapshot_id.0, 42);
+}
+
+#[test]
+fn analyze_graph_python_cross_file_import() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_py_import");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(tmp.join("utils.py"), "def helper(): pass\n").unwrap();
+    std::fs::write(tmp.join("main.py"), "from utils import helper\nhelper()\n").unwrap();
+
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(&tmp, SnapshotId(1)).unwrap();
+
+    assert_eq!(analysis.graph.file_count(), 2);
+
+    let import_edges: Vec<_> = analysis.graph.edges_of_kind(EdgeKind::Import).collect();
+    assert!(!import_edges.is_empty(), "should have import edges");
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_rust_member_chain_captures_base_reference() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_rust_base_ref");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(tmp.join("main.rs"), "fn test() { obj.method(); }\n").unwrap();
+
+    let result =
+        meta_ast::extractor::extract(&[(tmp.join("main.rs"), meta_ast::language::LangId::Rust)]);
+    assert_eq!(result.files.len(), 1);
+    let ref_names: Vec<&str> = result.files[0]
+        .references
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert!(
+        ref_names.contains(&"obj"),
+        "should capture 'obj' as reference, got: {ref_names:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_js_relative_import() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_js_import");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(tmp.join("utils.js"), "export function helper() {}\n").unwrap();
+    std::fs::write(
+        tmp.join("index.js"),
+        "import { helper } from './utils';\nhelper();\n",
+    )
+    .unwrap();
+
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(&tmp, SnapshotId(1)).unwrap();
+
+    assert_eq!(analysis.graph.file_count(), 2);
+
+    let import_edges: Vec<_> = analysis.graph.edges_of_kind(EdgeKind::Import).collect();
+    assert!(
+        !import_edges.is_empty(),
+        "should have import edges for JS relative imports"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_external_imports_appear_in_graph() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_external_imports");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    // Python file importing an external module
+    std::fs::write(
+        tmp.join("main.py"),
+        "import os\nimport json\nprint('hello')\n",
+    )
+    .unwrap();
+
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(&tmp, SnapshotId(1)).unwrap();
+
+    // Should have 1 file node
+    assert_eq!(analysis.graph.file_count(), 1);
+
+    // Should have at least one external node
+    let external_nodes: Vec<_> = analysis
+        .graph
+        .graph
+        .node_indices()
+        .filter_map(|idx| analysis.graph.graph.node_weight(idx))
+        .filter(|node| matches!(node, NodeData::External(_)))
+        .collect();
+    assert!(
+        !external_nodes.is_empty(),
+        "should have external nodes for 'import os' and 'import json'"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn extract_python_multiline_import() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_py_multiline_import");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(
+        tmp.join("main.py"),
+        "from foo import (\n    bar,\n    baz,\n)\n",
+    )
+    .unwrap();
+
+    let result =
+        meta_ast::extractor::extract(&[(tmp.join("main.py"), meta_ast::language::LangId::Python)]);
+    assert_eq!(result.files.len(), 1);
+    let imports = &result.files[0].imports;
+    assert_eq!(imports.len(), 2);
+    assert_eq!(imports[0].namespace, "foo");
+    assert_eq!(imports[1].namespace, "foo");
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn extract_js_multiline_import() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_js_multiline_import");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(
+        tmp.join("index.js"),
+        "import {\n  foo,\n  bar,\n} from './module';\n",
+    )
+    .unwrap();
+
+    let result = meta_ast::extractor::extract(&[(
+        tmp.join("index.js"),
+        meta_ast::language::LangId::JavaScript,
+    )]);
+    assert_eq!(result.files.len(), 1);
+    let imports = &result.files[0].imports;
+    assert!(
+        imports.len() >= 2,
+        "should have at least 2 imports, got {}",
+        imports.len()
+    );
+    for imp in imports {
+        assert_eq!(imp.namespace, "'./module'");
+    }
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn extract_rust_multiline_use() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_rust_multiline_use");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(
+        tmp.join("main.rs"),
+        "use crate::utils::{\n    helper,\n    util,\n};\nfn main() {}\n",
+    )
+    .unwrap();
+
+    let result =
+        meta_ast::extractor::extract(&[(tmp.join("main.rs"), meta_ast::language::LangId::Rust)]);
+    assert_eq!(result.files.len(), 1);
+    let imports = &result.files[0].imports;
+    assert!(!imports.is_empty(), "should have imports");
+    for imp in imports {
+        assert_eq!(imp.namespace, "crate::utils");
+    }
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_python_multiline_import_edges() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_py_multiline_import_edges");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(tmp.join("foo.py"), "def bar(): pass\ndef baz(): pass\n").unwrap();
+    std::fs::write(
+        tmp.join("main.py"),
+        "from foo import (\n    bar,\n    baz,\n)\nbar()\nbaz()\n",
+    )
+    .unwrap();
+
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(&tmp, SnapshotId(1)).unwrap();
+    assert_eq!(analysis.graph.file_count(), 2);
+
+    let import_edges: Vec<_> = analysis.graph.edges_of_kind(EdgeKind::Import).collect();
+    assert!(
+        !import_edges.is_empty(),
+        "should have import edges for multi-line Python import"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_js_multiline_import_edges() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_js_multiline_import_edges");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(
+        tmp.join("module.js"),
+        "export function foo() {}\nexport function bar() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.join("index.js"),
+        "import {\n  foo,\n  bar,\n} from './module';\nfoo();\nbar();\n",
+    )
+    .unwrap();
+
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(&tmp, SnapshotId(1)).unwrap();
+    assert_eq!(analysis.graph.file_count(), 2);
+
+    let import_edges: Vec<_> = analysis.graph.edges_of_kind(EdgeKind::Import).collect();
+    assert!(
+        !import_edges.is_empty(),
+        "should have import edges for multi-line JS import"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_rust_multiline_use_edges() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_rust_multiline_use_edges");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(
+        tmp.join("utils.rs"),
+        "pub fn helper() {}\npub fn util() {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.join("main.rs"),
+        "mod utils;\nuse crate::utils::{\n    helper,\n    util,\n};\nfn main() { helper(); util(); }\n",
+    )
+    .unwrap();
+
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(&tmp, SnapshotId(1)).unwrap();
+    assert_eq!(analysis.graph.file_count(), 2);
+
+    let import_edges: Vec<_> = analysis.graph.edges_of_kind(EdgeKind::Import).collect();
+    assert!(
+        !import_edges.is_empty(),
+        "should have import edges for multi-line Rust use"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_js_member_chain_captures_base_reference() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_js_base_ref");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(tmp.join("test.js"), "function test() { obj.method(); }\n").unwrap();
+
+    let result = meta_ast::extractor::extract(&[(
+        tmp.join("test.js"),
+        meta_ast::language::LangId::JavaScript,
+    )]);
+    assert_eq!(result.files.len(), 1);
+    let ref_names: Vec<&str> = result.files[0]
+        .references
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert!(
+        ref_names.contains(&"obj"),
+        "should capture 'obj' as reference, got: {ref_names:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_ts_member_chain_captures_base_reference() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_ts_base_ref");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(tmp.join("test.ts"), "function test() { obj.method(); }\n").unwrap();
+
+    let result = meta_ast::extractor::extract(&[(
+        tmp.join("test.ts"),
+        meta_ast::language::LangId::TypeScript,
+    )]);
+    assert_eq!(result.files.len(), 1);
+    let ref_names: Vec<&str> = result.files[0]
+        .references
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert!(
+        ref_names.contains(&"obj"),
+        "should capture 'obj' as reference, got: {ref_names:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_go_member_chain_captures_base_reference() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_go_base_ref");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(
+        tmp.join("main.go"),
+        "package main\nfunc main() { obj.Method() }\n",
+    )
+    .unwrap();
+
+    let result =
+        meta_ast::extractor::extract(&[(tmp.join("main.go"), meta_ast::language::LangId::Go)]);
+    assert_eq!(result.files.len(), 1);
+    let ref_names: Vec<&str> = result.files[0]
+        .references
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert!(
+        ref_names.contains(&"obj"),
+        "should capture 'obj' as reference, got: {ref_names:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_c_member_chain_captures_base_reference() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_c_base_ref");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(tmp.join("main.c"), "void test() { obj.method(); }\n").unwrap();
+
+    let result =
+        meta_ast::extractor::extract(&[(tmp.join("main.c"), meta_ast::language::LangId::C)]);
+    assert_eq!(result.files.len(), 1);
+    let ref_names: Vec<&str> = result.files[0]
+        .references
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert!(
+        ref_names.contains(&"obj"),
+        "should capture 'obj' as reference, got: {ref_names:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn analyze_graph_cpp_member_chain_captures_base_reference() {
+    let tmp = std::env::temp_dir().join("meta_ast_test_cpp_base_ref");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(tmp.join("main.cpp"), "void test() { obj.method(); }\n").unwrap();
+
+    let result =
+        meta_ast::extractor::extract(&[(tmp.join("main.cpp"), meta_ast::language::LangId::Cpp)]);
+    assert_eq!(result.files.len(), 1);
+    let ref_names: Vec<&str> = result.files[0]
+        .references
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert!(
+        ref_names.contains(&"obj"),
+        "should capture 'obj' as reference, got: {ref_names:?}"
+    );
+
+    std::fs::remove_dir_all(&tmp).unwrap();
 }

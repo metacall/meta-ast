@@ -1,6 +1,5 @@
 ---
 source: src/language/go.rs
-assertion_line: 255
 expression: symbols
 ---
 [
@@ -19,7 +18,7 @@ expression: symbols
         "column": 1
       }
     },
-    "visibility": null,
+    "visibility": "Public",
     "signature": null,
     "docstring": null,
     "is_async": false
@@ -39,7 +38,7 @@ expression: symbols
         "column": 1
       }
     },
-    "visibility": null,
+    "visibility": "Public",
     "signature": "()",
     "docstring": null,
     "is_async": false
@@ -59,7 +58,7 @@ expression: symbols
         "column": 1
       }
     },
-    "visibility": null,
+    "visibility": "Public",
     "signature": "()",
     "docstring": null,
     "is_async": false
@@ -79,7 +78,7 @@ expression: symbols
         "column": 1
       }
     },
-    "visibility": null,
+    "visibility": "Public",
     "signature": null,
     "docstring": null,
     "is_async": false
