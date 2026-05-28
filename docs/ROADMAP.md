@@ -1,10 +1,10 @@
 # Roadmap
 
-## Phase 1 - Core & MVP symbols
+## Phase 1 - Core & MVP symbols [COMPLETE]
 
 Goals:
 
-- Parser lifecycle implementation per language "python,JS/TS".
+- Parser lifecycle implementation for all 8 languages: Python, JavaScript, TypeScript, TSX, C, C++, Rust, Go.
 - Symbol extraction and normalized IR.
 - Inspect-compatible JSON output (`funcs`, `classes`, `objects`).
 
@@ -14,7 +14,7 @@ Exit gates:
 2. Stable JSON output for representative projects.
 3. Contract tests for required keys pass.
 
-## Phase 2 - Dependency graph & SCC
+## Phase 2 - Dependency graph & SCC [COMPLETE]
 
 Goals:
 
@@ -27,7 +27,7 @@ Exit gates:
 2. Cross-file dependency mapping validated on mixed-language samples.
 3. ReferenceEdges appear in graph output with confidence scores in cross-file resolution tests.
 
-## Phase 3 - Datagraph & optional sink
+## Phase 3 - Datagraph & optional sink [NOT STARTED]
 
 Goals:
 
@@ -39,12 +39,13 @@ Exit gates:
 1. Export format validated.
 2. Snapshot/version semantics documented and tested.
 
-## Phase 4 - CLI polish, output formats, visualization
+## Phase 4 - CLI polish, output formats, visualization [NOT STARTED]
 
 Goals:
 
 - Structured output (JSON + YAML) with `--format` flag.
 - Interactive HTML dashboard with Cytoscape.js via `--html` flag.
+- `--self-contained` embeds Cytoscape.js offline (requires `embed-cytoscape` feature).
 - Watch mode and incremental-update strategy.
 - C ABI scaffolding and header generation.
 
@@ -57,7 +58,7 @@ Exit gates:
 5. C ABI smoke tests pass.
 6. Incremental performance target evidence captured.
 
-## Phase 5 - Validation and delivery
+## Phase 5 - Validation and delivery [NOT STARTED]
 
 Goals:
 

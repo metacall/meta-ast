@@ -13,9 +13,11 @@
 2. Tree-sitter parse per file.
 3. Query-based symbol extraction per language pack.
 4. Intermediate symbol model normalization.
-5. Dependency graph construction (Import edges from cross-file module resolution, Reference edges from scope-aware symbol resolution).
-6. SCC analysis (Tarjan) and deployability annotation.
-7. Output emission (JSON, YAML, or interactive HTML dashboard).
+5. Dependency graph construction (initial node + file edges).
+6. Import path resolution via per-language resolvers (mapping import strings to file IDs).
+7. Cross-file reference resolution via `FlattenedScopeCache` (DFS the import graph once per file, then O(1) scope lookups).
+8. SCC analysis (Tarjan) and deployability annotation.
+9. Output emission (JSON, YAML, or interactive HTML dashboard).
 
 ## 3. Component boundaries
 
@@ -23,11 +25,13 @@
 - **Parser layer:** Tree-sitter parser lifecycle and tree ownership.
 - **Extractor layer:** language-specific query packs and capture mapping.
 - **Model layer:** normalized symbol/domain structs.
-- **Graph layer:** directed graph assembly + SCC algorithms.
+- **Graph layer:** directed graph assembly + SCC algorithms. External dependencies (stdlib, third-party packages) that are referenced but not part of the project are represented as `ExternalNode` entries (`graph/node.rs:83`), carrying the raw import path and language. They appear in the graph but have no file-backed symbol data.
+- **Pipeline layer:** full graph analysis orchestration (`pipeline.rs`).
+- **Resolver layer:** cross-file reference resolution via `FlattenedScopeCache` (`graph/resolver.rs`).
 - **Output layer:** inspect-compatible serialization and optional adapters.
 - **Interface layer:** CLI + library API (future: C ABI).
 
-Detailed module layout, data structures, and dependency direction are defined in `structure.md`.
+Detailed module layout, data structures, and dependency direction are defined in `STRUCTURE.md`.
 
 ## 4. Data contracts (summary)
 
@@ -41,7 +45,6 @@ Static extensions:
 
 - `source_range`
 - `docstring` (where available)
-- `complexity_score` (defined policy-driven; may be nullable initially)
 
 Detailed graph contract is defined in `specs/graph-model.md`, including `language_id`, project-root-relative `path`, `snapshot_id`, `file_id`, `visibility`, and `DataNode` semantics.
 
@@ -57,7 +60,7 @@ Detailed graph contract is defined in `specs/graph-model.md`, including `languag
 - Optimized mode: apply `InputEdit` + changed range reduction.
 - Optimization is benchmark-triggered and must not compromise correctness.
 
-Parallel parse + extract uses rayon per-file; graph assembly is sequential. See `structure.md` section 5 for pipeline phase details.
+Parallel parse + extract uses rayon per-file; graph assembly is sequential. See `STRUCTURE.md` section 5 for pipeline phase details.
 
 ## 7. Output formats
 

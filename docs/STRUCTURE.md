@@ -1,6 +1,6 @@
 # Code Structure and Design Plan
 
-This document defines the module layout, data structures, design patterns, language features, testing strategy, and implementation order for `meta-ast`. It is the authoritative reference for how code is organized and why and it will be refactored at the end of 4 phases to reflect the actual code documentation.
+This document defines the module layout, data structures, design patterns, language features, testing strategy, and implementation order for `meta-ast`. It is the authoritative reference for how code is organized and why.
 
 ---
 
@@ -11,14 +11,16 @@ src/
 ├── lib.rs                    Public API re-exports
 ├── main.rs                   CLI entrypoint
 ├── error.rs                  Error + Diagnostic types (thiserror)
+├── pipeline.rs               Full graph analysis orchestration
 │
 ├── model/
 │   ├── mod.rs                Symbol, SymbolKind, SourceRange, UnresolvedImport, UnresolvedReference, FileExtraction
-│   ├── ids.rs                FileId, SymbolId, SnapshotId (newtyped u32)
+│   ├── ids.rs                FileId, SymbolId, SnapshotId (newtyped u32 via define_id_type! macro)
 │   └── output.rs             InspectOutput, FuncEntry, ClassEntry, ObjectEntry
 │
 ├── language/
-│   ├── mod.rs                LangId enum, LanguagePack trait
+│   ├── mod.rs                LangId enum, LanguageSpec struct, DefaultVisibility, DocCommentConfig
+│   ├── common.rs             extract_with_spec, associate_docstrings, resolve_import_path_from_symbol_node
 │   ├── python.rs             Python queries + extraction
 │   ├── javascript.rs         JavaScript queries + extraction
 │   ├── typescript.rs         TypeScript queries + extraction
@@ -39,17 +41,17 @@ src/
 │
 ├── graph/
 │   ├── mod.rs                DiGraph construction, node/edge types, re-exports
-│   ├── node.rs               NodeData enum (File / Symbol)
+│   ├── node.rs               NodeData enum (File / Symbol / External)
 │   ├── edge.rs               EdgeKind enum (Ownership / Import / Reference) with confidence
-│   ├── builder.rs            GraphBuilder, EdgeNormalizer, import_adjacency
+│   ├── builder.rs            GraphBuilder, EdgeNormalizer, import_adjacency, external_index
 │   ├── scc.rs                Tarjan SCC + DeployabilityHint
-│   └── resolver.rs           FlattenedScopeCache + resolve_all_references (RFC 0009)
+│   └── resolver.rs           FlattenedScopeCache, ResolutionContext, resolve_all_references
 │
 ├── output/
 │   ├── mod.rs                OutputFormat enum (Json / Yaml) with serialize dispatch
 │   ├── inspect.rs            Inspect-compatible JSON/YAML emission
 │   ├── graph.rs              GraphOutput + SCC serialization (metadata, nodes, edges, sccs)
-│   └── dashboard.rs          Interactive HTML dashboard (Cytoscape.js, --html flag)
+│   └── dashboard.rs          Interactive HTML dashboard (Cytoscape.js, --html, --self-contained)
 │
 └── interface/
     ├── mod.rs                CLI module root
@@ -60,13 +62,14 @@ src/
 
 ```
 CLI (interface/)
-  → Output (output/)
-    → Model (model/)          ← core, no I/O or parsing knowledge
-    → Graph (graph/)          → depends on model + petgraph
-  → Extractor (extractor/)    → depends on model + language + parser
-    → Parser (parser/)        → depends on language (grammar dispatch)
-  → Input (input/)            → depends on language (detection)
-  → Error (error.rs)          ← cross-cutting
+  → Pipeline (pipeline.rs)  → orchestrates the full graph analysis
+    → Extractor (extractor/) → depends on model + language + parser
+      → Parser (parser/)     → depends on language (grammar dispatch)
+    → Graph (graph/)         → depends on model + petgraph
+      → Resolver (graph/resolver.rs) → cross-file reference resolution
+    → Input (input/)         → depends on language (detection)
+  → Output (output/)         → depends on model + graph
+  → Error (error.rs)         ← cross-cutting
 ```
 
 Outer layers depend on inner layers. The model layer has zero knowledge of parsing, I/O, or language specifics.
@@ -77,20 +80,15 @@ Outer layers depend on inner layers. The model layer has zero knowledge of parsi
 
 ### 2.1 ID Types
 
-Sequential `AtomicU32`-generated newtypes. Thread-safe, deterministic within a session, and type-safe against mixing.
+Sequential `AtomicU32`-generated newtypes via `define_id_type!` macro. Thread-safe, deterministic within a session, and type-safe against mixing.
 
 ```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-pub struct FileId(u32);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-pub struct SymbolId(u32);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-pub struct SnapshotId(u32);
+define_id_type!(FileId);
+define_id_type!(SymbolId);
+define_id_type!(SnapshotId);
 ```
 
-Each ID type has a corresponding generator (`IdGenerator<T>`) wrapping an `AtomicU32` for thread-safe allocation.
+Each ID type has a corresponding `IdGenerator<T>` wrapping an `AtomicU32` for thread-safe allocation.
 
 ### 2.2 Source Location
 
@@ -125,12 +123,14 @@ pub enum SymbolKind {
     Enum,
     Object,
     Constant,
+    Static,
     Module,
     Namespace,
     TypeAlias,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub enum Visibility {
     Public,
     Private,
@@ -151,35 +151,34 @@ pub struct Symbol {
 }
 ```
 
-### 2.4 Graph Model (Phase 2)
+### 2.4 Graph Model
 
-Node and edge kinds per `specs/graph-model.md`:
+Node and edge types:
 
 | Node | Fields |
 |------|--------|
 | `FileNode` | id, path (project-root-relative), language_id, snapshot_id |
 | `SymbolNode` | id, name, kind, file_id, visibility, source_range |
-| `DataNode` | id, symbol_id, scope, type_hint (Phase 3) |
+| `ExternalNode` | raw_path, language |
 
 | Edge | Direction |
 |------|-----------|
-| `ImportEdge` | FileNode → FileNode |
-| `ReferenceEdge` | SymbolNode → SymbolNode |
-| `OwnershipEdge` | FileNode → SymbolNode, SymbolNode → SymbolNode (nesting) |
-| `FlowEdge` | DataNode → DataNode (Phase 3) |
+| `OwnershipEdge` | FileNode -> SymbolNode, SymbolNode -> SymbolNode (nesting) |
+| `ImportEdge` | FileNode -> FileNode |
+| `ReferenceEdge` | SymbolNode -> SymbolNode |
 
-Graph invariants (per spec):
+Graph invariants:
 1. Every SymbolNode maps to exactly one FileNode.
 2. Ownership edges form an acyclic containment structure.
-3. SCC applies to dependency/reference subgraph only.
+3. SCC applies to dependency/reference subgraph only (Ownership excluded).
 4. Duplicate edges normalized by `(src, dst, edge_kind)`.
+5. External dependencies get `NodeData::External` placeholder nodes.
 
 ### 2.5 Inspect Output
 
-Stable contract per ADR-0005 and `specs/requirements.md` FR-3:
+Stable contract:
 
 ```rust
-#[derive(Debug, Serialize)]
 pub struct InspectOutput {
     pub funcs: Vec<FuncEntry>,
     pub classes: Vec<ClassEntry>,
@@ -193,16 +192,23 @@ Each entry type includes: `name`, `source_range`, optional `signature`, `visibil
 
 ## 3. Language System Design
 
-### 3.1 LanguagePack Trait
+### 3.1 LanguageSpec Struct
 
-Each language is a zero-sized unit struct implementing `LanguagePack`:
+Each language is a static `LanguageSpec` constant with function pointers (not a trait):
 
 ```rust
-pub trait LanguagePack: Clone + Send + Sync + 'static {
-    fn grammar(&self) -> tree_sitter::Language;
-    fn id(&self) -> &'static str;
-    fn file_extensions(&self) -> &'static [&'static str];
-    fn extract_symbols(&self, tree: &Tree, source: &[u8]) -> Vec<Symbol>;
+pub struct LanguageSpec {
+    pub extensions: &'static [&'static str],
+    pub grammar_fn: fn() -> tree_sitter::Language,
+    pub query_fn: fn() -> &'static Query,
+    pub import_path_resolver: fn(&str, &Path, &Path) -> Option<PathBuf>,
+    pub import_ref_query_fn: fn() -> &'static Query,
+    pub class_like_parents: &'static [&'static str],
+    pub ancestor_visibility_rules: &'static [(&'static str, Visibility)],
+    pub visibility_from_name: Option<fn(&str) -> Option<Visibility>>,
+    pub import_statement_kinds: &'static [&'static str],
+    pub default_visibility: DefaultVisibility,
+    pub doc_comment_config: Option<DocCommentConfig>,
 }
 ```
 
@@ -211,9 +217,11 @@ pub trait LanguagePack: Clone + Send + Sync + 'static {
 The aggregate dispatch enum. `#[non_exhaustive]` for forward compatibility:
 
 ```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, strum::Display, strum::AsRefStr)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+#[repr(usize)]
 pub enum LangId {
     Python,
     JavaScript,
@@ -226,44 +234,19 @@ pub enum LangId {
 }
 ```
 
-**TypeScript and TSX are separate variants** because `tree-sitter-typescript` provides two distinct grammars (`.ts` vs `.tsx` have different parsing rules for JSX).
-
-### 3.3 Registration Macro
-
-A declarative macro minimizes boilerplate when adding a new language:
-
-```rust
-macro_rules! impl_language {
-    ($lang:ident, $grammar:expr, $extract_fn:expr, $extensions:expr) => {
-        #[derive(Clone, Copy, Debug)]
-        pub struct $lang;
-
-        impl LanguagePack for $lang {
-            fn grammar(&self) -> tree_sitter::Language { $grammar.into() }
-            fn id(&self) -> &'static str { stringify!($lang) }
-            fn file_extensions(&self) -> &'static [&'static str] { $extensions }
-            fn extract_symbols(&self, tree: &Tree, source: &[u8]) -> Vec<Symbol> {
-                $extract_fn(tree, source)
-            }
-        }
-    };
-}
-```
-
-### 3.4 Adding a New Language
+### 3.3 Adding a New Language
 
 The process is:
 
 1. Add the tree-sitter grammar crate to `Cargo.toml`.
-2. Create `src/language/<name>.rs` with query constants and an extraction function.
-3. Invoke `impl_language!` to implement `LanguagePack`.
-4. Add a variant to `LangId` enum.
-5. Add a match arm in the dispatch function.
-6. Add fixture files and tests.
+2. Create `src/language/<name>.rs` with query constants, extraction function, and `LanguageSpec` constant.
+3. Add a variant to `LangId` enum.
+4. Add a match arm in `spec_for()`.
+5. Add fixture files and tests.
 
-so no trait objects, no runtime plugins, no `inventory` crate. Compile-time completeness checking via exhaustive match.
+No trait objects, no runtime plugins. Compile-time completeness checking via exhaustive match.
 
-### 3.5 Language Detection
+### 3.4 Language Detection
 
 `detect_language(path: &Path) -> Option<LangId>` maps file extensions to `LangId` variants. Lives in `input/mod.rs`.
 
@@ -284,22 +267,22 @@ so no trait objects, no runtime plugins, no `inventory` crate. Compile-time comp
 
 ### 4.1 Enum Static Dispatch (Language System)
 
-All language-specific behavior dispatches through `match` on `LangId`. No vtables, no `dyn` - full monomorphization and inline optimization. thanks to  ast-grep for inspiration.
+All language-specific behavior dispatches through `match` on `LangId`. No vtables, no `dyn` - full monomorphization and inline optimization.
 
 ### 4.2 Pipeline Pattern
 
-The analysis pipeline is a linear flow with well-defined phase boundaries:
+The analysis pipeline is orchestrated by `pipeline.rs`:
 
 ```
-Source Discovery → Parallel Parse + Extract → Graph Assembly → Output
-   (sequential)        (rayon par_iter)         (sequential)     (sequential)
+Source Discovery -> Parallel Parse + Extract -> Graph Assembly -> Import Resolution -> Reference Resolution -> SCC -> Output
+   (sequential)       (rayon par_iter)         (sequential)       (sequential)          (sequential)      (sequential)
 ```
 
-Parse and extract are combined per-file to avoid materializing all tree-sitter trees simultaneously (memory savings for large codebases).
+Parse and extract are combined per-file to avoid materializing all tree-sitter trees simultaneously.
 
 ### 4.3 Newtype Pattern
 
-`FileId`, `SymbolId`, `SnapshotId` are newtyped `u32` values. The compiler prevents mixing them, and `#[serde(transparent)]` keeps serialization clean.
+`FileId`, `SymbolId`, `SnapshotId` are newtyped `u32` values via `define_id_type!` macro. The compiler prevents mixing them, and `#[serde(transparent)]` keeps serialization clean.
 
 ### 4.4 Recoverable Error Accumulation
 
@@ -308,10 +291,6 @@ Parse errors do not abort extraction. The pipeline accumulates `Vec<Diagnostic>`
 ### 4.5 Immutable IR
 
 `Symbol` structs are constructed during extraction and never mutated. Downstream consumers (graph assembly, output serialization) read them immutably.
-
-### 4.6 Adapter Pattern
-
-Language-specific extractors are adapters that transform tree-sitter CST into the normalized `Symbol` model. The model is independent of any specific language grammar (per cargo-semver-checks architecture).
 
 ---
 
@@ -332,19 +311,10 @@ Language-specific extractors are adapters that transform tree-sitter CST into th
 | File discovery | Sequential | Single walk, fast I/O |
 | Parse + Extract | rayon `par_iter` | CPU-bound, per-file independent, largest time slice |
 | Graph assembly | Sequential | petgraph mutation + cross-file resolution requires single-threaded access |
-| Output serialization | Sequential | Single JSON document emission |
+| Import resolution | Sequential | Uses per-language import path resolvers |
+| Reference resolution | Sequential | FlattenedScopeCache + cross-file lookup |
+| Output serialization | Sequential | Single JSON/YAML document emission |
 
-### 5.3 Caching
-
-`moka::sync::Cache` with `get_with()` provides atomic single-computation guarantee per key. Used to deduplicate parsing across incremental runs. Key: `(PathBuf, content_hash)`.
-
-### 5.4 When rayon Is Not Worth It
-
-- **< 50 files**: Thread pool startup + synchronization overhead may exceed savings.
-- **Very small files (< 1KB)**: Parse time per file is microseconds; rayon overhead is comparable.
-- **Mitigation**: Sort files by size descending (largest first) to improve work stealing balance.
-
-** but the decision to use rayon has been made because this project aims to compete at large scale codebases and the usage of rayon maybe dynamically  gated behind a config later **
 ---
 
 ## 6. Error Handling
@@ -365,6 +335,9 @@ pub enum Error {
 
     #[error("config: {0}")]
     Config(String),
+
+    #[error("graph error: {0}")]
+    Graph(String),
 }
 ```
 
@@ -381,7 +354,7 @@ pub struct Diagnostic {
 }
 ```
 
-Diagnostics are accumulated in a `Vec<Diagnostic>` separate from the symbol model. Extraction continues on recoverable errors (ADR-0002).
+Diagnostics are accumulated in a `Vec<Diagnostic>` separate from the symbol model. Extraction continues on recoverable errors.
 
 ### 6.3 Error Recovery Rules
 
@@ -398,7 +371,7 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 
 **Why not `abort()`**: `panic!()` runs destructors, is propagated by rayon, and integrates with Rust's panic infrastructure. `abort()` skips all cleanup.
 
-**Why not `Result`**: Queries are compiled inside `LazyLock<T>::new()` closures which require `FnOnce() -> T` (infallible return). Threading `Result` through `LazyLock` -> `LanguageSpec.query_fn` -> `extract_with_spec` -> `extract_single_file` would touch 6+ functions across 4 modules for a failure mode that is a hardcoded-query bug.
+**Why not `Result`**: Queries are compiled inside `LazyLock<T>::new()` closures which require `FnOnce() -> T` (infallible return).
 
 **Mitigation**: `language::validate_queries()` eagerly initializes all 16 `LazyLock` statics at startup, ensuring any query bug panics immediately rather than after processing files.
 
@@ -410,15 +383,15 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 |---------|-------|
 | Edition 2024 | MSRV 1.92.0 |
 | `#[non_exhaustive]` | All public enums (`LangId`, `SymbolKind`, `Visibility`, `Severity`) |
-| Newtype pattern | `FileId(u32)`, `SymbolId(u32)` - prevent mixing at compile time |
+| Newtype pattern | `FileId`, `SymbolId`, `SnapshotId` via `define_id_type!` macro |
 | `impl From<X> for Error` | Automatic error conversion for `?` propagation |
 | `AtomicU32` | Thread-safe ID generation |
-| Declarative macros (`macro_rules!`) | `impl_language!` for zero-boilerplate language registration |
 | `serde` derive | All serializable types with `#[serde(rename_all = "snake_case")]` |
 | `thiserror` derive | Error types with formatted messages |
 | `clap` derive | CLI argument structs |
 | rayon `par_iter` | File-level parallelism |
-| moka `sync::Cache` | Parse deduplication cache |
+| `strum` derives | `LangId` display/serialization |
+| `LazyLock` | Language query static initialization |
 
 ---
 
@@ -438,23 +411,28 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 | `tree-sitter-go` | 0.25.0 | Go grammar |
 | `petgraph` | 0.8.3 | Directed graph + Tarjan SCC |
 | `serde` + `serde_json` | 1.0 | JSON serialization |
-| `clap` | 4.5 | CLI (derive API, env, color) |
-| `notify` | 8.2.0 | Filesystem watch mode |
-| `moka` | 0.12 | Multi-level caching (sync + future) |
+| `yaml_serde` | 0.10 | YAML serialization |
+| `strum` | 0.28 | Enum derive macros (Display, AsRefStr) |
+| `webbrowser` | 1.2 | Auto-open HTML dashboard in browser |
+| `clap` | 4.6 | CLI (derive API, env, color) |
 | `rayon` | 1.10 | Parallel file processing |
 | `thiserror` | 2.0 | Library error types |
 | `anyhow` | 1.0 | Application error boundary |
-| `dunce` | 1.0.5 | Path normalization |
-| `dotenvy` | 0.15 | Configuration |
-| `tracing` + `tracing-subscriber` | latest | Structured diagnostics (NFR-5) |
+| `ignore` | 0.4 | Gitignore-aware file walking |
+| `tracing` + `tracing-subscriber` | 0.1 / 0.3 | Structured diagnostics |
 
 ### 8.2 Development Dependencies
 
-| Crate | Purpose |
-|-------|---------|
-| `insta` | Snapshot testing for JSON output contracts |
-| `jsonschema` | Output schema validation in tests |
-| `criterion` | Benchmark gating (Phase 4) |
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `insta` | 1.47 | Snapshot testing for JSON output contracts |
+| `criterion` | 0.8 | Benchmark gating |
+
+### 8.3 Feature Flags
+
+| Feature | Purpose |
+|---------|---------|
+| `embed-cytoscape` | Embed Cytoscape.js directly in HTML dashboard (for offline use) |
 
 ---
 
@@ -462,12 +440,12 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 
 ```
 tests/
-├── language_detection.rs              Existing language detection tests
-│
+├── integration.rs                   Integration test module root
 ├── integration/
-│   ├── pipeline_test.rs               End-to-end: discover → parse → extract → output
-│   └── inspect_output_test.rs         JSON contract validation via jsonschema
-│
+│   ├── pipeline_test.rs             End-to-end: discover -> parse -> extract -> graph -> output
+│   ├── dashboard_test.rs            HTML dashboard generation tests
+│   ├── output_format_test.rs        JSON/YAML output format tests
+│   └── inspect_output_test.rs       Inspect-compatible output validation
 └── fixtures/
     ├── python/
     │   ├── simple_functions.py
@@ -476,7 +454,7 @@ tests/
     │   ├── imports.py
     │   ├── partial_syntax_error.py
     │   └── expected/
-    │       └── *.snap.json            Insta snapshot files
+    │       └── *.snap.json          Insta snapshot files
     ├── javascript/
     │   ├── functions.js
     │   ├── arrow_functions.js
@@ -519,8 +497,6 @@ tests/
 | Language detection | Unit tests | Extension-to-LangId mapping |
 | Per-language extraction | Fixture files + unit tests | Query correctness, capture mapping |
 | JSON output contract | `insta` snapshots | Regression detection |
-| Schema validation | `jsonschema` | Required keys, types, structure |
 | Error recovery | Fixture with invalid syntax | Partial results, no panics |
-| End-to-end pipeline | Integration tests | Full discover → output flow |
-| Determinism | Property test | Same input → identical output |
-| Performance | `criterion` benchmarks | Phase 4: < 100ms incremental target |
+| End-to-end pipeline | Integration tests | Full discover -> output flow |
+| Performance | `criterion` benchmarks | Extraction throughput |

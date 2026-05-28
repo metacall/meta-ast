@@ -8,34 +8,27 @@
 
 ## 2. Workflow layout
 
-- `lint.yml` - format + clippy + dependency policy checks.
-- `test.yml` - unit/integration/doc tests on Linux/macOS/Windows.
-- `security.yml` - dependency vulnerability checks.
-- `build.yml` - release build matrix and artifact upload.
+- `ci.yml` - single workflow with three jobs: test (nextest + doc tests), build (release artifacts), lint (fmt + clippy + cargo-deny).
 - `benchmark.yml` - criterion benchmarks and trend tracking.
-- `docs.yml` - docs generation and publication 'mdbook'.
+- `docs.yml` - docs generation and publication via mdbook.
 - `release.yml` - tag-driven release and package publication with changelog generation.
 
 ## 3. Quality gates
 
-Required for protected branch merge:
+Required for protected branch merge (all within `ci.yml`):
 
-1. Lint workflow green.
-2. Test matrix green.
-3. Security checks green.
-4. Build artifacts generated.
-
-Recommended optional gate:
-
-- Benchmark regression threshold enforcement.
+1. Lint job green (fmt + clippy + cargo-deny).
+2. Test matrix green (nextest + doc tests across OS/toolchain).
+3. Build artifacts generated (release binaries uploaded per OS).
 
 ## 4. Matrix strategy
 
 OS targets:
 
-- Linux
-- macOS
-- Windows
+- Linux (ubuntu-latest)
+- macOS (macos-latest)
+- Windows (windows-latest)
+- Windows ARM64 (windows-11-arm)
 
 Rust channels:
 
@@ -110,8 +103,8 @@ CI and local dev use `cargo-nextest` for faster test execution.
 
 ## 13. Benchmarks (criterion)
 
-- Dev dependency: `criterion` 0.5 with `html_reports` feature.
-- Benchmark target: `benches/pipeline.rs` - extraction throughput per language fixture.
+- Dev dependency: `criterion` 0.8 with `html_reports` feature.
+- Benchmark targets: `benches/pipeline.rs` (extraction throughput per language fixture), `benches/graph.rs` (graph operation throughput).
 - Profile: `opt-level = 3`, LTO enabled (see `[profile.bench]` in `Cargo.toml`).
 
 ## 14. Release targets
