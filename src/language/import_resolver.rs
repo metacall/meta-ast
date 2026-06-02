@@ -4,7 +4,9 @@
 //! that wraps existing stateless function pointers, allowing gradual
 //! migration to stateful per-language resolvers.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
 
 /// Stateful import path resolution seam.
 ///
@@ -38,16 +40,59 @@ impl ImportResolver for StatelessResolver {
 /// Stateful resolver for Python import paths.
 pub struct PythonResolver {
     f: fn(&str, &Path, &Path) -> Option<PathBuf>,
+    exists_cache: RwLock<HashMap<PathBuf, bool>>,
 }
 
 impl PythonResolver {
     pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
-        Self { f }
+        Self {
+            f,
+            exists_cache: RwLock::new(HashMap::new()),
+        }
     }
 }
 
 impl ImportResolver for PythonResolver {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+        let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+        if raw.is_empty() {
+            return None;
+        }
+
+        let check_exists = |path: &Path| -> bool {
+            let cache_val = self
+                .exists_cache
+                .read()
+                .ok()
+                .and_then(|cache| cache.get(path).copied());
+            if let Some(res) = cache_val {
+                return res;
+            }
+            let res = path.exists();
+            if let Ok(mut cache) = self.exists_cache.write() {
+                cache.insert(path.to_path_buf(), res);
+            }
+            res
+        };
+
+        if raw.starts_with('.') {
+            let relative = raw.trim_start_matches('.');
+            if relative.is_empty() {
+                return Some(source_dir.join("__init__.py"));
+            }
+            let path = source_dir.join(relative.replace('.', std::path::MAIN_SEPARATOR_STR));
+            let init_path = path.join("__init__.py");
+            if check_exists(&init_path) {
+                return Some(init_path);
+            }
+        } else {
+            let path = project_root.join(raw.replace('.', std::path::MAIN_SEPARATOR_STR));
+            let init_path = path.join("__init__.py");
+            if check_exists(&init_path) {
+                return Some(init_path);
+            }
+        }
+
         (self.f)(raw, source_dir, project_root)
     }
 }
@@ -55,16 +100,62 @@ impl ImportResolver for PythonResolver {
 /// Stateful resolver for Go module import paths.
 pub struct GoModResolver {
     f: fn(&str, &Path, &Path) -> Option<PathBuf>,
+    cached_module: OnceLock<Option<(PathBuf, String)>>,
 }
 
 impl GoModResolver {
     pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
-        Self { f }
+        Self {
+            f,
+            cached_module: OnceLock::new(),
+        }
     }
 }
 
 impl ImportResolver for GoModResolver {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+        let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+        if raw.is_empty() {
+            return None;
+        }
+
+        if let Some(relative) = raw.strip_prefix('.') {
+            let path = source_dir.join(relative);
+            return Some(path.with_extension("go"));
+        }
+
+        let module_info = self.cached_module.get_or_init(|| {
+            let mut current = Some(project_root);
+            while let Some(dir) = current {
+                let go_mod = dir.join("go.mod");
+                if go_mod.is_file() {
+                    if let Ok(content) = std::fs::read_to_string(&go_mod) {
+                        for line in content.lines() {
+                            let line = line.trim();
+                            if let Some(module) = line.strip_prefix("module ") {
+                                return Some((dir.to_path_buf(), module.trim().to_string()));
+                            }
+                        }
+                    }
+                    break;
+                }
+                current = dir.parent();
+            }
+            None
+        });
+
+        let matched_module = module_info.as_ref().and_then(|(dir, name)| {
+            if raw.starts_with(name) {
+                Some((dir, name))
+            } else {
+                None
+            }
+        });
+        if let Some((dir, module_name)) = matched_module {
+            let relative = raw[module_name.len()..].trim_start_matches('/');
+            return Some(dir.join(relative).with_extension("go"));
+        }
+
         (self.f)(raw, source_dir, project_root)
     }
 }
@@ -72,16 +163,65 @@ impl ImportResolver for GoModResolver {
 /// Stateful resolver for JavaScript import paths.
 pub struct JsResolver {
     f: fn(&str, &Path, &Path) -> Option<PathBuf>,
+    is_file_cache: RwLock<HashMap<PathBuf, bool>>,
 }
 
 impl JsResolver {
     pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
-        Self { f }
+        Self {
+            f,
+            is_file_cache: RwLock::new(HashMap::new()),
+        }
     }
 }
 
 impl ImportResolver for JsResolver {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+        let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+        if raw.is_empty() {
+            return None;
+        }
+
+        let check_is_file = |path: &Path| -> bool {
+            let cache_val = self
+                .is_file_cache
+                .read()
+                .ok()
+                .and_then(|cache| cache.get(path).copied());
+            if let Some(res) = cache_val {
+                return res;
+            }
+            let res = path.is_file();
+            if let Ok(mut cache) = self.is_file_cache.write() {
+                cache.insert(path.to_path_buf(), res);
+            }
+            res
+        };
+
+        if !raw.starts_with('.') && !raw.starts_with('/') {
+            return (self.f)(raw, source_dir, project_root);
+        }
+
+        let base = if raw.starts_with('/') {
+            PathBuf::from("/")
+        } else {
+            source_dir.to_path_buf()
+        };
+
+        let path = base.join(raw);
+
+        let extensions = ["", ".js", ".json", ".node", ".mjs", ".cjs"];
+        for ext in &extensions {
+            let candidate = if ext.is_empty() {
+                path.clone()
+            } else {
+                path.with_extension(ext.trim_start_matches('.'))
+            };
+            if check_is_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+
         (self.f)(raw, source_dir, project_root)
     }
 }
@@ -89,16 +229,65 @@ impl ImportResolver for JsResolver {
 /// Stateful resolver for TypeScript import paths using `tsconfig.json`.
 pub struct TsConfigResolver {
     f: fn(&str, &Path, &Path) -> Option<PathBuf>,
+    is_file_cache: RwLock<HashMap<PathBuf, bool>>,
 }
 
 impl TsConfigResolver {
     pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
-        Self { f }
+        Self {
+            f,
+            is_file_cache: RwLock::new(HashMap::new()),
+        }
     }
 }
 
 impl ImportResolver for TsConfigResolver {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+        let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+        if raw.is_empty() {
+            return None;
+        }
+
+        let check_is_file = |path: &Path| -> bool {
+            let cache_val = self
+                .is_file_cache
+                .read()
+                .ok()
+                .and_then(|cache| cache.get(path).copied());
+            if let Some(res) = cache_val {
+                return res;
+            }
+            let res = path.is_file();
+            if let Ok(mut cache) = self.is_file_cache.write() {
+                cache.insert(path.to_path_buf(), res);
+            }
+            res
+        };
+
+        if !raw.starts_with('.') && !raw.starts_with('/') {
+            return (self.f)(raw, source_dir, project_root);
+        }
+
+        let base = if raw.starts_with('/') {
+            PathBuf::from("/")
+        } else {
+            source_dir.to_path_buf()
+        };
+
+        let path = base.join(raw);
+
+        let extensions = ["", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"];
+        for ext in &extensions {
+            let candidate = if ext.is_empty() {
+                path.clone()
+            } else {
+                path.with_extension(ext.trim_start_matches('.'))
+            };
+            if check_is_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+
         (self.f)(raw, source_dir, project_root)
     }
 }
@@ -197,5 +386,85 @@ mod tests {
         let resolver = GoModResolver::new(dummy_go_resolver);
         let result = resolver.resolve("test", Path::new("/src"), Path::new("/proj"));
         assert_eq!(result, Some(PathBuf::from("/proj/test.go")));
+    }
+
+    #[test]
+    fn go_mod_resolver_memoizes_go_mod_file() {
+        let temp_dir = std::env::temp_dir().join("go_mod_resolver_memoizes_go_mod_file");
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let go_mod_path = temp_dir.join("go.mod");
+        std::fs::write(&go_mod_path, "module myproject\n").unwrap();
+
+        let resolver = make_resolver(crate::language::LangId::Go);
+
+        // First resolve: should succeed and read from disk
+        let res1 = resolver.resolve("myproject/sub", &temp_dir, &temp_dir);
+        assert_eq!(res1, Some(temp_dir.join("sub.go")));
+
+        // Delete go.mod from disk!
+        std::fs::remove_file(&go_mod_path).unwrap();
+
+        // Second resolve: should STILL succeed because the resolver memoized the module name!
+        let res2 = resolver.resolve("myproject/other", &temp_dir, &temp_dir);
+        assert_eq!(res2, Some(temp_dir.join("other.go")));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn python_resolver_memoizes_exists_checks() {
+        let temp_dir = std::env::temp_dir().join("python_resolver_memoizes_exists_checks");
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let pkg_dir = temp_dir.join("my_package");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        let init_py = pkg_dir.join("__init__.py");
+        std::fs::write(&init_py, "").unwrap();
+
+        let resolver = make_resolver(crate::language::LangId::Python);
+
+        // First resolve: resolves to my_package/__init__.py
+        let res1 = resolver.resolve("my_package", &temp_dir, &temp_dir);
+        assert_eq!(res1, Some(init_py.clone()));
+
+        // Delete __init__.py from disk
+        std::fs::remove_file(&init_py).unwrap();
+
+        // Second resolve: should STILL return my_package/__init__.py because the resolver memoized the exists() result!
+        let res2 = resolver.resolve("my_package", &temp_dir, &temp_dir);
+        assert_eq!(res2, Some(init_py));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn tsconfig_resolver_memoizes_is_file_checks() {
+        let temp_dir = std::env::temp_dir().join("tsconfig_resolver_memoizes_is_file_checks");
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let ts_file = temp_dir.join("my_file.ts");
+        std::fs::write(&ts_file, "").unwrap();
+
+        let resolver = make_resolver(crate::language::LangId::TypeScript);
+
+        // First resolve: resolves to my_file.ts
+        let res1 = resolver.resolve("./my_file", &temp_dir, &temp_dir);
+        assert_eq!(res1, Some(ts_file.clone()));
+
+        // Delete my_file.ts
+        std::fs::remove_file(&ts_file).unwrap();
+
+        // Second resolve: should STILL return my_file.ts because it memoized the is_file() result!
+        let res2 = resolver.resolve("./my_file", &temp_dir, &temp_dir);
+        assert_eq!(res2, Some(ts_file));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

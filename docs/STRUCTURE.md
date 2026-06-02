@@ -257,6 +257,12 @@ pub trait ImportResolver: Send + Sync {
    - `PythonResolver`, `GoModResolver`, `JsResolver`, `TsConfigResolver`: Concrete structs implementing `ImportResolver`, prepped to hold caches or parse configs.
 4. **`make_resolver(LangId) -> Box<dyn ImportResolver>`**: Factory function constructing the stateful resolver for each language dynamically.
 
+#### Stateful Caching and Memoization Engines
+To guarantee maximum throughput and avoid redundant filesystem traversal during large-scale workspace parsing, the stateful resolvers employ optimized, thread-safe caching strategies:
+- **`OnceLock` Module Boundary Scanning (`GoModResolver`)**: Scans for the root `go.mod` file and parses the module path at most once per execution using a standard `OnceLock`. Subsequent resolution calls query the in-memory boundary in $O(1)$ time.
+- **`RwLock` File Existence Memoization (`PythonResolver`, `JsResolver`, `TsConfigResolver`)**: Memoizes `exists()` and `is_file()` filesystem checks using an `RwLock<HashMap<PathBuf, bool>>`. This minimizes expensive system calls during TypeScript candidate extensions resolution (e.g. trying `.ts`, `.tsx`, `.js`) and Python relative path matching, while remaining safe for concurrency.
+- **Stateless Fallback**: When candidate paths do not match or cannot be resolved using stateful logic, all resolvers gracefully fallback to their underlying stateless `LanguageSpec` function pointer, ensuring 100% backward compatibility.
+
 During graph assembly, resolvers are created once per run and cached inside the builder to ensure O(1) config-file reading and caching properties.
 
 ### 3.4 Adding a New Language
