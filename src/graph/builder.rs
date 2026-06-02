@@ -314,15 +314,21 @@ impl GraphBuilder {
             .collect();
 
         // Phase 4: resolve language-specific import paths and add import edges
+        let mut resolvers = HashMap::new();
+        for lang in crate::language::LangId::all() {
+            resolvers.insert(lang, crate::language::import_resolver::make_resolver(lang));
+        }
+
         for file in extractions {
             let Some(&source_fid) = path_to_file_id.get(&file.path) else {
                 continue;
             };
             let source_dir = file.path.parent().unwrap_or(std::path::Path::new("."));
-            let resolver_fn = file.lang.spec().import_path_resolver;
-            for import in &file.imports {
-                if let Some(target) = resolver_fn(&import.namespace, source_dir, root) {
-                    builder.add_import(source_fid, target);
+            if let Some(resolver) = resolvers.get(&file.lang) {
+                for import in &file.imports {
+                    if let Some(target) = resolver.resolve(&import.namespace, source_dir, root) {
+                        builder.add_import(source_fid, target);
+                    }
                 }
             }
         }

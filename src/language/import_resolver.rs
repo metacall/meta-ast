@@ -35,13 +35,90 @@ impl ImportResolver for StatelessResolver {
     }
 }
 
+/// Stateful resolver for Python import paths.
+pub struct PythonResolver {
+    f: fn(&str, &Path, &Path) -> Option<PathBuf>,
+}
+
+impl PythonResolver {
+    pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
+        Self { f }
+    }
+}
+
+impl ImportResolver for PythonResolver {
+    fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+        (self.f)(raw, source_dir, project_root)
+    }
+}
+
+/// Stateful resolver for Go module import paths.
+pub struct GoModResolver {
+    f: fn(&str, &Path, &Path) -> Option<PathBuf>,
+}
+
+impl GoModResolver {
+    pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
+        Self { f }
+    }
+}
+
+impl ImportResolver for GoModResolver {
+    fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+        (self.f)(raw, source_dir, project_root)
+    }
+}
+
+/// Stateful resolver for JavaScript import paths.
+pub struct JsResolver {
+    f: fn(&str, &Path, &Path) -> Option<PathBuf>,
+}
+
+impl JsResolver {
+    pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
+        Self { f }
+    }
+}
+
+impl ImportResolver for JsResolver {
+    fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+        (self.f)(raw, source_dir, project_root)
+    }
+}
+
+/// Stateful resolver for TypeScript import paths using `tsconfig.json`.
+pub struct TsConfigResolver {
+    f: fn(&str, &Path, &Path) -> Option<PathBuf>,
+}
+
+impl TsConfigResolver {
+    pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
+        Self { f }
+    }
+}
+
+impl ImportResolver for TsConfigResolver {
+    fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+        (self.f)(raw, source_dir, project_root)
+    }
+}
+
 /// Construct a boxed `ImportResolver` for the given language.
 ///
-/// Wraps the existing stateless fn pointer from `LanguageSpec`.
-/// Future language-specific resolvers (PythonResolver, TsConfigResolver, etc.)
-/// can replace the `StatelessResolver` here without changing callers.
+/// Wraps the existing stateless fn pointer from `LanguageSpec` into
+/// a language-specific resolver (PythonResolver, TsConfigResolver, etc.)
+/// allowing gradual, modular migration to stateful resolution.
 pub fn make_resolver(lang: crate::language::LangId) -> Box<dyn ImportResolver> {
-    Box::new(StatelessResolver::new(lang.spec().import_path_resolver))
+    let f = lang.spec().import_path_resolver;
+    match lang {
+        crate::language::LangId::Python => Box::new(PythonResolver::new(f)),
+        crate::language::LangId::Go => Box::new(GoModResolver::new(f)),
+        crate::language::LangId::JavaScript => Box::new(JsResolver::new(f)),
+        crate::language::LangId::TypeScript | crate::language::LangId::Tsx => {
+            Box::new(TsConfigResolver::new(f))
+        }
+        _ => Box::new(StatelessResolver::new(f)),
+    }
 }
 
 #[cfg(test)]
@@ -90,5 +167,35 @@ mod tests {
         }
         let resolver = StatelessResolver::new(null_resolver);
         accepts_boxed(&resolver);
+    }
+
+    #[test]
+    fn python_resolver_resolves_import() {
+        fn dummy_python_resolver(raw: &str, _source: &Path, root: &Path) -> Option<PathBuf> {
+            Some(root.join(format!("{raw}.py")))
+        }
+        let resolver = PythonResolver::new(dummy_python_resolver);
+        let result = resolver.resolve("test", Path::new("/src"), Path::new("/proj"));
+        assert_eq!(result, Some(PathBuf::from("/proj/test.py")));
+    }
+
+    #[test]
+    fn tsconfig_resolver_resolves_import() {
+        fn dummy_ts_resolver(raw: &str, _source: &Path, root: &Path) -> Option<PathBuf> {
+            Some(root.join(format!("{raw}.ts")))
+        }
+        let resolver = TsConfigResolver::new(dummy_ts_resolver);
+        let result = resolver.resolve("test", Path::new("/src"), Path::new("/proj"));
+        assert_eq!(result, Some(PathBuf::from("/proj/test.ts")));
+    }
+
+    #[test]
+    fn go_mod_resolver_resolves_import() {
+        fn dummy_go_resolver(raw: &str, _source: &Path, root: &Path) -> Option<PathBuf> {
+            Some(root.join(format!("{raw}.go")))
+        }
+        let resolver = GoModResolver::new(dummy_go_resolver);
+        let result = resolver.resolve("test", Path::new("/src"), Path::new("/proj"));
+        assert_eq!(result, Some(PathBuf::from("/proj/test.go")));
     }
 }
