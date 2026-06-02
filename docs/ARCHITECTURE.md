@@ -14,7 +14,7 @@
 3. Query-based symbol extraction per language pack.
 4. Intermediate symbol model normalization.
 5. Dependency graph construction (initial node + file edges).
-6. Import path resolution via per-language resolvers (mapping import strings to file IDs).
+6. Import path resolution via stateful resolvers implementing the `ImportResolver` trait (mapping import strings to file paths/IDs, supporting stateful configs like `tsconfig.json` and disk caches).
 7. Cross-file reference resolution via `FlattenedScopeCache` (DFS the import graph once per file, then O(1) scope lookups).
 8. SCC analysis (Tarjan) and deployability annotation.
 9. Output emission (JSON, YAML, or interactive HTML dashboard).

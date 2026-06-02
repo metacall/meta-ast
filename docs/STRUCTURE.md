@@ -234,7 +234,32 @@ pub enum LangId {
 }
 ```
 
-### 3.3 Adding a New Language
+### 3.3 Stateful Import Resolution Seam
+
+To support complex stateful import resolution (e.g. resolving paths using configuration files like `tsconfig.json` or module boundary scanning like `go.mod`), `meta-ast` implements a hybrid seam combining static `LanguageSpec` specs with a stateful `ImportResolver` trait:
+
+```rust
+pub trait ImportResolver: Send + Sync {
+    fn resolve(
+        &self,
+        raw: &str,
+        source_dir: &Path,
+        project_root: &Path,
+    ) -> Option<PathBuf>;
+}
+```
+
+#### Hybrid Resolution Bridge
+1. **`LanguageSpec`** remains static and `const` (containing a stateless `import_path_resolver` fn pointer).
+2. **`ImportResolver`** represents a stateful trait interface.
+3. Concrete adapters bridge the two:
+   - `StatelessResolver`: Zero-cost wrapper delegating to static fn pointers.
+   - `PythonResolver`, `GoModResolver`, `JsResolver`, `TsConfigResolver`: Concrete structs implementing `ImportResolver`, prepped to hold caches or parse configs.
+4. **`make_resolver(LangId) -> Box<dyn ImportResolver>`**: Factory function constructing the stateful resolver for each language dynamically.
+
+During graph assembly, resolvers are created once per run and cached inside the builder to ensure O(1) config-file reading and caching properties.
+
+### 3.4 Adding a New Language
 
 The process is:
 
@@ -246,7 +271,7 @@ The process is:
 
 No trait objects, no runtime plugins. Compile-time completeness checking via exhaustive match.
 
-### 3.4 Language Detection
+### 3.5 Language Detection
 
 `detect_language(path: &Path) -> Option<LangId>` maps file extensions to `LangId` variants. Lives in `input/mod.rs`.
 
