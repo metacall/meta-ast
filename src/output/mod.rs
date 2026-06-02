@@ -1,4 +1,5 @@
 pub mod dashboard;
+pub mod emitter;
 pub mod graph;
 pub mod inspect;
 

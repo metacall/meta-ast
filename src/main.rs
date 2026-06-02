@@ -33,12 +33,15 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            let content = meta_ast::output::inspect::serialize_inspect(&symbols, &args.format)?;
+            let config = meta_ast::output::emitter::EmitConfig {
+                output: args.output,
+                format: args.format,
+                html: false,
+                open_browser: false,
+                self_contained: false,
+            };
 
-            match args.output {
-                Some(path) => std::fs::write(&path, &content)?,
-                None => println!("{content}"),
-            }
+            meta_ast::output::emitter::emit_inspect(&symbols, &config)?;
 
             Ok(())
         }
@@ -55,38 +58,26 @@ fn main() -> anyhow::Result<()> {
                 );
             }
 
-            if args.html {
-                let html = meta_ast::output::dashboard::to_graph_html(
-                    &analysis.graph,
-                    &analysis.scc,
-                    snapshot_id.0 as u64,
-                    args.self_contained,
-                )?;
-                let path = args.output.unwrap_or_else(|| {
-                    let name = args
-                        .path
-                        .file_stem()
-                        .map(|s: &std::ffi::OsStr| s.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "project".to_string());
-                    std::path::PathBuf::from(format!("{}.metast", name))
-                });
-                let path_str = path.to_string_lossy().to_string();
-                std::fs::write(&path, &html)?;
-                if let Err(e) = webbrowser::open(&path_str) {
-                    tracing::warn!(error = %e, "could not open browser");
-                }
+            let default_html_output = if args.html && args.output.is_none() {
+                let name = args
+                    .path
+                    .file_stem()
+                    .map(|s: &std::ffi::OsStr| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "project".to_string());
+                Some(std::path::PathBuf::from(format!("{}.metast", name)))
             } else {
-                let content = meta_ast::output::graph::serialize_graph(
-                    &analysis.graph,
-                    &analysis.scc,
-                    snapshot_id.0 as u64,
-                    &args.format,
-                )?;
-                match args.output {
-                    Some(path) => std::fs::write(&path, &content)?,
-                    None => println!("{content}"),
-                }
-            }
+                args.output
+            };
+
+            let config = meta_ast::output::emitter::EmitConfig {
+                output: default_html_output,
+                format: args.format,
+                html: args.html,
+                open_browser: true,
+                self_contained: args.self_contained,
+            };
+
+            meta_ast::output::emitter::emit_graph(&analysis, &config)?;
 
             Ok(())
         }
