@@ -266,6 +266,91 @@ impl GraphBuilder {
     pub fn external_count(&self) -> usize {
         self.external_index.len()
     }
+
+    /// Assemble a complete CodeGraph + SCC from parallel extraction results.
+    ///
+    /// Replaces the manual multi-step wiring in pipeline.rs. Handles:
+    /// - File and symbol node registration
+    /// - Import edge resolution (via language-specific resolvers)
+    /// - Cross-file reference resolution via FlattenedScopeCache
+    /// - SCC analysis
+    ///
+    /// Errors during symbol addition are non-fatal and appended to `diagnostics`.
+    pub fn from_extractions(
+        extractions: &[crate::model::FileExtraction],
+        root: &std::path::Path,
+        snapshot_id: crate::model::SnapshotId,
+        diagnostics: &mut Vec<crate::error::Diagnostic>,
+    ) -> (CodeGraph, crate::graph::SccAnalysis) {
+        let mut builder = Self::new(snapshot_id);
+
+        // Phase 1: register all files
+        for file in extractions {
+            builder.add_file(file.path.clone(), file.lang);
+        }
+
+        // Phase 2: register all symbols; symbol errors are non-fatal
+        for file in extractions {
+            for symbol in &file.symbols {
+                if let Err(e) = builder.add_symbol(symbol) {
+                    diagnostics.push(crate::error::Diagnostic {
+                        path: file.path.clone(),
+                        severity: crate::error::Severity::Warning,
+                        message: format!("failed to add symbol to graph: {e}"),
+                        source_range: None,
+                    });
+                }
+            }
+        }
+
+        // Phase 3: build path -> FileId map needed by the resolver
+        let path_to_file_id: HashMap<std::path::PathBuf, crate::model::FileId> = extractions
+            .iter()
+            .filter_map(|f| {
+                builder
+                    .file_id_for_path(&f.path)
+                    .map(|fid| (f.path.clone(), fid))
+            })
+            .collect();
+
+        // Phase 4: resolve language-specific import paths and add import edges
+        for file in extractions {
+            let Some(&source_fid) = path_to_file_id.get(&file.path) else {
+                continue;
+            };
+            let source_dir = file.path.parent().unwrap_or(std::path::Path::new("."));
+            let resolver_fn = file.lang.spec().import_path_resolver;
+            for import in &file.imports {
+                if let Some(target) = resolver_fn(&import.namespace, source_dir, root) {
+                    builder.add_import(source_fid, target);
+                }
+            }
+        }
+
+        // Phase 5: cross-file reference resolution via FlattenedScopeCache
+        let import_adjacency = builder.import_adjacency();
+        let ctx = crate::graph::resolver::ResolutionContext::from_extractions(
+            extractions,
+            &path_to_file_id,
+            import_adjacency,
+        );
+        let scope_cache = crate::graph::resolver::FlattenedScopeCache::build(&ctx, diagnostics);
+        let ref_edges = crate::graph::resolver::resolve_all_references(
+            extractions,
+            &path_to_file_id,
+            &scope_cache,
+            diagnostics,
+        );
+        for (from, to) in ref_edges {
+            builder.add_reference(from, to);
+        }
+
+        // Phase 6: finalize and compute SCC
+        let graph = builder.build();
+        let scc = crate::graph::SccAnalysis::analyze(&graph.graph);
+
+        (graph, scc)
+    }
 }
 
 #[cfg(test)]
@@ -378,5 +463,154 @@ mod tests {
         // Verify mappings exist
         assert!(builder.file_to_index.contains_key(&file_id));
         assert!(builder.symbol_to_index.contains_key(&SymbolId(42)));
+    }
+
+    #[test]
+    fn from_extractions_builds_graph_with_correct_node_count() {
+        use crate::model::{FileExtraction, LineColumn, SourceRange, Symbol, SymbolId, SymbolKind};
+        use std::path::PathBuf;
+        let sym = Symbol {
+            id: SymbolId(1),
+            name: "foo".into(),
+            kind: SymbolKind::Function,
+            language: LangId::Python,
+            file_path: PathBuf::from("/proj/a.py"),
+            source_range: SourceRange {
+                byte_start: 0,
+                byte_end: 10,
+                start: LineColumn { line: 0, column: 0 },
+                end: LineColumn {
+                    line: 0,
+                    column: 10,
+                },
+            },
+            visibility: None,
+            signature: None,
+            docstring: None,
+            is_async: false,
+        };
+        let extractions = vec![FileExtraction {
+            path: PathBuf::from("/proj/a.py"),
+            lang: LangId::Python,
+            symbols: vec![sym],
+            imports: vec![],
+            references: vec![],
+            diagnostics: vec![],
+        }];
+        let mut diags = Vec::new();
+        let (graph, _scc) = GraphBuilder::from_extractions(
+            &extractions,
+            std::path::Path::new("/proj"),
+            SnapshotId(1),
+            &mut diags,
+        );
+        assert_eq!(graph.file_count(), 1);
+        assert_eq!(graph.symbol_count(), 1);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn from_extractions_populates_scc_analysis() {
+        use crate::model::FileExtraction;
+        let extractions: Vec<FileExtraction> = vec![];
+        let mut diags = Vec::new();
+        let (graph, scc) = GraphBuilder::from_extractions(
+            &extractions,
+            std::path::Path::new("/proj"),
+            SnapshotId(1),
+            &mut diags,
+        );
+        assert_eq!(graph.node_count(), 0);
+        assert!(!scc.components.iter().any(|c| c.is_cyclic));
+    }
+
+    #[test]
+    fn from_extractions_accumulates_diagnostics_on_symbol_error() {
+        use crate::model::{FileExtraction, LineColumn, SourceRange, Symbol, SymbolId, SymbolKind};
+        use std::path::PathBuf;
+        let sym = Symbol {
+            id: SymbolId(99),
+            name: "orphan".into(),
+            kind: SymbolKind::Function,
+            language: LangId::Python,
+            file_path: PathBuf::from("/proj/missing.py"),
+            source_range: SourceRange {
+                byte_start: 0,
+                byte_end: 5,
+                start: LineColumn { line: 0, column: 0 },
+                end: LineColumn { line: 0, column: 5 },
+            },
+            visibility: None,
+            signature: None,
+            docstring: None,
+            is_async: false,
+        };
+        let extractions = vec![FileExtraction {
+            path: PathBuf::from("/proj/a.py"),
+            lang: LangId::Python,
+            symbols: vec![sym],
+            imports: vec![],
+            references: vec![],
+            diagnostics: vec![],
+        }];
+        let mut diags = Vec::new();
+        let (_graph, _scc) = GraphBuilder::from_extractions(
+            &extractions,
+            std::path::Path::new("/proj"),
+            SnapshotId(1),
+            &mut diags,
+        );
+        assert!(!diags.is_empty(), "expected diagnostic for orphan symbol");
+    }
+
+    #[test]
+    fn from_extractions_resolves_cross_file_imports() {
+        use crate::model::{FileExtraction, LineColumn, SourceRange, UnresolvedImport};
+        use std::path::PathBuf;
+        let extractions = vec![
+            FileExtraction {
+                path: PathBuf::from("/proj/a.py"),
+                lang: LangId::Python,
+                symbols: vec![],
+                imports: vec![UnresolvedImport {
+                    namespace: "b".into(),
+                    alias: None,
+                    symbol: None,
+                    star: false,
+                    range: SourceRange {
+                        byte_start: 0,
+                        byte_end: 1,
+                        start: LineColumn { line: 0, column: 0 },
+                        end: LineColumn { line: 0, column: 1 },
+                    },
+                }],
+                references: vec![],
+                diagnostics: vec![],
+            },
+            FileExtraction {
+                path: PathBuf::from("/proj/b.py"),
+                lang: LangId::Python,
+                symbols: vec![],
+                imports: vec![],
+                references: vec![],
+                diagnostics: vec![],
+            },
+        ];
+        let mut diags = Vec::new();
+        let (graph, _scc) = GraphBuilder::from_extractions(
+            &extractions,
+            std::path::Path::new("/proj"),
+            SnapshotId(1),
+            &mut diags,
+        );
+        assert_eq!(graph.file_count(), 2);
+        let import_edges: Vec<_> = graph
+            .edges_of_kind(crate::graph::EdgeKind::Import)
+            .collect();
+        assert_eq!(
+            import_edges.len(),
+            1,
+            "expected import edge from a.py to b.py"
+        );
     }
 }
