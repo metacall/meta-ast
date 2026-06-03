@@ -18,7 +18,7 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UnresolvedImport {
-    pub namespace: String,
+    pub import_specifier: String,
     pub alias: Option<String>,
     pub symbol: Option<String>,
     pub star: bool,

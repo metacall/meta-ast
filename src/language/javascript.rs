@@ -219,7 +219,7 @@ mod tests {
             "expected 2 named import records for foo and bar"
         );
         for imp in &named {
-            assert_eq!(imp.namespace, "'utils'");
+            assert_eq!(imp.import_specifier, "'utils'");
         }
         assert_eq!(named[0].symbol.as_deref(), Some("foo"));
         assert_eq!(named[1].symbol.as_deref(), Some("bar"));
@@ -238,7 +238,7 @@ mod tests {
         );
         let named: Vec<_> = imports.iter().filter(|i| i.symbol.is_some()).collect();
         assert_eq!(named.len(), 1);
-        assert_eq!(named[0].namespace, "'react'");
+        assert_eq!(named[0].import_specifier, "'react'");
         assert_eq!(named[0].symbol.as_deref(), Some("React"));
     }
 
@@ -254,7 +254,7 @@ mod tests {
             &std::path::PathBuf::from("test.js"),
         );
         assert_eq!(imports.len(), 1);
-        assert_eq!(imports[0].namespace, "'styles.css'");
+        assert_eq!(imports[0].import_specifier, "'styles.css'");
         assert!(imports[0].symbol.is_none());
     }
 

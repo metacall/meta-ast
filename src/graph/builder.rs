@@ -326,7 +326,9 @@ impl GraphBuilder {
             let source_dir = file.path.parent().unwrap_or(std::path::Path::new("."));
             if let Some(resolver) = resolvers.get(&file.lang) {
                 for import in &file.imports {
-                    if let Some(target) = resolver.resolve(&import.namespace, source_dir, root) {
+                    if let Some(target) =
+                        resolver.resolve(&import.import_specifier, source_dir, root)
+                    {
                         builder.add_import(source_fid, target);
                     }
                 }
@@ -579,7 +581,7 @@ mod tests {
                 lang: LangId::Python,
                 symbols: vec![],
                 imports: vec![UnresolvedImport {
-                    namespace: "b".into(),
+                    import_specifier: "b".into(),
                     alias: None,
                     symbol: None,
                     star: false,

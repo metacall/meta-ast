@@ -468,7 +468,7 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     let mut imports: Vec<crate::model::UnresolvedImport> = Vec::with_capacity(raw_imports.len());
     for r in raw_imports {
         imports.push(crate::model::UnresolvedImport {
-            namespace: match r.namespace {
+            import_specifier: match r.namespace {
                 Some(ns) => slice(ns),
                 None => continue,
             },
