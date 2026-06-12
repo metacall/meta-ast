@@ -240,7 +240,7 @@ fn cross_file_reference_rust_crate() {
         for import in &file.imports {
             if let Some(dir) = file.path.parent() {
                 let resolver = file.lang.spec().import_path_resolver;
-                if let Some(target) = resolver(&import.namespace, dir, root) {
+                if let Some(target) = resolver(&import.import_specifier, dir, root) {
                     builder.add_import(source_fid, target);
                 }
             }
@@ -327,7 +327,7 @@ fn cross_file_reference_typescript() {
         for import in &file.imports {
             if let Some(dir) = file.path.parent() {
                 let resolver = file.lang.spec().import_path_resolver;
-                if let Some(target) = resolver(&import.namespace, dir, root) {
+                if let Some(target) = resolver(&import.import_specifier, dir, root) {
                     builder.add_import(source_fid, target);
                 }
             }
@@ -446,7 +446,7 @@ fn edge_circular_does_not_infinite_loop() {
         for import in &file.imports {
             if let Some(dir) = file.path.parent() {
                 let resolver = file.lang.spec().import_path_resolver;
-                if let Some(target) = resolver(&import.namespace, dir, root) {
+                if let Some(target) = resolver(&import.import_specifier, dir, root) {
                     builder.add_import(source_fid, target);
                 }
             }
@@ -528,7 +528,7 @@ fn edge_transitive_resolution() {
         for import in &file.imports {
             if let Some(dir) = file.path.parent() {
                 let resolver = file.lang.spec().import_path_resolver;
-                if let Some(target) = resolver(&import.namespace, dir, root) {
+                if let Some(target) = resolver(&import.import_specifier, dir, root) {
                     builder.add_import(source_fid, target);
                 }
             }
@@ -936,8 +936,8 @@ fn extract_python_multiline_import() {
     assert_eq!(result.files.len(), 1);
     let imports = &result.files[0].imports;
     assert_eq!(imports.len(), 2);
-    assert_eq!(imports[0].namespace, "foo");
-    assert_eq!(imports[1].namespace, "foo");
+    assert_eq!(imports[0].import_specifier, "foo");
+    assert_eq!(imports[1].import_specifier, "foo");
 
     std::fs::remove_dir_all(&tmp).unwrap();
 }
@@ -965,7 +965,7 @@ fn extract_js_multiline_import() {
         imports.len()
     );
     for imp in imports {
-        assert_eq!(imp.namespace, "'./module'");
+        assert_eq!(imp.import_specifier, "'./module'");
     }
 
     std::fs::remove_dir_all(&tmp).unwrap();
@@ -988,7 +988,7 @@ fn extract_rust_multiline_use() {
     let imports = &result.files[0].imports;
     assert!(!imports.is_empty(), "should have imports");
     for imp in imports {
-        assert_eq!(imp.namespace, "crate::utils");
+        assert_eq!(imp.import_specifier, "crate::utils");
     }
 
     std::fs::remove_dir_all(&tmp).unwrap();

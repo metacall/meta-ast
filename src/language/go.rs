@@ -205,7 +205,7 @@ mod tests {
             1,
             "expected 1 import record for non-aliased import"
         );
-        assert_eq!(imports[0].namespace, "\"fmt\"");
+        assert_eq!(imports[0].import_specifier, "\"fmt\"");
         assert!(imports[0].alias.is_none());
     }
 
@@ -225,7 +225,7 @@ mod tests {
             1,
             "expected 1 import record, not 2 (CR-03 regression check)"
         );
-        assert_eq!(imports[0].namespace, "\"fmt\"");
+        assert_eq!(imports[0].import_specifier, "\"fmt\"");
         assert_eq!(imports[0].alias.as_deref(), Some("alias"));
     }
 
@@ -241,8 +241,8 @@ mod tests {
             &std::path::PathBuf::from("test.go"),
         );
         assert_eq!(imports.len(), 2, "expected 2 import records for fmt and os");
-        assert_eq!(imports[0].namespace, "\"fmt\"");
-        assert_eq!(imports[1].namespace, "\"os\"");
+        assert_eq!(imports[0].import_specifier, "\"fmt\"");
+        assert_eq!(imports[1].import_specifier, "\"os\"");
     }
 
     #[test]

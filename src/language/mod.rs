@@ -9,6 +9,7 @@ pub(crate) mod c;
 pub(crate) mod common;
 pub(crate) mod cpp;
 pub(crate) mod go;
+pub mod import_resolver;
 pub(crate) mod javascript;
 pub(crate) mod python;
 pub(crate) mod rust;
