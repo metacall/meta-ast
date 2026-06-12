@@ -1,25 +1,30 @@
 # meta-ast Documentation
 
-This directory contains the implementation-facing technical documentation for `meta-ast`.
+This directory contains the implementation-facing technical documentation for
+`meta-ast`.
 
-Later we will have an MDBOOK-style user guide in `docs/user-guide` but this section is focused on design and implementation artifacts for traceability and onboarding.
-
-The structure is intentionally traceable: proposal → specs → architecture → structure → ADRs → roadmap → validation artifacts so this bureaucratized manner is easier to debug and trace.
+The structure is intentionally traceable: specs -> architecture -> structure ->
+ADRs -> roadmap -> validation artifacts, so design decisions are easy to trace
+back to requirements and forward to tests.
 
 ## Document map
 
-- `ARCHITECTURE.md` - system architecture, component boundaries, runtime flow, output formats, and dashboard visualization.
-- `structure.md` - code structure, data structures, design patterns, module layout, and implementation order.
+- `ARCHITECTURE.md` - system architecture, component boundaries, runtime flow,
+  output formats, and the `metacall-deploy` feature layer.
+- `STRUCTURE.md` - code structure, data structures, design patterns, module layout,
+  and implementation order.
 - `DEV_CRATE_DECISIONS.md` - crate selection rationale and trade-offs.
 - `CI_CD.md` - CI/CD architecture and quality gates.
-- `ROADMAP.md` - phase-aligned implementation milestones and measurable gates.
+- `ROADMAP.md` - phase-aligned implementation milestones and measurable exit gates.
 
 ## Specs
 
 - `specs/requirements.md` - normative requirements and acceptance criteria.
-- `specs/graph-model.md` - symbol graph and datagraph contracts, including `language_id`, project-root-relative `path`, `snapshot_id`, `file_id`, `visibility`, and `DataNode` semantics.
+- `specs/graph-model.md` - symbol graph and datagraph contracts, including
+  `language_id`, project-root-relative `path`, `snapshot_id`, `file_id`,
+  `visibility`, and `DataNode` semantics.
 - `specs/symbol-extraction.md` - language-pack extraction contracts.
-- `specs/traceability.md` - mapping from proposal deliverables to implementation/docs/tests.
+- `specs/traceability.md` - mapping from deliverables to implementation/docs/tests.
 
 ## Architecture decisions (ADRs)
 
@@ -35,9 +40,15 @@ The structure is intentionally traceable: proposal → specs → architecture �
 
 ## Scope policy
 
-- **MVP (must ship):** symbol extraction, inspect-compatible JSON, dependency graph + SCC, cross-platform CI.
-- **Stretch:** intra-procedural dataflow beyond simple def-use, live Dgraph sink, advanced cross-language type matching.
+- **MVP (must ship):** symbol extraction, dependency graph + SCC/Deployment Unit
+  analysis, cross-platform CI.
+- **`metacall-deploy` feature:** Cross-Language Call Site detection, Deploy Manifest
+  generation, Root Manifest assembly, Mesh Annotation from SCC.
+- **Stretch:** intra-procedural dataflow beyond simple def-use, live Dgraph sink,
+  advanced cross-language type matching, expanded language support.
 
 ## Update policy
 
-When implementation changes any public contract (schema, CLI behavior, graph semantics, language support), update the corresponding file in this directory in the same pull request.
+When implementation changes any public contract (schema, CLI behavior, graph
+semantics, language support), update the corresponding file in this directory in
+the same pull request.

@@ -2,13 +2,16 @@
 
 ## 1. Purpose
 
-Define normative requirements for `meta-ast`, a standalone Rust static analyzer for polyglot projects with `metacall_inspect`-compatible output.
+Define normative requirements for `meta-ast`, a standalone Rust static analyzer for
+polyglot source trees. The tool extracts symbol surfaces, builds cross-file dependency
+graphs, and computes SCCs. MetaCall FaaS deployment manifest generation is an
+optional capability behind the `metacall-deploy` feature flag.
 
 ## 2. Functional requirements
 
 ### FR-1: Parsing and language support
 
-The analyzer shall parse source files for:
+The analyzer shall parse source files for a growing set of languages, starting with:
 
 - Python
 - JavaScript
@@ -18,25 +21,18 @@ The analyzer shall parse source files for:
 - Rust
 - Go
 
+Additional languages (C#, Java, and others) are planned in later phases.
+
 ### FR-2: Symbol extraction
 
-The analyzer shall extract top-level symbols and language-appropriate nested symbols into a normalized intermediate representation:
+The analyzer shall extract top-level symbols and language-appropriate nested symbols
+into a normalized intermediate representation:
 
 - Functions
 - Classes / structs / interfaces / traits
 - Objects (constants, globals, module-level bindings)
 
-### FR-3: Inspect parity output
-
-The primary JSON output contract shall include keys:
-
-- `funcs`
-- `classes`
-- `objects`
-
-These keys must remain stable and compatible with MetaCall inspect-style consumers.
-
-### FR-4: Dependency graph
+### FR-3: Dependency graph
 
 The analyzer shall construct a directed graph of symbol-level dependencies:
 
@@ -44,38 +40,70 @@ The analyzer shall construct a directed graph of symbol-level dependencies:
 - Intra-project symbol references
 - Cross-language reference candidates
 
-### FR-5: SCC and deployability insight
+### FR-4: SCC and Deployment Unit identification
 
-The analyzer shall compute strongly connected components (Tarjan) and provide cluster-level deployability insight.
+The analyzer shall compute Strongly Connected Components (Tarjan) and annotate each
+SCC as a Deployment Unit, classifying it as:
 
-### FR-6: Incremental updates
+- Independent (acyclic, Function Mesh separation candidate)
+- Co-deployment required (cyclic, must remain grouped)
 
-The analyzer shall support update workflows from file changes with a target incremental response of under 100ms for files below 5k LOC.
+### FR-5: Incremental updates
 
-### FR-7: CLI and library modes
+The analyzer shall support update workflows from file changes with a target incremental
+response of under 100ms for files below 5k LOC.
+
+### FR-6: CLI and library modes
 
 The project shall expose:
 
 - Rust library interface
-- CLI entrypoint for project analysis and JSON emission
+- CLI entrypoint for project analysis and output emission
 
-### FR-8: C ABI (planned later phase)
+### FR-7: C ABI (planned later phase)
 
 The project shall provide a stable C ABI header (`mc_ast.h`) for embedding scenarios.
 
-### FR-9: datagraph export
+### FR-8: Datagraph export
 
-The project may export a datagraph model suitable for external graph sinks (including Dgraph).
+The project may export a datagraph model suitable for external graph sinks
+(including Dgraph).
+
+### FR-9: Deploy Manifest generation (feature-gated: `metacall-deploy`)
+
+When built with `--features metacall-deploy`, the `deploy` subcommand shall:
+
+- Scan source files for Cross-Language Call Sites
+  (`metacall_load_from_file`, `metacall_load_from_memory`,
+  `metacall_load_from_package`, `metacall_load_from_configuration`)
+- Extract `(language_tag, script_paths[])` pairs from call site arguments
+- Generate one Deploy Manifest (`metacall.{tag}.json`) per detected language group
+- Generate a Root Manifest (`metacall.json`) referencing all per-language manifests
+- Inline referenced `metacall_load_from_configuration` targets when present in tree;
+  emit a low-confidence annotation when the target is absent
+- Validate an existing `metacall.json` against static analysis when `--check` is passed
+
+### FR-10: Mesh Annotation (feature-gated: `metacall-deploy`)
+
+When built with `--features metacall-deploy`, the `deploy` subcommand shall also emit
+`metacall.mesh.json` containing:
+
+- SCC-derived Deployment Units with constituent symbol lists
+- Cross-language boundary flags per unit
+- Independent mesh candidate classification per unit
 
 ## 3. Non-functional requirements
 
 ### NFR-1: Correctness
 
-Incorrect symbol labeling is a high-severity defect. Correctness takes priority over throughput.
+Incorrect symbol labeling is a high-severity defect. Correctness takes priority over
+throughput.
 
 ### NFR-2: Resilience
 
-Malformed source files shall not crash analysis. Partial extraction shall be allowed when parser recovery is possible.
+Malformed source files shall not crash analysis. Partial extraction shall be allowed
+when parser recovery is possible. Unresolvable Cross-Language Call Site arguments
+(dynamic values) shall be annotated, not silently discarded.
 
 ### NFR-3: Portability
 
@@ -87,21 +115,26 @@ Given identical input set and tool version, emitted output shall be deterministi
 
 ### NFR-5: Observability
 
-The implementation shall provide structured diagnostics suitable for CI and local debugging.
+The implementation shall provide structured diagnostics suitable for CI and local
+debugging.
 
 ## 4. Acceptance criteria
 
-1. Parse all MVP languages and emit valid symbol JSON.
+1. Parse all supported languages and emit valid symbol JSON.
 2. Correct SCC identification for multi-language project fixtures.
-3. Output parity for keys `funcs`, `classes`, `objects`.
-4. Incremental-update target under 100ms for <5k LOC files.
-5. CI pipeline green on Linux/macOS/Windows.
+3. Incremental-update target under 100ms for files below 5k LOC.
+4. CI pipeline green on Linux/macOS/Windows.
+5. _(with `metacall-deploy`)_ Deploy Manifests generated match expected fixtures for
+   all example projects in `assets/examples/`.
+6. _(with `metacall-deploy`)_ Mesh Annotation correctly classifies Deployment Units
+   for the `auth-function-mesh` fixture.
 
 ## 5. Out-of-scope for MVP
 
 - Full inter-procedural global dataflow with alias analysis.
 - Sound cross-language type inference.
 - Mandatory online graph database dependency.
+- Dynamic Cross-Language Call Site resolution (runtime tag/path values).
 
 ## 6. Versioning policy
 
