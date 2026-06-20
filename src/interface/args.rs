@@ -5,6 +5,8 @@ use clap::Parser;
 pub enum Cli {
     Inspect(InspectArgs),
     Graph(GraphArgs),
+    #[cfg(feature = "metacall-deploy")]
+    Deploy(DeployArgs),
 }
 
 fn parse_format(s: &str) -> Result<crate::output::OutputFormat, String> {
@@ -49,4 +51,23 @@ pub struct GraphArgs {
     /// Embed Cytoscape.js directly in the HTML (no CDN dependency)
     #[arg(long)]
     pub self_contained: bool,
+}
+
+#[cfg(feature = "metacall-deploy")]
+#[derive(Parser)]
+pub struct DeployArgs {
+    /// Root directory to analyze
+    pub path: std::path::PathBuf,
+
+    /// Output format for manifests
+    #[arg(short = 'f', long, default_value = "json", value_parser = parse_format)]
+    pub format: crate::output::OutputFormat,
+
+    /// Check mode: diff generated manifests against existing metacall.json
+    #[arg(long)]
+    pub check: bool,
+
+    /// Output directory for generated manifests
+    #[arg(short, long, default_value = ".")]
+    pub out: std::path::PathBuf,
 }

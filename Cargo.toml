@@ -54,10 +54,12 @@ ignore = "0.4"
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
 insta = { version = "1.47", features = ["json"] }
+tempfile = "3.27"
 
 [features]
 default = []
 embed-cytoscape = []
+metacall-deploy = []
 
 [profile.bench]
 opt-level = 3

@@ -9,6 +9,9 @@ pub mod output;
 pub mod parser;
 pub mod pipeline;
 
+#[cfg(feature = "metacall-deploy")]
+pub mod deploy;
+
 pub use error::{Diagnostic, Error, Severity};
 pub use input::detect_language;
 pub use language::{LangId, LanguageSpec};
