@@ -110,7 +110,7 @@ impl SccAnalysis {
             });
         }
 
-        Self::classify_independence(graph, &mut components);
+        Self::classify_independence(graph, &mut components, &node_to_component);
 
         Self {
             components,
@@ -120,7 +120,11 @@ impl SccAnalysis {
 
     /// Classify components as Independent if they have no outgoing dependencies
     /// to other components.
-    fn classify_independence(graph: &DiGraph<NodeData, EdgeData>, components: &mut [Scc]) {
+    fn classify_independence(
+        graph: &DiGraph<NodeData, EdgeData>,
+        components: &mut [Scc],
+        node_to_component: &HashMap<NodeIndex, usize>,
+    ) {
         let mut component_deps: HashMap<usize, Vec<usize>> = HashMap::new();
 
         for edge_idx in graph.edge_indices() {
@@ -133,10 +137,10 @@ impl SccAnalysis {
             let Some((source, target)) = graph.edge_endpoints(edge_idx) else {
                 continue;
             };
-            let source_comp = Self::find_component_for_node(components, source);
-            let target_comp = Self::find_component_for_node(components, target);
+            let source_comp = node_to_component.get(&source);
+            let target_comp = node_to_component.get(&target);
 
-            if let (Some(s), Some(t)) = (source_comp, target_comp)
+            if let (Some(&s), Some(&t)) = (source_comp, target_comp)
                 && s != t
             {
                 component_deps.entry(s).or_default().push(t);
@@ -156,14 +160,6 @@ impl SccAnalysis {
                 }
             }
         }
-    }
-
-    /// Find which component contain a given node.
-    fn find_component_for_node(components: &[Scc], node: NodeIndex) -> Option<usize> {
-        components
-            .iter()
-            .find(|comp| comp.nodes.contains(&node))
-            .map(|comp| comp.index)
     }
 
     /// Get the component index for a specific node.

@@ -7,6 +7,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
+use rayon::prelude::*;
+
 use crate::error::{Diagnostic, Severity};
 use crate::language::LangId;
 use crate::model::{FileExtraction, FileId, SymbolId, Visibility};
@@ -66,21 +68,26 @@ impl FlattenedScopeCache {
     /// - 0.8: transitive import, same language
     /// - 0.6: cross-language imports
     pub fn build(ctx: &ResolutionContext, diagnostics: &mut Vec<Diagnostic>) -> Self {
-        let mut scopes: HashMap<FileId, ScopeMap> = HashMap::new();
+        let results: Vec<(FileId, ScopeMap, Vec<Diagnostic>)> = ctx
+            .symbol_index
+            .par_iter()
+            .map(|(&file_id, _)| {
+                let (scope, diags) = Self::compute_scope(file_id, ctx);
+                (file_id, scope, diags)
+            })
+            .collect();
 
-        for &file_id in ctx.symbol_index.keys() {
-            let scope = Self::compute_scope(file_id, ctx, diagnostics);
+        let mut scopes = HashMap::with_capacity(results.len());
+        for (file_id, scope, diags) in results {
             scopes.insert(file_id, scope);
+            diagnostics.extend(diags);
         }
 
         Self { scopes }
     }
 
-    fn compute_scope(
-        file_id: FileId,
-        ctx: &ResolutionContext,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> ScopeMap {
+    fn compute_scope(file_id: FileId, ctx: &ResolutionContext) -> (ScopeMap, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
         let source_lang = ctx.file_languages.get(&file_id).copied();
         let mut scope: ScopeMap = HashMap::new();
         let mut visited: HashSet<FileId> = HashSet::new();
@@ -94,13 +101,13 @@ impl FlattenedScopeCache {
             }
 
             if let Some(symbols) = ctx.symbol_index.get(&current) {
-                for (sym_id, name, sym_lang, visibility) in symbols {
-                    let default_vis = ctx
-                        .file_languages
-                        .get(&current)
-                        .map(|lang| lang.spec().default_visibility)
-                        .unwrap_or(crate::language::DefaultVisibility::PublicByDefault);
+                let default_vis = ctx
+                    .file_languages
+                    .get(&current)
+                    .map(|lang| lang.spec().default_visibility)
+                    .unwrap_or(crate::language::DefaultVisibility::PublicByDefault);
 
+                for (sym_id, name, sym_lang, visibility) in symbols {
                     let is_public = match visibility {
                         Some(Visibility::Public) => true,
                         Some(Visibility::Private) => current == file_id,
@@ -127,10 +134,11 @@ impl FlattenedScopeCache {
                         0.8
                     };
 
-                    scope
-                        .entry(name.clone())
-                        .or_default()
-                        .push((*sym_id, confidence));
+                    if let Some(entries) = scope.get_mut(name) {
+                        entries.push((*sym_id, confidence));
+                    } else {
+                        scope.insert(name.clone(), vec![(*sym_id, confidence)]);
+                    }
                 }
             }
 
@@ -169,7 +177,7 @@ impl FlattenedScopeCache {
             });
         }
 
-        scope
+        (scope, diagnostics)
     }
 
     /// Look up a name in a file's flattened scope.
@@ -203,40 +211,53 @@ pub fn resolve_all_references(
     scope_cache: &FlattenedScopeCache,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<(SymbolId, SymbolId)> {
-    let mut edges = Vec::new();
+    #[allow(clippy::type_complexity)]
+    let results: Vec<(Vec<(SymbolId, SymbolId)>, Vec<Diagnostic>)> = extractions
+        .par_iter()
+        .map(|file_ext| {
+            let mut local_edges = Vec::new();
+            let mut local_diags = Vec::new();
 
-    for file_ext in extractions {
-        let file_id = match path_to_file_id.get(&file_ext.path) {
-            Some(&id) => id,
-            None => continue,
-        };
+            let file_id = match path_to_file_id.get(&file_ext.path) {
+                Some(&id) => id,
+                None => return (local_edges, local_diags),
+            };
 
-        let file_path = &file_ext.path;
-        for ref_ in &file_ext.references {
-            if let Some(matches) = scope_cache.resolve(file_id, &ref_.name) {
-                // Find the source symbol that contains this reference range
-                let source_sym = file_ext.symbols.iter().find(|s| {
-                    s.source_range.byte_start <= ref_.range.byte_start
-                        && s.source_range.byte_end >= ref_.range.byte_end
-                });
+            let file_path = &file_ext.path;
+            for ref_ in &file_ext.references {
+                if let Some(matches) = scope_cache.resolve(file_id, &ref_.name) {
+                    // Find the source symbol that contains this reference range
+                    // We use rfind to get the innermost symbol (e.g. method inside class)
+                    let source_sym = file_ext.symbols.iter().rfind(|s| {
+                        s.source_range.byte_start <= ref_.range.byte_start
+                            && s.source_range.byte_end >= ref_.range.byte_end
+                    });
 
-                if let Some(source) = source_sym {
-                    for &(target_id, _confidence) in matches {
-                        // Don't add self-references (symbol to itself)
-                        if source.id != target_id {
-                            edges.push((source.id, target_id));
+                    if let Some(source) = source_sym {
+                        for &(target_id, _confidence) in matches {
+                            // Don't add self-references (symbol to itself)
+                            if source.id != target_id {
+                                local_edges.push((source.id, target_id));
+                            }
                         }
                     }
+                } else {
+                    local_diags.push(Diagnostic {
+                        path: file_path.clone(),
+                        severity: Severity::Warning,
+                        message: format!("unresolved reference: '{}'", ref_.name),
+                        source_range: Some(ref_.range.clone()),
+                    });
                 }
-            } else {
-                diagnostics.push(Diagnostic {
-                    path: file_path.clone(),
-                    severity: Severity::Warning,
-                    message: format!("unresolved reference: '{}'", ref_.name),
-                    source_range: Some(ref_.range.clone()),
-                });
             }
-        }
+            (local_edges, local_diags)
+        })
+        .collect();
+
+    let mut edges = Vec::new();
+    for (local_edges, local_diags) in results {
+        edges.extend(local_edges);
+        diagnostics.extend(local_diags);
     }
 
     // Deduplicate
