@@ -80,7 +80,9 @@ https://lefthook.dev/install/
 
 lefthook install
 ```
+
 a dev script will be provided later to automate this process
+
 ### pre-commit (parallel, fast)
 
 1. `cargo fmt --all -- --check` - formatting gate.

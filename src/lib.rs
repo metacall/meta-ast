@@ -21,6 +21,10 @@ pub use graph::{
     CodeGraph,
     builder::GraphBuilder,
     edge::{EdgeData, EdgeKind},
-    node::{FileNode, NodeData, SymbolNode},
+    node::{ExternalNode, FileNode, NodeData, SymbolNode},
+    resolver::FlattenedScopeCache,
     scc::{DeployabilityHint, Scc, SccAnalysis},
 };
+
+// Pipeline re-exports
+pub use pipeline::GraphAnalysis;

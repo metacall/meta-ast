@@ -3,13 +3,14 @@
 ## 1. Purpose
 
 Define language-pack extraction contracts backed by Tree-sitter grammar queries.
+Each language pack covers symbols, imports, and references. The set of supported
+languages grows over time; see `ROADMAP.md` Phase 6 for the expansion plan.
 
 ## 2. Shared extraction rules
 
 - Prefer grammar field-based extraction where available.
 - Record both byte and line/column ranges.
 - Continue extraction in presence of parser recovery nodes when safe.
-- `Python` , `JS/TS` are prefered at the start of every iteration
 
 ## 3. Language packs
 

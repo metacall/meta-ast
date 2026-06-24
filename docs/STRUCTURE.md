@@ -20,7 +20,7 @@ src/
 │
 ├── language/
 │   ├── mod.rs                LangId enum, LanguageSpec struct, DefaultVisibility, DocCommentConfig
-│   ├── common.rs             extract_with_spec, associate_docstrings, resolve_import_path_from_symbol_node
+│   ├── common.rs             extract_with_spec, extract_imports_and_references_with_spec, associate_docstrings
 │   ├── python.rs             Python queries + extraction
 │   ├── javascript.rs         JavaScript queries + extraction
 │   ├── typescript.rs         TypeScript queries + extraction
@@ -28,7 +28,8 @@ src/
 │   ├── c.rs                  C queries + extraction
 │   ├── cpp.rs                C++ queries + extraction
 │   ├── rust.rs               Rust queries + extraction
-│   └── go.rs                 Go queries + extraction
+│   ├── go.rs                 Go queries + extraction
+│   └── import_resolver.rs    ImportResolver trait, stateful resolvers (Python, Go, JS, TS)
 │
 ├── input/
 │   └── mod.rs                File discovery, filtering, language routing
@@ -43,12 +44,13 @@ src/
 │   ├── mod.rs                DiGraph construction, node/edge types, re-exports
 │   ├── node.rs               NodeData enum (File / Symbol / External)
 │   ├── edge.rs               EdgeKind enum (Ownership / Import / Reference) with confidence
-│   ├── builder.rs            GraphBuilder, EdgeNormalizer, import_adjacency, external_index
+│   ├── builder.rs            GraphBuilder, from_extractions, import_adjacency, external_index
 │   ├── scc.rs                Tarjan SCC + DeployabilityHint
 │   └── resolver.rs           FlattenedScopeCache, ResolutionContext, resolve_all_references
 │
 ├── output/
 │   ├── mod.rs                OutputFormat enum (Json / Yaml) with serialize dispatch
+│   ├── emitter.rs            EmitConfig, emit_inspect(), emit_graph() - CLI output dispatch
 │   ├── inspect.rs            Inspect-compatible JSON/YAML emission
 │   ├── graph.rs              GraphOutput + SCC serialization (metadata, nodes, edges, sccs)
 │   └── dashboard.rs          Interactive HTML dashboard (Cytoscape.js, --html, --self-contained)
@@ -157,17 +159,18 @@ Node and edge types:
 
 | Node | Fields |
 |------|--------|
-| `FileNode` | id, path (project-root-relative), language_id, snapshot_id |
+| `FileNode` | id, path (project-root-relative), language, snapshot_id |
 | `SymbolNode` | id, name, kind, file_id, visibility, source_range |
 | `ExternalNode` | raw_path, language |
 
 | Edge | Direction |
 |------|-----------|
-| `OwnershipEdge` | FileNode -> SymbolNode, SymbolNode -> SymbolNode (nesting) |
-| `ImportEdge` | FileNode -> FileNode |
-| `ReferenceEdge` | SymbolNode -> SymbolNode |
+| `Ownership` | FileNode -> SymbolNode, SymbolNode -> SymbolNode (nesting) |
+| `Import` | FileNode -> FileNode |
+| `Reference` | SymbolNode -> SymbolNode |
 
 Graph invariants:
+
 1. Every SymbolNode maps to exactly one FileNode.
 2. Ownership edges form an acyclic containment structure.
 3. SCC applies to dependency/reference subgraph only (Ownership excluded).
@@ -186,7 +189,7 @@ pub struct InspectOutput {
 }
 ```
 
-Each entry type includes: `name`, `source_range`, optional `signature`, `visibility`, `docstring`, `async` flag.
+Each entry type includes: `name`, `source_range`, optional `signature`, `visibility`, `docstring`. `FuncEntry` additionally includes an `async` flag.
 
 ---
 
@@ -250,6 +253,7 @@ pub trait ImportResolver: Send + Sync {
 ```
 
 #### Hybrid Resolution Bridge
+
 1. **`LanguageSpec`** remains static and `const` (containing a stateless `import_path_resolver` fn pointer).
 2. **`ImportResolver`** represents a stateful trait interface.
 3. Concrete adapters bridge the two:
@@ -258,7 +262,9 @@ pub trait ImportResolver: Send + Sync {
 4. **`make_resolver(LangId) -> Box<dyn ImportResolver>`**: Factory function constructing the stateful resolver for each language dynamically.
 
 #### Stateful Caching and Memoization Engines
+
 To guarantee maximum throughput and avoid redundant filesystem traversal during large-scale workspace parsing, the stateful resolvers employ optimized, thread-safe caching strategies:
+
 - **`OnceLock` Module Boundary Scanning (`GoModResolver`)**: Scans for the root `go.mod` file and parses the module path at most once per execution using a standard `OnceLock`. Subsequent resolution calls query the in-memory boundary in $O(1)$ time.
 - **`RwLock` File Existence Memoization (`PythonResolver`, `JsResolver`, `TsConfigResolver`)**: Memoizes `exists()` and `is_file()` filesystem checks using an `RwLock<HashMap<PathBuf, bool>>`. This minimizes expensive system calls during TypeScript candidate extensions resolution (e.g. trying `.ts`, `.tsx`, `.js`) and Python relative path matching, while remaining safe for concurrency.
 - **Stateless Fallback**: When candidate paths do not match or cannot be resolved using stateful logic, all resolvers gracefully fallback to their underlying stateless `LanguageSpec` function pointer, ensuring 100% backward compatibility.
@@ -482,44 +488,44 @@ tests/
     │   ├── simple_functions.py
     │   ├── classes.py
     │   ├── async_decorators.py
-    │   ├── imports.py
+    │   ├── deep_nesting.py
     │   ├── partial_syntax_error.py
-    │   └── expected/
-    │       └── *.snap.json          Insta snapshot files
+    │   └── sample.py
     ├── javascript/
     │   ├── functions.js
-    │   ├── arrow_functions.js
     │   ├── classes.js
-    │   ├── imports_exports.js
-    │   └── expected/
+    │   └── large_classes.js
     ├── typescript/
-    │   ├── interfaces.ts
-    │   ├── enums_ts.ts
-    │   ├── type_aliases.ts
-    │   └── expected/
+    │   └── interfaces.ts
     ├── tsx/
-    │   ├── components.tsx
-    │   └── expected/
+    │   └── components.tsx
     ├── c/
     │   ├── functions.c
-    │   ├── structs_enums.c
-    │   └── expected/
+    │   └── structs_enums.c
     ├── cpp/
     │   ├── classes.cpp
-    │   ├── namespaces.cpp
-    │   ├── templates.cpp
-    │   └── expected/
+    │   └── namespaces.cpp
     ├── rust/
     │   ├── functions.rs
     │   ├── structs_enums.rs
-    │   ├── traits_impls.rs
-    │   └── expected/
-    └── go/
-        ├── functions.go
-        ├── methods.go
-        ├── interfaces.go
-        └── expected/
+    │   └── large_file.rs
+    ├── go/
+    │   ├── functions.go
+    │   ├── methods.go
+    │   └── deep_nesting.go
+    ├── mixed/                      Multi-language single-directory fixtures
+    │   ├── app.py, index.js, main.rs, test.generated.py
+    └── multi/                      Multi-file cross-language fixtures
+        ├── main.py, lib.py, app.js, util.js
+        ├── c_app/, cpp_app/, go_app/, rust_crate/, ts_app/, tsx_app/
+        └── edge_*/                 Edge case fixtures (circular, alias, shadowing, etc.)
 ```
+
+### Snapshot policy
+
+Insta snapshot files live in `src/language/snapshots/` as `.snap` files (not under fixture directories). Each
+language module generates snapshots via inline unit tests. Update workflow: `cargo insta test` then
+`cargo insta review` then commit accepted `.snap` files.
 
 ### Testing Strategy
 
@@ -527,7 +533,7 @@ tests/
 |-------|------|---------|
 | Language detection | Unit tests | Extension-to-LangId mapping |
 | Per-language extraction | Fixture files + unit tests | Query correctness, capture mapping |
-| JSON output contract | `insta` snapshots | Regression detection |
+| JSON output contract | `insta` snapshots in `src/language/snapshots/` | Regression detection |
 | Error recovery | Fixture with invalid syntax | Partial results, no panics |
 | End-to-end pipeline | Integration tests | Full discover -> output flow |
 | Performance | `criterion` benchmarks | Extraction throughput |

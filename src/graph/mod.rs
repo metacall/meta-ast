@@ -19,7 +19,7 @@
 //!
 //! ```
 //! use meta_ast::graph::{GraphBuilder, SccAnalysis, CodeGraph};
-//! use meta_ast::model::{SnapshotId, Symbol};
+//! use meta_ast::model::SnapshotId;
 //!
 //! // Create builder and add files/symbols
 //! let mut builder = GraphBuilder::new(SnapshotId(1));

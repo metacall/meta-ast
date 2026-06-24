@@ -15,12 +15,6 @@ thread_local! {
     static PARSERS: RefCell<[Option<Parser>; LangId::COUNT]> = const { RefCell::new([const { None }; LangId::COUNT]) };
 }
 
-#[allow(dead_code)]
-pub(crate) struct ParsedFile {
-    pub tree: tree_sitter::Tree,
-    pub source: Vec<u8>,
-}
-
 fn get_or_init_parser(
     parsers: &mut [Option<Parser>; LangId::COUNT],
     lang: LangId,
@@ -47,15 +41,6 @@ pub(crate) fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tre
             path: Default::default(),
             message: "parser returned no tree".into(),
         })
-    })
-}
-
-#[allow(dead_code)]
-pub(crate) fn parse(lang: LangId, source: &[u8]) -> Result<ParsedFile, Error> {
-    let tree = parse_tree(lang, source)?;
-    Ok(ParsedFile {
-        tree,
-        source: source.to_vec(),
     })
 }
 
@@ -107,72 +92,24 @@ mod tests {
         assert_eq!(javascript.root_node().kind(), "program");
     }
 
-    fn has_error_node(node: &tree_sitter::Node) -> bool {
-        if node.is_error() {
-            return true;
-        }
-        for child in node.children(&mut node.walk()) {
-            if has_error_node(&child) {
-                return true;
-            }
-        }
-        false
-    }
-
-    #[test]
-    fn parse_valid_python() {
-        let result = parse(LangId::Python, b"def hello(): pass");
-        assert!(result.is_ok());
-        let parsed = result.unwrap();
-        assert!(!parsed.tree.root_node().has_error());
-    }
-
-    #[test]
-    fn parse_malformed_python() {
-        let result = parse(LangId::Python, b"def broken(");
-        assert!(result.is_ok());
-        let parsed = result.unwrap();
-        assert!(has_error_node(&parsed.tree.root_node()));
-    }
-
-    #[test]
-    fn parse_empty_source() {
-        let result = parse(LangId::Python, b"");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn parse_javascript() {
-        let result = parse(LangId::JavaScript, b"function hello() {}");
-        assert!(result.is_ok());
-        let parsed = result.unwrap();
-        assert!(!parsed.tree.root_node().has_error());
-    }
-
     #[test]
     fn error_ratio_valid_source() {
-        let parsed = parse(LangId::Python, b"def hello(): pass").unwrap();
-        let ratio = error_ratio(&parsed.tree, &parsed.source);
+        let tree = parse_tree(LangId::Python, b"def hello(): pass").unwrap();
+        let ratio = error_ratio(&tree, b"def hello(): pass");
         assert!(ratio < 0.1);
     }
 
     #[test]
     fn error_ratio_malformed() {
-        let parsed = parse(LangId::Python, b"def broken(").unwrap();
-        let ratio = error_ratio(&parsed.tree, &parsed.source);
+        let tree = parse_tree(LangId::Python, b"def broken(").unwrap();
+        let ratio = error_ratio(&tree, b"def broken(");
         assert!(ratio > 0.0);
     }
 
     #[test]
     fn error_ratio_empty_source() {
-        let parsed = parse(LangId::Python, b"").unwrap();
-        let ratio = error_ratio(&parsed.tree, &parsed.source);
+        let tree = parse_tree(LangId::Python, b"").unwrap();
+        let ratio = error_ratio(&tree, b"");
         assert_eq!(ratio, 0.0);
-    }
-
-    #[test]
-    fn tree_root_node_kind() {
-        let parsed = parse(LangId::Python, b"def hello(): pass").unwrap();
-        assert_eq!(parsed.tree.root_node().kind(), "module");
     }
 }
