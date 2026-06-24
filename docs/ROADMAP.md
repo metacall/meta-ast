@@ -41,7 +41,7 @@ Exit gates:
 1. Export format validated.
 2. Snapshot/version semantics documented and tested.
 
-## Phase 4 - CLI polish, output formats, visualization [NOT STARTED]
+## Phase 4 - CLI polish, output formats, visualization [IN PROGRESS]
 
 Goals:
 
@@ -53,13 +53,13 @@ Goals:
 
 Exit gates:
 
-1. `--format json|yaml` works for analysis output.
-2. `--html` generates a self-contained dashboard with SCC/Deployment Unit coloring,
-   auto-opens in browser.
-3. `--self-contained` embeds Cytoscape.js offline (requires `embed-cytoscape` feature).
-4. Watch-mode stability tests pass.
-5. C ABI smoke tests pass.
-6. Incremental performance target evidence captured.
+1. ~~`--format json|yaml` works for analysis output.~~ DONE
+2. ~~`--html` generates a self-contained dashboard with SCC/Deployment Unit coloring,
+   auto-opens in browser.~~ DONE
+3. ~~`--self-contained` embeds Cytoscape.js offline (requires `embed-cytoscape` feature).~~ DONE
+4. Watch-mode stability tests pass. NOT YET STARTED
+5. C ABI smoke tests pass. NOT YET STARTED
+6. Incremental performance target evidence captured. NOT YET STARTED
 
 ## Phase 5 - MetaCall Deploy Manifests [NOT STARTED]
 

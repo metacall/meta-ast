@@ -69,7 +69,6 @@
 - `tracing`, `tracing-subscriber` - structured observability.
 - `cbindgen` - C ABI header generation when ABI phase begins.
 
-
 ## 6. Alternatives and trade-offs
 
 - Graph: custom adjacency maps can be faster but increase maintenance cost.
