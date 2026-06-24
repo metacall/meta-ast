@@ -26,17 +26,24 @@ back to requirements and forward to tests.
 - `specs/symbol-extraction.md` - language-pack extraction contracts.
 - `specs/traceability.md` - mapping from deliverables to implementation/docs/tests.
 
-## Architecture decisions (ADRs)
+## Architecture Decision Records (ADRs)
 
-- `rfcs/0001-language-loading-model.md`
-- `rfcs/0002-error-semantics-and-recovery.md`
-- `rfcs/0003-incremental-parsing-strategy.md`
-- `rfcs/0004-graph-representation-and-scc.md`
-- `rfcs/0005-output-contract-policy.md`
-- `rfcs/0006-type-inference-scope.md`
-- `rfcs/0007-dgraph-integration-scope.md`
-- `rfcs/0008-graph-module.md`
-- `rfcs/0009-cross-file-dependency-mapping.md`
+- `adr/0001-stateful-import-resolver.md` - Stateful import resolver trait seam
+- `adr/0002-scope-resolution-heuristics.md` - Scope resolution heuristics
+- `adr/0003-unresolved-import-policy.md` - Unresolved import handling policy
+- `adr/0004-global-scope-synthetic-symbols.md` - Global scope synthetic symbol generation
+
+## Requests for Comments (RFCs)
+
+- `rfcs/0001-language-loading-model.md` - Language loading model
+- `rfcs/0002-error-semantics-and-recovery.md` - Error semantics and recovery
+- `rfcs/0003-incremental-parsing-strategy.md` - Incremental parsing strategy
+- `rfcs/0004-graph-representation-and-scc.md` - Graph representation and SCC
+- `rfcs/0005-output-contract-policy.md` - Output contract policy
+- `rfcs/0006-type-inference-scope.md` - Type inference scope
+- `rfcs/0007-dgraph-integration-scope.md` - Dgraph integration scope
+- `rfcs/0008-graph-module.md` - Graph module design
+- `rfcs/0009-cross-file-dependency-mapping.md` - Cross-file dependency mapping
 
 ## Scope policy
 

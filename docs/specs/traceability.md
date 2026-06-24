@@ -6,8 +6,8 @@
 |---|---|---|
 | Rust lib + CLI | `ARCHITECTURE.md`, `ROADMAP.md` | build/test/CLI fixture checks |
 | Language packs | `specs/symbol-extraction.md` | language fixture + snapshot tests |
-| Dependency graph + SCC | `specs/graph-model.md`, ADR-0004, ADR-0008, ADR-0009 | graph fixture SCC assertions |
-| Deployment Unit annotation | `CONTEXT.md`, `specs/graph-model.md` | SCC classification fixture tests |
+| Dependency graph + SCC | `specs/graph-model.md`, RFC-0004, RFC-0008, RFC-0009 | graph fixture SCC assertions |
+| Deployment Unit annotation | `specs/graph-model.md`, ADR-0004 | SCC classification fixture tests |
 | Dataflow (stretch) | `specs/graph-model.md`, ADR-0007 | optional feature tests |
 | Stable C ABI | ADR-0005 + `ROADMAP.md` | C ABI smoke tests |
 | Dgraph sink | ADR-0007 + `specs/graph-model.md` | export contract validation |
