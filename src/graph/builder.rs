@@ -186,6 +186,60 @@ impl GraphBuilder {
         self.add_edge_internal(from_idx, to_idx, EdgeKind::Import);
     }
 
+    /// Adds a MetaCall load edge between files.
+    pub fn add_metacall_load(
+        &mut self,
+        from_path: PathBuf,
+        target_lang: LangId,
+        scripts: &[String],
+        confidence: f64,
+        root: &std::path::Path,
+    ) {
+        let Some(&from_fid) = self.path_to_file.get(&from_path) else {
+            return;
+        };
+        let Some(&from_idx) = self.file_to_index.get(&from_fid) else {
+            return;
+        };
+
+        for script in scripts {
+            let target_path = root.join(script);
+            // Resolve to FileId if it exists
+            if let Some(&to_fid) = self.path_to_file.get(&target_path) {
+                if let Some(&to_idx) = self.file_to_index.get(&to_fid) {
+                    let edge_data = EdgeData {
+                        kind: EdgeKind::Import,
+                        confidence: confidence as f32,
+                    };
+                    self.graph.add_edge(from_idx, to_idx, edge_data);
+                }
+            } else {
+                // External or not discovered
+                let raw_path = script.clone();
+                if let Some(&to_idx) = self.external_index.get(&raw_path) {
+                    let edge_data = EdgeData {
+                        kind: EdgeKind::Import,
+                        confidence: confidence as f32,
+                    };
+                    self.graph.add_edge(from_idx, to_idx, edge_data);
+                } else {
+                    let node = ExternalNode {
+                        raw_path: raw_path.clone(),
+                        language: target_lang,
+                    };
+                    let idx = self.graph.add_node(NodeData::External(node));
+                    self.external_index.insert(raw_path, idx);
+
+                    let edge_data = EdgeData {
+                        kind: EdgeKind::Import,
+                        confidence: confidence as f32,
+                    };
+                    self.graph.add_edge(from_idx, idx, edge_data);
+                }
+            }
+        }
+    }
+
     /// Adds a reference edge between two symbols.
     ///
     /// Both symbols must exist in the builder.
