@@ -1,0 +1,3 @@
+[submodule "assets/examples"]
+	path = assets/examples
+	url = https://github.com/metacall/examples.git

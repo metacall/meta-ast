@@ -31,4 +31,5 @@ target
 # Optional offline JS asset
 /assets/*
 !/assets/cytoscape.min.js
+!/assets/examples
 
