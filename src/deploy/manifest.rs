@@ -36,7 +36,7 @@ pub fn generate_manifests(
 
         // Use relative path for scripts
         let rel_path: &Path = path.strip_prefix(root).unwrap_or(path);
-        let rel_str = rel_path.to_string_lossy().to_string();
+        let rel_str = rel_path.to_string_lossy().replace('\\', "/");
         if !scripts.contains(&rel_str) {
             scripts.push(rel_str);
         }

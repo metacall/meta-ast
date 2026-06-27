@@ -86,7 +86,7 @@ pub fn generate_mesh_annotation(
                     symbols.push(UnitSymbol {
                         name: sym.name.clone(),
                         file: file_node
-                            .map(|f| f.path.to_string_lossy().to_string())
+                            .map(|f| f.path.to_string_lossy().replace('\\', "/"))
                             .unwrap_or_default(),
                         language: lang_tag.to_string(),
                         kind: format!("{:?}", sym.kind).to_lowercase(),
