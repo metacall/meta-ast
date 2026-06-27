@@ -81,5 +81,16 @@ fn main() -> anyhow::Result<()> {
 
             Ok(())
         }
+
+        #[cfg(feature = "metacall-deploy")]
+        Cli::Deploy(args) => {
+            let config = meta_ast::deploy::DeployConfig {
+                root: args.path,
+                out: args.out,
+                format: args.format,
+                check: args.check,
+            };
+            meta_ast::deploy::run_deploy(config)
+        }
     }
 }
