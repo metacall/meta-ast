@@ -96,6 +96,13 @@ pub fn generate_mesh_annotation(
                     let lang_tag = crate::deploy::tags::metacall_tag(f.language);
                     languages.insert(lang_tag.to_string());
                     unit_languages.insert(lang_tag.to_string());
+
+                    symbols.push(UnitSymbol {
+                        name: f.path.to_string_lossy().replace('\\', "/"),
+                        file: f.path.to_string_lossy().replace('\\', "/"),
+                        language: lang_tag.to_string(),
+                        kind: "file".to_string(),
+                    });
                 }
                 NodeData::External(ext) => {
                     let lang_tag = crate::deploy::tags::metacall_tag(ext.language);
