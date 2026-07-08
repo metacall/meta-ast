@@ -81,6 +81,19 @@ impl LangId {
     pub fn spec(self) -> &'static LanguageSpec {
         spec_for(self)
     }
+
+    #[cfg(feature = "metacall-deploy")]
+    pub fn metacall_tag(self) -> &'static str {
+        match self {
+            LangId::Python => "py",
+            LangId::JavaScript => "node",
+            LangId::TypeScript | LangId::Tsx => "ts",
+            LangId::C => "c",
+            LangId::Cpp => "cpp",
+            LangId::Rust => "rs",
+            LangId::Go => "go",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -260,5 +273,18 @@ mod tests {
             let spec = spec_for(id);
             let _query = (spec.query_fn)();
         }
+    }
+
+    #[test]
+    #[cfg(feature = "metacall-deploy")]
+    fn test_lang_id_metacall_tag() {
+        assert_eq!(LangId::Python.metacall_tag(), "py");
+        assert_eq!(LangId::JavaScript.metacall_tag(), "node");
+        assert_eq!(LangId::TypeScript.metacall_tag(), "ts");
+        assert_eq!(LangId::Tsx.metacall_tag(), "ts");
+        assert_eq!(LangId::C.metacall_tag(), "c");
+        assert_eq!(LangId::Cpp.metacall_tag(), "cpp");
+        assert_eq!(LangId::Rust.metacall_tag(), "rs");
+        assert_eq!(LangId::Go.metacall_tag(), "go");
     }
 }
