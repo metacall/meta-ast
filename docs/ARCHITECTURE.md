@@ -18,7 +18,7 @@
 7. Cross-file reference resolution via `FlattenedScopeCache` (DFS the import graph once per file, then O(1) scope lookups).
 8. SCC analysis (Tarjan) and Deployment Unit annotation.
 9. Output emission (JSON, YAML, or interactive HTML dashboard).
-10. _(Roadmap Phase 5, requires `metacall-deploy` feature)_ Cross-Language Call Site detection, Deploy Manifest generation, and Mesh Annotation emission.
+10. _(Requires `metacall-deploy` feature)_ Cross-Language Call Site detection (scanner), Deploy Manifest generation, and Mesh Annotation emission. See `docs/DEPLOY.md`.
 
 ## 3. Component boundaries
 
@@ -31,7 +31,7 @@
 - **Resolver layer:** cross-file reference resolution via `FlattenedScopeCache` (`graph/resolver.rs`).
 - **Output layer:** serialization and optional adapters.
 - **Interface layer:** CLI + library API (future: C ABI).
-- **Deploy layer** _(PLANNED - Roadmap Phase 5, feature-gated: `metacall-deploy`)_: Cross-Language Call Site scanner, Deploy Manifest writer, Root Manifest assembler, Mesh Annotation emitter. **Not yet implemented.**
+- **Deploy layer** _(feature-gated: `metacall-deploy`)_: Cross-Language Call Site scanner (`scanner.rs`), Deploy Manifest writer (`manifest.rs`), Root Manifest assembler, Mesh Annotation emitter (`mesh.rs`), CI check mode (`check.rs`). Fully implemented. See `docs/DEPLOY.md`.
 
 Detailed module layout, data structures, and dependency direction are defined in `STRUCTURE.md`.
 
@@ -48,13 +48,13 @@ Static extensions:
 - `source_range`
 - `docstring` (where available)
 
-Deploy output _(PLANNED - Roadmap Phase 5, feature-gated: `metacall-deploy`)_:
+Deploy output _(feature-gated: `metacall-deploy`)_:
 
 - `metacall.{tag}.json` per detected language group (Deploy Manifest)
 - `metacall.json` root manifest (Root Manifest)
 - `metacall.mesh.json` (Mesh Annotation - SCC-derived Deployment Unit advisory)
 
-**Note:** The `metacall-deploy` feature is not yet implemented. No code exists behind this feature gate.
+See [DEPLOY.md](DEPLOY.md) for schema details and the call site scanner reference.
 
 Detailed graph contract is defined in `specs/graph-model.md`.
 
@@ -86,5 +86,5 @@ The dashboard turns SCC analysis into something you can actually see. Nodes in c
 
 ## 8. Compatibility and integration
 
-- Optional integration layers (C ABI, `metacall-deploy`, Dgraph) are feature-scoped and do not block standalone operation. **Note:** C ABI and `metacall-deploy` are planned but not yet implemented.
+- Optional integration layers (C ABI, `metacall-deploy`, Dgraph) are feature-scoped and do not block standalone operation. The `metacall-deploy` feature is implemented (see [DEPLOY.md](DEPLOY.md)). C ABI is planned but not yet implemented.
 - Discussion and contributions: [Discord](https://discord.gg/VvSZRsBK)

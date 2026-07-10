@@ -61,9 +61,9 @@ Exit gates:
 5. C ABI smoke tests pass. NOT YET STARTED
 6. Incremental performance target evidence captured. NOT YET STARTED
 
-## Phase 5 - MetaCall Deploy Manifests [NOT STARTED]
+## Phase 5 - MetaCall Deploy Manifests [COMPLETE]
 
-_Requires `--features metacall-deploy`._
+_Requires `--features metacall-deploy`. Full documentation in [DEPLOY.md](DEPLOY.md)._
 
 Goals:
 
@@ -82,13 +82,11 @@ Goals:
 Exit gates:
 
 1. Deploy Manifests generated match expected fixtures for all projects in
-   `assets/examples/`.
+   `assets/examples/`. DONE
 2. Mesh Annotation correctly classifies Deployment Units for `auth-function-mesh`
-   fixture (two independent units: `{encrypt, sign}` and `{decrypt, verify}`).
-3. `--check` detects manifest/source divergence and reports it as a structured
-   diagnostic.
-4. Dynamic call site arguments (non-literal tag or path) emit low-confidence
-   annotation rather than a hard failure.
+   fixture. DONE
+3. `--check` detects manifest/source divergence and reports structured diagnostics. DONE
+4. Dynamic call site arguments emit low-confidence annotation rather than hard failure. DONE
 
 ## Phase 6 - Language expansion [NOT STARTED]
 

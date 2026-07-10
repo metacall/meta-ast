@@ -57,7 +57,15 @@ src/
 │
 └── interface/
     ├── mod.rs                CLI module root
-    └── args.rs               Clap derive structs (Inspect, Graph + --format, --html, --self-contained)
+    └── args.rs               Clap derive structs (Inspect, Graph, Deploy + --format, --html, --self-contained)
+│
+└── deploy/                   [feature: metacall-deploy] See docs/DEPLOY.md
+    ├── mod.rs                Entry: run_deploy(), DeployConfig
+    ├── scanner.rs            tree-sitter call site detection, CallSite, CallSiteVariant, confidence
+    ├── manifest.rs           DeployManifest, RootManifest, generate_manifests()
+    ├── mesh.rs               MeshAnnotation, DeploymentUnit, CrossLanguageEdge, generate_mesh_annotation()
+    ├── check.rs              check_manifests() - diff generated vs on-disk manifests
+    └── tags.rs               LangId <-> MetaCall runtime tag mapping
 ```
 
 ### Module dependency direction
@@ -71,6 +79,7 @@ CLI (interface/)
       → Resolver (graph/resolver.rs) → cross-file reference resolution
     → Input (input/)         → depends on language (detection)
   → Output (output/)         → depends on model + graph
+  → Deploy (deploy/)         → depends on pipeline + graph + input [feature: metacall-deploy]
   → Error (error.rs)         ← cross-cutting
 ```
 
