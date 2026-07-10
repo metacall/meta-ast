@@ -6,11 +6,11 @@
 |---|---|---|
 | Rust lib + CLI | `ARCHITECTURE.md`, `ROADMAP.md` | build/test/CLI fixture checks |
 | Language packs | `specs/symbol-extraction.md` | language fixture + snapshot tests |
-| Dependency graph + SCC | `specs/graph-model.md`, RFC-0004, RFC-0008, RFC-0009 | graph fixture SCC assertions |
-| Deployment Unit annotation | `specs/graph-model.md`, ADR-0004 | SCC classification fixture tests |
-| Dataflow (stretch) | `specs/graph-model.md`, ADR-0007 | optional feature tests |
-| Stable C ABI | ADR-0005 + `ROADMAP.md` | C ABI smoke tests |
-| Dgraph sink | ADR-0007 + `specs/graph-model.md` | export contract validation |
+| Dependency graph + SCC | `specs/graph-model.md`, `rfcs/0004-graph-representation-and-scc.md`, `rfcs/0008-graph-module.md`, `rfcs/0009-cross-file-dependency-mapping.md` | graph fixture SCC assertions |
+| Deployment Unit annotation | `specs/graph-model.md`, `rfcs/0004-graph-representation-and-scc.md` | SCC classification fixture tests |
+| Dataflow (stretch) | `specs/graph-model.md`, `rfcs/0007-dgraph-integration-scope.md` | optional feature tests |
+| Stable C ABI | `ROADMAP.md` (Phase 4) | C ABI smoke tests |
+| Dgraph sink | `rfcs/0007-dgraph-integration-scope.md` + `specs/graph-model.md` | export contract validation |
 | Deploy Manifests (`metacall-deploy`) | `specs/requirements.md` FR-9 | fixture manifest comparison tests |
 | Mesh Annotation (`metacall-deploy`) | `specs/requirements.md` FR-10 | SCC unit classification tests |
 
@@ -21,7 +21,7 @@
 | Parse all supported languages | `specs/requirements.md` FR-1 | per-language fixture parsing tests |
 | Correct SCC identification | `specs/graph-model.md` | graph fixture SCC assertions |
 | Deployment Unit classification | `specs/requirements.md` FR-4 | independent vs. co-deploy fixture assertions |
-| Incremental update target | `ARCHITECTURE.md` + ADR-0003 | benchmark harness and thresholds |
+| Incremental update target | `ARCHITECTURE.md` + `rfcs/0003-incremental-parsing-strategy.md` | benchmark harness and thresholds |
 | Linux/macOS/Windows portability | `CI_CD.md` | CI matrix status |
 | Deploy Manifest fixture match | `specs/requirements.md` FR-9 | `assets/examples/` manifest comparison |
 | Mesh Annotation correctness | `specs/requirements.md` FR-10 | `auth-function-mesh` unit classification |

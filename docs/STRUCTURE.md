@@ -337,9 +337,9 @@ Parse errors do not abort extraction. The pipeline accumulates `Vec<Diagnostic>`
 
 `rayon = "1.10"` is used for file-level parallelism in the parse + extract phase.
 
-- `Parser` and `Tree` are `Send + Sync` (safe for parallel use).
-- A fresh `Parser` is created per rayon task (creation is ~malloc + zero-init; `set_language` is a pointer assignment to a static grammar table).
-- No parser pooling needed - per-task creation is simpler and equally fast.
+- A thread-local pool of `Parser` instances (one per language) is maintained within each worker thread via `thread_local!` and `RefCell` caching. This avoids sharing the non-`Sync` `Parser` across threads.
+- Emitted `Tree` and symbol models are `Send` and are safely returned from rayon workers to the main thread for graph assembly.
+- Caching `Parser` instances avoids redundant grammar re-initialization and allocation overhead on every task.
 
 ### 5.2 Pipeline Phases
 

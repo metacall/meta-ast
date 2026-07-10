@@ -1,4 +1,4 @@
-# ADR 0004: Graph Representation and SCC
+# RFC 0004: Graph Representation and SCC
 
 ## Status
 
