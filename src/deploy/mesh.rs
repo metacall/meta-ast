@@ -145,9 +145,16 @@ pub fn generate_mesh_annotation(
             continue;
         }
 
-        let (u, v) = analysis.graph.graph.edge_endpoints(edge_idx).unwrap();
-        let u_comp = analysis.scc.component_of(u).unwrap();
-        let v_comp = analysis.scc.component_of(v).unwrap();
+        // Both endpoints and their component membership are graph invariants
+        // produced by SCC analysis; skip edges that violate them rather than panic.
+        let Some((u, v)) = analysis.graph.graph.edge_endpoints(edge_idx) else {
+            continue;
+        };
+        let (Some(u_comp), Some(v_comp)) =
+            (analysis.scc.component_of(u), analysis.scc.component_of(v))
+        else {
+            continue;
+        };
 
         if u_comp != v_comp {
             let u_lang = get_node_language(&analysis.graph.graph[u], &analysis.graph);

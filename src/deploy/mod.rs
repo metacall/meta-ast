@@ -32,7 +32,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&crate::language::grammar_for(*lang))
-            .expect("Failed to load grammar");
+            .map_err(|e| anyhow::anyhow!("failed to load grammar for {lang:?}: {e}"))?;
 
         if let Some(tree) = parser.parse(&source, None) {
             let sites = scanner::scan_file(*lang, &tree, &source, path);

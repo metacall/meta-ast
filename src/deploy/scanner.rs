@@ -199,8 +199,14 @@ pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<Cal
 
     let mut call_sites = Vec::new();
 
-    let fn_name_idx = query.capture_index_for_name("fn_name").unwrap();
-    let args_idx = query.capture_index_for_name("args").unwrap();
+    // Capture indices are static query-shape facts; a missing name means a
+    // malformed query constant, not runtime data. Bail out rather than panic.
+    let Some(fn_name_idx) = query.capture_index_for_name("fn_name") else {
+        return call_sites;
+    };
+    let Some(args_idx) = query.capture_index_for_name("args") else {
+        return call_sites;
+    };
 
     while let Some(mat) = matches.next() {
         let mut variant = None;
