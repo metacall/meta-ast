@@ -1,4 +1,4 @@
-# ADR 0007: Dgraph Integration Scope
+# RFC 0007: Dgraph Integration Scope
 
 ## Status
 

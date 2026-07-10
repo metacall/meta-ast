@@ -1,4 +1,4 @@
-# ADR 0005: Output Contract Policy
+# RFC 0005: Output Contract Policy
 
 ## Status
 

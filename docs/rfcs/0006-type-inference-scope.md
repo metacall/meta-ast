@@ -1,4 +1,4 @@
-# ADR 0006: Type Inference Scope
+# RFC 0006: Type Inference Scope
 
 ## Status
 

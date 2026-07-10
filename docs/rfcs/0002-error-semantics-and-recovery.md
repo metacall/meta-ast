@@ -1,4 +1,4 @@
-# ADR 0002: Error Semantics and Recovery
+# RFC 0002: Error Semantics and Recovery
 
 ## Status
 

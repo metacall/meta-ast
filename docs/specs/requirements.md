@@ -48,10 +48,9 @@ SCC as a Deployment Unit, classifying it as:
 - Independent (acyclic, Function Mesh separation candidate)
 - Co-deployment required (cyclic, must remain grouped)
 
-### FR-5: Incremental updates
+### FR-5: Incremental updates (Planned)
 
-The analyzer shall support update workflows from file changes with a target incremental
-response of under 100ms for files below 5k LOC.
+The analyzer is designed to support update workflows from file changes with a target incremental response of under 100ms for files below 5k LOC. Note: This is planned for Phase 4 of the roadmap and is not yet implemented.
 
 ### FR-6: CLI and library modes
 
@@ -60,18 +59,17 @@ The project shall expose:
 - Rust library interface
 - CLI entrypoint for project analysis and output emission
 
-### FR-7: C ABI (planned later phase)
+### FR-7: C ABI (Planned)
 
-The project shall provide a stable C ABI header (`mc_ast.h`) for embedding scenarios.
+The project will provide a stable C ABI header (`mc_ast.h`) for embedding scenarios in a later phase.
 
-### FR-8: Datagraph export
+### FR-8: Datagraph export (Planned)
 
-The project may export a datagraph model suitable for external graph sinks
-(including Dgraph).
+The project will support exporting a datagraph model suitable for external graph sinks (including Dgraph) in a later phase.
 
-### FR-9: Deploy Manifest generation (feature-gated: `metacall-deploy`)
+### FR-9: Deploy Manifest generation (feature-gated: `metacall-deploy`, Planned)
 
-When built with `--features metacall-deploy`, the `deploy` subcommand shall:
+When built with `--features metacall-deploy`, the `deploy` subcommand will support generating manifests:
 
 - Scan source files for Cross-Language Call Sites
   (`metacall_load_from_file`, `metacall_load_from_memory`,
@@ -83,14 +81,18 @@ When built with `--features metacall-deploy`, the `deploy` subcommand shall:
   emit a low-confidence annotation when the target is absent
 - Validate an existing `metacall.json` against static analysis when `--check` is passed
 
-### FR-10: Mesh Annotation (feature-gated: `metacall-deploy`)
+*Note: This feature is planned for Phase 5 of the roadmap and is not yet implemented.*
 
-When built with `--features metacall-deploy`, the `deploy` subcommand shall also emit
+### FR-10: Mesh Annotation (feature-gated: `metacall-deploy`, Planned)
+
+When built with `--features metacall-deploy`, the `deploy` subcommand will also emit
 `metacall.mesh.json` containing:
 
 - SCC-derived Deployment Units with constituent symbol lists
 - Cross-language boundary flags per unit
 - Independent mesh candidate classification per unit
+
+*Note: This feature is planned for Phase 5 of the roadmap and is not yet implemented.*
 
 ## 3. Non-functional requirements
 
@@ -122,15 +124,16 @@ debugging.
 
 1. Parse all supported languages and emit valid symbol JSON.
 2. Correct SCC identification for multi-language project fixtures.
-3. Incremental-update target under 100ms for files below 5k LOC.
-4. CI pipeline green on Linux/macOS/Windows.
-5. _(with `metacall-deploy`)_ Deploy Manifests generated match expected fixtures for
-   all example projects in `assets/examples/`.
-6. _(with `metacall-deploy`)_ Mesh Annotation correctly classifies Deployment Units
-   for the `auth-function-mesh` fixture.
+3. CI pipeline green on Linux/macOS/Windows.
+4. *(Planned)* Incremental-update target under 100ms for files below 5k LOC.
+5. *(Planned with `metacall-deploy`)* Deploy Manifests generated match expected fixtures for all example projects in `assets/examples/`.
+6. *(Planned with `metacall-deploy`)* Mesh Annotation correctly classifies Deployment Units for the `auth-function-mesh` fixture.
 
 ## 5. Out-of-scope for MVP
 
+- Incremental watch-mode and C ABI embedding (post-MVP).
+- `metacall-deploy` manifest/mesh generation and `--check` mode (post-MVP).
+- Dgraph sink/export adapter (post-MVP).
 - Full inter-procedural global dataflow with alias analysis.
 - Sound cross-language type inference.
 - Mandatory online graph database dependency.

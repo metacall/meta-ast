@@ -1,4 +1,4 @@
-# ADR 0003: Incremental Parsing Strategy
+# RFC 0003: Incremental Parsing Strategy
 
 ## Status
 

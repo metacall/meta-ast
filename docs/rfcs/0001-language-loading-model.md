@@ -1,4 +1,4 @@
-# ADR 0001: Language Loading Model
+# RFC 0001: Language Loading Model
 
 ## Status
 
