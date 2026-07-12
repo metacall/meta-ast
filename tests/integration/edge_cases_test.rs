@@ -82,7 +82,7 @@ fn malformed_file_emits_diagnostics_per_language() {
         );
         // The graph must remain internally consistent after recovery.
         assert!(
-            analysis.scc.components.len() >= 1,
+            !analysis.scc.components.is_empty(),
             "expected at least one SCC for {name}"
         );
         let _ = diags;
