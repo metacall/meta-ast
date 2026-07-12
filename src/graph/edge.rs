@@ -3,9 +3,21 @@
 //! Defines the semantic relationships between nodes in the code graph.
 //! Edges are directed and carry metadata about the relationship type
 //! and confidence level.
+//!
+//! ## Design: uni-directional edges
+//!
+//! All edges are directed. There is no bidirectional or monitor/link
+//! pattern - an edge from A to B means A depends on B, not that B will
+//! be notified of A's failure. Shared-fate semantics (failure propagation)
+//! are a separate, optional annotation that the deploy layer may add
+//! during cut-edge RPC conversion. This follows the principle from
+//! *A Unified Semantics for Future Erlang* §2.2/§6.2: bidirectional links
+//! are replaced by uni-directional links plus monitors, and supervision
+//! trees can be built from uni-directional links alone.
 
 /// Semantic kind of a directed edge in the code graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[non_exhaustive]
 pub enum EdgeKind {
     /// Ownership edge: File owns/contains a symbol.
     Ownership,
@@ -45,7 +57,7 @@ impl std::fmt::Display for EdgeKind {
 }
 
 /// Data stored for each edge in the graph.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct EdgeData {
     /// Semantic kind of the relationship.
     pub kind: EdgeKind,

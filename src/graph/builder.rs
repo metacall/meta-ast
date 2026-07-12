@@ -135,8 +135,8 @@ impl GraphBuilder {
         let sym_idx = self.graph.add_node(NodeData::Symbol(node));
         self.symbol_to_index.insert(symbol.id, sym_idx);
 
-        // Add ownership edge: file -> symbol
-        self.add_edge_internal(file_idx, sym_idx, EdgeKind::Ownership);
+        // Add ownership edge: file -> symbol (always full confidence)
+        self.add_edge_internal(file_idx, sym_idx, EdgeKind::Ownership, 1.0);
 
         Ok(sym_idx)
     }
@@ -154,7 +154,7 @@ impl GraphBuilder {
         // Resolve target path to file ID if it exists in our graph
         if let Some(&to_id) = self.path_to_file.get(&to) {
             if let Some(&to_idx) = self.file_to_index.get(&to_id) {
-                self.add_edge_internal(from_idx, to_idx, EdgeKind::Import);
+                self.add_edge_internal(from_idx, to_idx, EdgeKind::Import, 1.0);
             }
             return;
         }
@@ -177,13 +177,14 @@ impl GraphBuilder {
             let node = ExternalNode {
                 raw_path: raw_path.clone(),
                 language,
+                classification: None,
             };
             let idx = self.graph.add_node(NodeData::External(node));
             self.external_index.insert(raw_path, idx);
             idx
         };
 
-        self.add_edge_internal(from_idx, to_idx, EdgeKind::Import);
+        self.add_edge_internal(from_idx, to_idx, EdgeKind::Import, 1.0);
     }
 
     /// Adds a MetaCall load edge between files.
@@ -226,6 +227,7 @@ impl GraphBuilder {
                     let node = ExternalNode {
                         raw_path: raw_path.clone(),
                         language: target_lang,
+                        classification: None,
                     };
                     let idx = self.graph.add_node(NodeData::External(node));
                     self.external_index.insert(raw_path, idx);
@@ -240,10 +242,12 @@ impl GraphBuilder {
         }
     }
 
-    /// Adds a reference edge between two symbols.
+    /// Adds a reference edge between two symbols with a confidence score.
     ///
-    /// Both symbols must exist in the builder.
-    pub fn add_reference(&mut self, from: SymbolId, to: SymbolId) {
+    /// Both symbols must exist in the builder. If a duplicate edge
+    /// already exists, the confidence is merged via max (the stronger
+    /// signal is preserved).
+    pub fn add_reference(&mut self, from: SymbolId, to: SymbolId, confidence: f32) {
         let Some(&from_idx) = self.symbol_to_index.get(&from) else {
             return;
         };
@@ -251,19 +255,32 @@ impl GraphBuilder {
             return;
         };
 
-        self.add_edge_internal(from_idx, to_idx, EdgeKind::Reference);
+        self.add_edge_internal(from_idx, to_idx, EdgeKind::Reference, confidence);
     }
 
-    /// Internal method to add an edge with deduplication.
-    fn add_edge_internal(&mut self, source: NodeIndex, target: NodeIndex, kind: EdgeKind) {
+    /// Internal method to add an edge with deduplication and confidence.
+    ///
+    /// If a duplicate `(source, target, kind)` already exists, the existing
+    /// edge's confidence is bumped to `max(existing, new)` - never reduced.
+    fn add_edge_internal(
+        &mut self,
+        source: NodeIndex,
+        target: NodeIndex,
+        kind: EdgeKind,
+        confidence: f32,
+    ) {
         if !self.edge_normalizer.is_new(source, target, kind) {
-            return; // Duplicate edge, skip
+            // Duplicate edge: max-merge confidence on the existing edge.
+            if let Some(edge_idx) = self.graph.find_edge(source, target) {
+                let existing = &mut self.graph[edge_idx];
+                if existing.kind == kind {
+                    existing.confidence = existing.confidence.max(confidence);
+                }
+            }
+            return;
         }
 
-        let edge_data = EdgeData {
-            kind,
-            confidence: 1.0, // Strong confidence for explicit imports
-        };
+        let edge_data = EdgeData { kind, confidence };
 
         self.graph.add_edge(source, target, edge_data);
     }
@@ -403,8 +420,8 @@ impl GraphBuilder {
             &scope_cache,
             diagnostics,
         );
-        for (from, to) in ref_edges {
-            builder.add_reference(from, to);
+        for (from, to, confidence) in ref_edges {
+            builder.add_reference(from, to, confidence);
         }
 
         // Phase 6: finalize and compute SCC
@@ -558,6 +575,7 @@ mod tests {
             imports: vec![],
             references: vec![],
             diagnostics: vec![],
+            ast_node_count: 0,
         }];
         let mut diags = Vec::new();
         let (graph, _scc) = GraphBuilder::from_extractions(
@@ -614,6 +632,7 @@ mod tests {
             imports: vec![],
             references: vec![],
             diagnostics: vec![],
+            ast_node_count: 0,
         }];
         let mut diags = Vec::new();
         let (_graph, _scc) = GraphBuilder::from_extractions(
@@ -648,6 +667,7 @@ mod tests {
                 }],
                 references: vec![],
                 diagnostics: vec![],
+                ast_node_count: 0,
             },
             FileExtraction {
                 path: PathBuf::from("/proj/b.py"),
@@ -656,6 +676,7 @@ mod tests {
                 imports: vec![],
                 references: vec![],
                 diagnostics: vec![],
+                ast_node_count: 0,
             },
         ];
         let mut diags = Vec::new();
