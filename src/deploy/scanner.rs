@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use tree_sitter::{Node, Query, QueryCursor, StreamingIterator, Tree};
 
+/// Variant of a MetaCall load call site.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CallSiteVariant {
     LoadFromFile,
     LoadFromMemory,
@@ -158,9 +160,9 @@ static RUST_QUERY: LazyLock<Query> = LazyLock::new(|| {
     (scoped_identifier
         path: (scoped_identifier path: (identifier) @mod_name name: (identifier) @sub_mod)
         name: (identifier) @fn_name)
+    (identifier) @fn_name
   ]
-  arguments: (arguments) @args
-  (#match? @mod_name "metacall"))
+  arguments: (arguments) @args)
 "#,
         "Rust deploy",
     )
@@ -336,13 +338,45 @@ mod tests {
     }
 
     #[test]
-    fn test_scan_go() {
-        let source = b"metacall.LoadFromFile(\"py\", []string{\"sum.py\"})";
-        let tree = parse(LangId::Go, source);
-        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+    fn test_scan_rust_bare_name() {
+        // After `use metacall::metacall_load_from_file`, the call is bare.
+        let source = b"metacall_load_from_file(\"py\", [\"sum.py\"])";
+        let tree = parse(LangId::Rust, source);
+        let sites = scan_file(LangId::Rust, &tree, source, Path::new("lib.rs"));
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
         assert_eq!(sites[0].target_lang.as_deref(), Some("py"));
         assert_eq!(sites[0].scripts, vec!["sum.py"]);
+    }
+
+    #[test]
+    fn test_scan_python_load_from_memory() {
+        let source = b"metacall_load_from_memory('node', 'console.log(\"hi\")')";
+        let tree = parse(LangId::Python, source);
+        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromMemory);
+        assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
+    }
+
+    #[test]
+    fn test_scan_python_load_from_package() {
+        let source = b"metacall_load_from_package('node', 'express')";
+        let tree = parse(LangId::Python, source);
+        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromPackage);
+        assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
+        assert_eq!(sites[0].scripts, vec!["express"]);
+    }
+
+    #[test]
+    fn test_scan_go_load_from_memory() {
+        let source = b"metacall.LoadFromMemory(\"node\", []string{\"const x = 1;\"})";
+        let tree = parse(LangId::Go, source);
+        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromMemory);
+        assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
     }
 }

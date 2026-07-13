@@ -10,7 +10,8 @@ fn resolve_ts_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Opti
     }
 
     if !raw.starts_with('.') && !raw.starts_with('/') {
-        return None;
+        // Bare module name -- returns as-is so graph builder creates ExternalNode.
+        return Some(PathBuf::from(raw));
     }
 
     let base = if raw.starts_with('/') {
@@ -125,6 +126,10 @@ pub(crate) const TS_FAMILY_IMPORT_QUERY: &str = r#"
   (import_clause
     (namespace_import
       (identifier) @import.symbol)))
+(call_expression
+  function: (identifier) @call.name
+  arguments: (arguments . (string) @import.path .)
+  (#eq? @call.name "require"))
 "#;
 
 pub(crate) const TS_FAMILY_REFERENCE_QUERY: &str = r#"

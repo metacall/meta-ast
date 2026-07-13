@@ -10,7 +10,10 @@ fn resolve_js_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Opti
     }
 
     if !raw.starts_with('.') && !raw.starts_with('/') {
-        return None;
+        // Bare module name (e.g. 'jsonwebtoken', 'react'): return as-is
+        // so the graph builder creates an ExternalNode for it.
+        // Node.js resolution (node_modules) is not walked here.
+        return Some(PathBuf::from(raw));
     }
 
     let base = if raw.starts_with('/') {
@@ -102,6 +105,10 @@ const JS_IMPORT_QUERY_STR: &str = r#"
   (import_clause
     (namespace_import
       (identifier) @import.symbol)))
+(call_expression
+  function: (identifier) @call.name
+  arguments: (arguments . (string) @import.path .)
+  (#eq? @call.name "require"))
 "#;
 
 const JS_REFERENCE_QUERY_STR: &str = r#"

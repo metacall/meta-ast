@@ -4,10 +4,7 @@ use std::sync::LazyLock;
 
 fn resolve_rust_module_path(rest: &str, base: &Path) -> Option<PathBuf> {
     let segments: Vec<&str> = rest.split("::").collect();
-    if segments.is_empty() {
-        return None;
-    }
-    let module = segments[0];
+    let module = segments.first()?;
 
     // Try direct file: base/module.rs
     let direct_file = base.join(format!("{module}.rs"));
