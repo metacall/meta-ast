@@ -7,6 +7,7 @@ use serde::Serialize;
 
 /// Supported output serialization formats.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub enum OutputFormat {
     Json,
     Yaml,

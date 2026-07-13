@@ -15,33 +15,36 @@ fn main() -> anyhow::Result<()> {
         Cli::Inspect(args) => {
             let files = meta_ast::input::discover_files(&args.path, None)?;
 
-            let result = meta_ast::extractor::extract(&files);
+            let result = meta_ast::extractor::extract_with_options(
+                &files,
+                &meta_ast::extractor::ExtractOptions {
+                    skip_imports_and_refs: true,
+                },
+            );
 
-            let symbols: Vec<_> = result
+            let mut symbols: Vec<_> = result
                 .files
-                .iter()
-                .flat_map(|f| f.symbols.iter().cloned())
+                .into_iter()
+                .flat_map(|f| {
+                    for diag in &f.diagnostics {
+                        tracing::warn!(
+                            path = %diag.path.display(),
+                            severity = ?diag.severity,
+                            "{}", diag.message
+                        );
+                    }
+                    f.symbols
+                })
                 .collect();
-
-            for file in &result.files {
-                for diag in &file.diagnostics {
-                    tracing::warn!(
-                        path = %diag.path.display(),
-                        severity = ?diag.severity,
-                        "{}", diag.message
-                    );
-                }
-            }
 
             let config = meta_ast::output::emitter::EmitConfig {
                 output: args.output,
                 format: args.format,
                 html: false,
                 open_browser: false,
-                self_contained: false,
             };
 
-            meta_ast::output::emitter::emit_inspect(&symbols, &config)?;
+            meta_ast::output::emitter::emit_inspect(&mut symbols, &config)?;
 
             Ok(())
         }
@@ -74,7 +77,6 @@ fn main() -> anyhow::Result<()> {
                 format: args.format,
                 html: args.html,
                 open_browser: true,
-                self_contained: args.self_contained,
             };
 
             meta_ast::output::emitter::emit_graph(&analysis, &config)?;

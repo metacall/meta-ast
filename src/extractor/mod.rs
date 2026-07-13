@@ -3,11 +3,12 @@
 //! Uses rayon `par_iter` to read, parse, and extract symbols/imports/
 //! references across files concurrently. Each file is processed
 //! independently; errors are accumulated as diagnostics per file.
+//!
+//! Set `ExtractOptions::skip_imports_and_refs` to `true` when only
+//! symbol listing is needed (e.g. inspect mode); skips the import and
+//! reference query passes, roughly halving per-file extraction time.
 
 use rayon::prelude::*;
-
-// TODO(MVP): Add a config flag to skip import/reference extraction when only
-//symbol listing is needed (performance optimization for inspect mode).
 
 use crate::error::{Diagnostic, Severity};
 use crate::language::LangId;
@@ -16,16 +17,32 @@ use crate::parser;
 
 pub use crate::model::FileExtraction;
 
+/// Controls what the extraction pass produces.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExtractOptions {
+    /// Skip import and reference extraction entirely; only extract symbols
+    /// and AST node counts. Halves per-file extraction cost for pure
+    /// symbol-inspection workflows.
+    pub skip_imports_and_refs: bool,
+}
+
 pub struct ExtractionResult {
     pub files: Vec<FileExtraction>,
 }
 
 pub fn extract(files: &[(std::path::PathBuf, LangId)]) -> ExtractionResult {
+    extract_with_options(files, &ExtractOptions::default())
+}
+
+pub fn extract_with_options(
+    files: &[(std::path::PathBuf, LangId)],
+    opts: &ExtractOptions,
+) -> ExtractionResult {
     let id_gen = IdGenerator::<SymbolId>::new();
 
     let mut file_extractions: Vec<_> = files
         .par_iter()
-        .map(|(path, lang)| extract_single_file(path, lang, &id_gen))
+        .map(|(path, lang)| extract_single_file(path, lang, &id_gen, opts))
         .collect();
 
     file_extractions.sort_by(|a, b| a.path.cmp(&b.path));
@@ -39,6 +56,7 @@ fn extract_single_file(
     path: &std::path::Path,
     lang: &LangId,
     id_gen: &IdGenerator<SymbolId>,
+    opts: &ExtractOptions,
 ) -> FileExtraction {
     let source = match std::fs::read(path) {
         Ok(s) => s,
@@ -55,6 +73,7 @@ fn extract_single_file(
                     message: format!("failed to read file: {e}"),
                     source_range: None,
                 }],
+                ast_node_count: 0,
             };
         }
     };
@@ -74,11 +93,13 @@ fn extract_single_file(
                     message: e.to_string(),
                     source_range: None,
                 }],
+                ast_node_count: 0,
             };
         }
     };
 
     let ratio = parser::error_ratio(&tree, &source);
+    let node_count = parser::ast_node_count(&tree);
     let mut diags = Vec::new();
 
     if ratio > 0.5 {
@@ -110,8 +131,11 @@ fn extract_single_file(
         })
         .collect();
 
-    let (imports, references) =
-        crate::language::extract_imports_and_references_for(*lang, &tree, &source, path);
+    let (imports, references) = if opts.skip_imports_and_refs {
+        (Vec::new(), Vec::new())
+    } else {
+        crate::language::extract_imports_and_references_for(*lang, &tree, &source, path)
+    };
 
     FileExtraction {
         path: path.to_path_buf(),
@@ -120,6 +144,7 @@ fn extract_single_file(
         imports,
         references,
         diagnostics: diags,
+        ast_node_count: node_count,
     }
 }
 

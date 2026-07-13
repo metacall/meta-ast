@@ -9,14 +9,13 @@ pub struct EmitConfig {
     pub format: OutputFormat,
     pub html: bool,
     pub open_browser: bool,
-    pub self_contained: bool,
 }
 
 /// Serialize and emit the symbol inspection results.
 ///
 /// If `config.output` is `Some(path)`, writes the serialized contents to that file.
 /// Otherwise, prints the contents directly to stdout.
-pub fn emit_inspect(symbols: &[Symbol], config: &EmitConfig) -> anyhow::Result<()> {
+pub fn emit_inspect(symbols: &mut Vec<Symbol>, config: &EmitConfig) -> anyhow::Result<()> {
     let content = crate::output::inspect::serialize_inspect(symbols, &config.format)?;
     match &config.output {
         Some(path) => {
@@ -43,7 +42,6 @@ pub fn emit_graph(analysis: &GraphAnalysis, config: &EmitConfig) -> anyhow::Resu
             &analysis.graph,
             &analysis.scc,
             analysis.snapshot_id.0 as u64,
-            config.self_contained,
         )?;
         let path = config
             .output
@@ -92,7 +90,7 @@ mod tests {
         }
         std::fs::create_dir_all(&temp_dir).unwrap();
         let file_path = temp_dir.join("output.json");
-        let symbols = vec![Symbol {
+        let mut symbols = vec![Symbol {
             id: SymbolId(1),
             name: "test".into(),
             kind: SymbolKind::Function,
@@ -117,9 +115,8 @@ mod tests {
             format: OutputFormat::Json,
             html: false,
             open_browser: false,
-            self_contained: false,
         };
-        emit_inspect(&symbols, &config).unwrap();
+        emit_inspect(&mut symbols, &config).unwrap();
         assert!(file_path.exists());
         let content = std::fs::read_to_string(file_path).unwrap();
         assert!(content.contains("test"));
@@ -128,7 +125,7 @@ mod tests {
 
     #[test]
     fn emit_inspect_prints_to_stdout_when_no_path() {
-        let symbols = vec![Symbol {
+        let mut symbols = vec![Symbol {
             id: SymbolId(1),
             name: "test".into(),
             kind: SymbolKind::Function,
@@ -153,9 +150,8 @@ mod tests {
             format: OutputFormat::Json,
             html: false,
             open_browser: false,
-            self_contained: false,
         };
-        emit_inspect(&symbols, &config).unwrap();
+        emit_inspect(&mut symbols, &config).unwrap();
     }
 
     #[test]
@@ -181,7 +177,6 @@ mod tests {
             format: OutputFormat::Json,
             html: true,
             open_browser: false,
-            self_contained: false,
         };
         emit_graph(&analysis, &config).unwrap();
         assert!(file_path.exists());
@@ -213,7 +208,6 @@ mod tests {
             format: OutputFormat::Json,
             html: false,
             open_browser: false,
-            self_contained: false,
         };
         emit_graph(&analysis, &config).unwrap();
         assert!(file_path.exists());

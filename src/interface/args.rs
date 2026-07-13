@@ -16,7 +16,7 @@ pub enum Cli {
     ///
     /// Examples:
     ///   meta-ast graph ./my-project
-    ///   meta-ast graph ./my-project --html --self-contained -o project_graph.html
+    ///   meta-ast graph ./my-project --html -o project_graph.html
     ///   meta-ast graph ./my-project -f yaml -o graph.yaml
     Graph(GraphArgs),
 
@@ -75,10 +75,6 @@ pub struct GraphArgs {
     /// Generate an interactive HTML dashboard with graph visualization
     #[arg(long)]
     pub html: bool,
-
-    /// Embed Cytoscape.js directly in the HTML (no CDN dependency)
-    #[arg(long)]
-    pub self_contained: bool,
 }
 
 #[cfg(feature = "metacall-deploy")]

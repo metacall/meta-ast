@@ -61,13 +61,68 @@ pub(crate) fn error_ratio(tree: &tree_sitter::Tree, source: &[u8]) -> f64 {
     errors as f64 / total as f64
 }
 
-fn count_nodes(node: &tree_sitter::Node, total: &mut u32, errors: &mut u32) {
-    *total += 1;
-    if node.is_error() || node.is_missing() {
-        *errors += 1;
+/// Count total tree-sitter nodes (named + anonymous) in a parse tree.
+///
+/// Walks the tree once, same O(n) pass as `error_ratio` but without the
+/// error-tracking overhead. Useful as a proxy for computational surface
+/// area in deployment metrics.
+///
+/// Iterates with a single reusable cursor instead of allocating a fresh
+/// `TreeCursor` per node, which the recursive `node.children(&mut node.walk())`
+/// form does for every node in the tree.
+pub fn ast_node_count(tree: &tree_sitter::Tree) -> usize {
+    let mut cursor = tree.walk();
+    let mut total = 0u32;
+    let mut reached_root = false;
+    while !reached_root {
+        if cursor.node().is_named() {
+            total += 1;
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        if cursor.goto_next_sibling() {
+            continue;
+        }
+        let mut retracing = true;
+        while retracing {
+            if !cursor.goto_parent() {
+                reached_root = true;
+                break;
+            }
+            if cursor.goto_next_sibling() {
+                retracing = false;
+            }
+        }
     }
-    for child in node.children(&mut node.walk()) {
-        count_nodes(&child, total, errors);
+    total as usize
+}
+
+fn count_nodes(node: &tree_sitter::Node, total: &mut u32, errors: &mut u32) {
+    let mut cursor = node.walk();
+    let mut reached_root = false;
+    while !reached_root {
+        let n = cursor.node();
+        *total += 1;
+        if n.is_error() || n.is_missing() {
+            *errors += 1;
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        if cursor.goto_next_sibling() {
+            continue;
+        }
+        let mut retracing = true;
+        while retracing {
+            if !cursor.goto_parent() {
+                reached_root = true;
+                break;
+            }
+            if cursor.goto_next_sibling() {
+                retracing = false;
+            }
+        }
     }
 }
 

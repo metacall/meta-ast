@@ -4,45 +4,24 @@ use crate::output::graph::GraphOutput;
 
 /// Generate an interactive HTML dashboard from graph analysis data.
 ///
-/// When `self_contained` is true and the `embed-cytoscape` feature is enabled,
-/// the Cytoscape.js library is compiled directly into the HTML (no CDN dependency).
+/// Cytoscape.js is always loaded from a CDN so the library is never shipped
+/// in the binary; the browser caches it after the first fetch.
 pub fn to_graph_html(
     graph: &CodeGraph,
     scc_analysis: &SccAnalysis,
     snapshot_id: u64,
-    self_contained: bool,
 ) -> anyhow::Result<String> {
     let graph_output = GraphOutput::from_graph(graph, scc_analysis, snapshot_id);
     let json_data = serde_json::to_string(&graph_output)?;
 
-    let cy_script = if self_contained {
-        embed_cytoscape_script()?
-    } else {
-        cdn_script()
-    };
-
     let html = HTML_TEMPLATE
-        .replacen("__CDN_SCRIPT__", &cy_script, 1)
+        .replacen("__CDN_SCRIPT__", &cdn_script(), 1)
         .replacen("__DATA__", &json_data, 1);
     Ok(html)
 }
 
 fn cdn_script() -> String {
     r#"<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js"></script>"#.to_string()
-}
-
-#[cfg(feature = "embed-cytoscape")]
-fn embed_cytoscape_script() -> anyhow::Result<String> {
-    let js = include_str!("../../assets/cytoscape.min.js");
-    Ok(format!("<script>{js}</script>"))
-}
-
-#[cfg(not(feature = "embed-cytoscape"))]
-fn embed_cytoscape_script() -> anyhow::Result<String> {
-    anyhow::bail!(
-        "--self-contained requires the 'embed-cytoscape' feature. \
-         Rebuild with: cargo build --features=embed-cytoscape"
-    )
 }
 
 const HTML_TEMPLATE: &str = r##"<!DOCTYPE html>
@@ -175,10 +154,10 @@ var s=(si!==undefined&&data.sccs[si])?data.sccs[si]:null;
 var cls="scc-normal";
 var hint="";
 if(s){
-if(s.hint==="CyclicCluster")cls="scc-cyclic";
-else if(s.hint==="SelfLoop")cls="scc-selfloop";
-else if(s.hint==="Independent")cls="scc-independent";
-else if(s.hint==="AcyclicDependency")cls="scc-acyclic";
+if(s.hint==="cyclic_cluster")cls="scc-cyclic";
+else if(s.hint==="self_loop")cls="scc-selfloop";
+else if(s.hint==="independent")cls="scc-independent";
+else if(s.hint==="acyclic_dependency")cls="scc-acyclic";
 hint=s.hint;
 }
 els.push({
@@ -235,7 +214,7 @@ function updateStats(data){
 var nFiles=data.nodes.filter(function(n){return n.kind==="file";}).length;
 var nSymbols=data.nodes.filter(function(n){return n.kind==="symbol";}).length;
 var nCyclic=data.sccs.filter(function(s){return s.is_cyclic;}).length;
-var nIndep=data.sccs.filter(function(s){return s.hint==="Independent"||s.hint==="AcyclicDependency";}).length;
+var nIndep=data.sccs.filter(function(s){return s.hint==="independent"||s.hint==="acyclic_dependency";}).length;
 document.getElementById("stats").textContent=
 data.nodes.length+" nodes | "+data.edges.length+" edges | "+
 data.sccs.length+" SCCs | "+nCyclic+" cyclic | "+nIndep+" deployable";
