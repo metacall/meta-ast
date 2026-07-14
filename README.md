@@ -26,6 +26,43 @@ The binary is at `./target/release/meta-ast`.
 
 ---
 
+## Installation
+
+### From crates.io (recommended)
+
+`meta-ast` is published to [crates.io](https://crates.io/crates/meta-ast). With a
+Rust toolchain installed, install the latest release in one command:
+
+```bash
+cargo install meta-ast
+```
+
+This installs the core analyzer (`inspect` and `graph` subcommands). To also
+enable the MetaCall deployment manifest generator (`deploy` subcommand), install
+with the `metacall-deploy` feature:
+
+```bash
+cargo install meta-ast --features metacall-deploy
+```
+
+The binary lands at `~/.cargo/bin/meta-ast` (on your `PATH` if cargo's bin dir is
+configured). No external services, network calls, or runtime execution of your
+code are involved.
+
+### From source
+
+```bash
+git clone https://github.com/metacall/meta-ast.git
+cd meta-ast
+cargo build --release                 # core only
+# or, with the deploy module:
+cargo build --release --features metacall-deploy
+```
+
+The binary is at `./target/release/meta-ast`.
+
+---
+
 ## Goals
 
 `meta-ast` exists to give polyglot codebases a single, fast, language-agnostic
@@ -70,14 +107,24 @@ view of their structure without executing any user code. Its objectives:
 
 - **Architecture review & onboarding.** Get a normalized map of every symbol and
   its dependencies across a polyglot repo to understand structure quickly.
+  Run `meta-ast inspect` on a checkout and read the JSON/YAML, or open the
+  interactive dashboard from `meta-ast graph --html`.
 - **Cyclic dependency guard.** Run `meta-ast graph` in CI to fail builds that
-  introduce accidental import cycles.
-- **Deployment planning for MetaCall / Function Mesh.** The `deploy` subcommand
-  turns detected cross-language `metacall_load_from_*` call sites and SCC units
-  into manifests that drive co-deployment vs. independent-function decisions.
+  introduce accidental import cycles (Tarjan SCC flags cyclic clusters).
+- **Dependency-graph diffing & refactors.** Before splitting a module or
+  deleting a package, generate the graph and confirm what actually depends on
+  it across languages - catch hidden cross-language coupling a grep would miss.
+- **Pre-commit / code-review signal.** Emit the graph or inspect output as a
+  PR artifact so reviewers see structural impact (new symbols, new edges) rather
+  than reading diffs blind.
+- **Deployment planning for MetaCall / Function Mesh.** With the `metacall-deploy`
+  feature, the `deploy` subcommand turns detected cross-language
+  `metacall_load_from_*` call sites and SCC units into manifests that drive
+  co-deployment vs. independent-function decisions. Requires the feature-enabled
+  install (`cargo install meta-ast --features metacall-deploy`).
 - **Documentation & visualization.** Emit an interactive Cytoscape.js dashboard
-  (`--html`, loaded from a CDN and cached by the browser) to explore ownership, references,
-  and deployment units visually.
+  (`--html`, loaded from a CDN and cached by the browser) to explore ownership,
+  references, and deployment units visually.
 - **Library integration.** Consume `meta-ast` as a crate: `analyze_graph`
   returns a `GraphAnalysis` (`CodeGraph` + `SccAnalysis`) for custom tooling,
   linters, or report generators.
