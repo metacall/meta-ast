@@ -3,6 +3,8 @@ mod integration {
     #[cfg(feature = "metacall-deploy")]
     mod deploy_edge_cases_test;
     #[cfg(feature = "metacall-deploy")]
+    mod deploy_mixed_test;
+    #[cfg(feature = "metacall-deploy")]
     mod deploy_test;
     mod edge_cases_test;
     mod inspect_output_test;

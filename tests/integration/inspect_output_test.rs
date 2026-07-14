@@ -14,7 +14,7 @@ fn extract_python_symbols(root: &Path) -> Vec<meta_ast::model::Symbol> {
     flatten_symbols(&result)
 }
 
-fn serialize_to_json(symbols: &[meta_ast::model::Symbol]) -> serde_json::Value {
+fn serialize_to_json(symbols: &mut Vec<meta_ast::model::Symbol>) -> serde_json::Value {
     let json_str = meta_ast::output::inspect::serialize_inspect(
         symbols,
         &meta_ast::output::OutputFormat::Json,
@@ -25,8 +25,8 @@ fn serialize_to_json(symbols: &[meta_ast::model::Symbol]) -> serde_json::Value {
 
 #[test]
 fn inspect_output_has_required_top_level_keys() {
-    let symbols = extract_python_symbols(Path::new("tests/fixtures/python"));
-    let parsed = serialize_to_json(&symbols);
+    let mut symbols = extract_python_symbols(Path::new("tests/fixtures/python"));
+    let parsed = serialize_to_json(&mut symbols);
 
     let obj = parsed.as_object().expect("root should be object");
     assert!(obj.contains_key("funcs"), "must have funcs key");
@@ -43,8 +43,8 @@ fn inspect_output_has_required_top_level_keys() {
 
 #[test]
 fn func_entry_has_required_fields() {
-    let symbols = extract_python_symbols(Path::new("tests/fixtures/python"));
-    let parsed = serialize_to_json(&symbols);
+    let mut symbols = extract_python_symbols(Path::new("tests/fixtures/python"));
+    let parsed = serialize_to_json(&mut symbols);
 
     let funcs = parsed["funcs"].as_array().expect("funcs should be array");
     if funcs.is_empty() {
@@ -95,8 +95,8 @@ fn func_entry_has_required_fields() {
 
 #[test]
 fn class_entry_has_required_fields() {
-    let symbols = extract_python_symbols(Path::new("tests/fixtures/python"));
-    let parsed = serialize_to_json(&symbols);
+    let mut symbols = extract_python_symbols(Path::new("tests/fixtures/python"));
+    let parsed = serialize_to_json(&mut symbols);
 
     let classes = parsed["classes"]
         .as_array()
@@ -134,8 +134,8 @@ fn class_entry_has_required_fields() {
 
 #[test]
 fn object_entry_has_required_fields() {
-    let symbols = extract_python_symbols(Path::new("tests/fixtures/python"));
-    let parsed = serialize_to_json(&symbols);
+    let mut symbols = extract_python_symbols(Path::new("tests/fixtures/python"));
+    let parsed = serialize_to_json(&mut symbols);
 
     let objects = parsed["objects"]
         .as_array()
@@ -173,8 +173,8 @@ fn object_entry_has_required_fields() {
 
 #[test]
 fn inspect_output_types_are_correct() {
-    let symbols = extract_python_symbols(Path::new("tests/fixtures/python"));
-    let parsed = serialize_to_json(&symbols);
+    let mut symbols = extract_python_symbols(Path::new("tests/fixtures/python"));
+    let parsed = serialize_to_json(&mut symbols);
 
     for func in parsed["funcs"].as_array().unwrap_or(&vec![]) {
         assert!(func["name"].is_string(), "func.name should be string");
@@ -267,8 +267,8 @@ fn inspect_output_types_are_correct() {
 
 #[test]
 fn empty_inspect_output_is_valid() {
-    let symbols: Vec<meta_ast::model::Symbol> = vec![];
-    let parsed = serialize_to_json(&symbols);
+    let mut symbols: Vec<meta_ast::model::Symbol> = vec![];
+    let parsed = serialize_to_json(&mut symbols);
 
     let obj = parsed.as_object().expect("root should be object");
     assert!(obj.contains_key("funcs"), "must have funcs key");

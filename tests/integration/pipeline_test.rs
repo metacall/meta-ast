@@ -36,7 +36,7 @@ fn end_to_end_python_project() {
     }
 
     let result = meta_ast::extractor::extract(&files);
-    let symbols = flatten_symbols(&result);
+    let mut symbols = flatten_symbols(&result);
     assert!(
         !symbols.is_empty(),
         "should extract symbols from Python fixtures"
@@ -48,7 +48,7 @@ fn end_to_end_python_project() {
     }
 
     let json = meta_ast::output::inspect::serialize_inspect(
-        &symbols,
+        &mut symbols,
         &meta_ast::output::OutputFormat::Json,
     )
     .unwrap();
@@ -99,11 +99,11 @@ fn end_to_end_mixed_languages() {
     );
 
     let result = meta_ast::extractor::extract(&files);
-    let symbols = flatten_symbols(&result);
+    let mut symbols = flatten_symbols(&result);
     assert!(!symbols.is_empty());
 
     let json = meta_ast::output::inspect::serialize_inspect(
-        &symbols,
+        &mut symbols,
         &meta_ast::output::OutputFormat::Json,
     )
     .unwrap();
@@ -143,9 +143,9 @@ fn json_output_has_required_structure() {
     let root = Path::new("tests/fixtures/python");
     let files = meta_ast::input::discover_files(root, None).unwrap();
     let result = meta_ast::extractor::extract(&files);
-    let symbols = flatten_symbols(&result);
+    let mut symbols = flatten_symbols(&result);
     let json = meta_ast::output::inspect::serialize_inspect(
-        &symbols,
+        &mut symbols,
         &meta_ast::output::OutputFormat::Json,
     )
     .unwrap();
@@ -269,8 +269,8 @@ fn cross_file_reference_rust_crate() {
         &mut Vec::new(),
     );
 
-    for (from, to) in &ref_edges {
-        builder.add_reference(*from, *to);
+    for &(from, to, confidence) in &ref_edges {
+        builder.add_reference(from, to, confidence);
     }
 
     let graph = builder.build();
@@ -356,8 +356,8 @@ fn cross_file_reference_typescript() {
         &mut Vec::new(),
     );
 
-    for (from, to) in &ref_edges {
-        builder.add_reference(*from, *to);
+    for &(from, to, confidence) in &ref_edges {
+        builder.add_reference(from, to, confidence);
     }
 
     let graph = builder.build();
@@ -557,8 +557,8 @@ fn edge_transitive_resolution() {
         &mut Vec::new(),
     );
 
-    for (from, to) in &ref_edges {
-        builder.add_reference(*from, *to);
+    for &(from, to, confidence) in &ref_edges {
+        builder.add_reference(from, to, confidence);
     }
 
     let graph = builder.build();
@@ -733,8 +733,8 @@ fn edge_selfref_does_not_create_self_loop() {
         &mut Vec::new(),
     );
 
-    for (from, to) in &ref_edges {
-        builder.add_reference(*from, *to);
+    for &(from, to, confidence) in &ref_edges {
+        builder.add_reference(from, to, confidence);
     }
 
     let graph = builder.build();
