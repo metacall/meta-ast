@@ -1,9 +1,13 @@
 [package]
 name = "meta-ast"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
+description = "Polyglot static-analysis engine: extract symbols and cross-language dependency graphs from 8 supported source languages, with optional MetaCall deployment manifest generation."
 readme = "README.md"
+repository = "https://github.com/metacall/meta-ast"
 license = "Apache-2.0"
+keywords = ["ast", "metacall", "polyglot", "static-analysis", "tree-sitter"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bench]]
 harness = false
@@ -30,7 +34,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Tree-Sitter Dependencies
-tree-sitter = "0.26.3"
+tree-sitter = "0.26.9"
 tree-sitter-c = "0.24.1"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-go = "0.25.0"
@@ -48,9 +52,9 @@ clap = { version = "4.6", features = ["color", "derive", "env"] }
 # Parallelism
 rayon = "1.10"
 
+dunce = "1"
 # Filesystem
 ignore = "0.4"
-dunce = "1"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
