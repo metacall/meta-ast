@@ -28,8 +28,3 @@ target
 # Default graph dashboard output
 *.metast
 
-# Optional offline JS asset
-/assets/*
-!/assets/cytoscape.min.js
-!/assets/examples
-
