@@ -64,18 +64,20 @@ jobs:
 
       # Deploy-enabled binary, built into a separate target dir.
       - name: Build release (deploy)
-        run: cargo build --release --target ${{ matrix.target }} --features metacall-deploy --out-dir target/${{ matrix.target }}/release-deploy
+        env:
+          CARGO_TARGET_DIR: target-deploy
+        run: cargo build --release --target ${{ matrix.target }} --features metacall-deploy
 
       - name: Strip binary (deploy)
         if: runner.os != 'Windows'
-        run: strip target/${{ matrix.target }}/release-deploy/meta-ast${{ matrix.ext }}
+        run: strip target-deploy/${{ matrix.target }}/release/meta-ast${{ matrix.ext }}
 
       - name: Collect artifacts
         shell: bash
         run: |
           mkdir -p release
           cp target/${{ matrix.target }}/release/meta-ast${{ matrix.ext }} release/meta-ast-${{ matrix.target }}${{ matrix.ext }}
-          cp target/${{ matrix.target }}/release-deploy/meta-ast${{ matrix.ext }} release/meta-ast-${{ matrix.target }}-deploy${{ matrix.ext }}
+          cp target-deploy/${{ matrix.target }}/release/meta-ast${{ matrix.ext }} release/meta-ast-${{ matrix.target }}-deploy${{ matrix.ext }}
 
       - name: Upload core artifact
         uses: actions/upload-artifact@v4
