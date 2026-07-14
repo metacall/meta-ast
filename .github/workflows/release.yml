@@ -54,25 +54,42 @@ jobs:
       - name: Add target
         run: rustup target add ${{ matrix.target }}
 
-      - name: Build release
+      # Core binary (no features).
+      - name: Build release (core)
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Strip binary
+      - name: Strip binary (core)
         if: runner.os != 'Windows'
         run: strip target/${{ matrix.target }}/release/meta-ast${{ matrix.ext }}
 
-      - name: Rename binary
+      # Deploy-enabled binary, built into a separate target dir.
+      - name: Build release (deploy)
+        run: cargo build --release --target ${{ matrix.target }} --features metacall-deploy --out-dir target/${{ matrix.target }}/release-deploy
+
+      - name: Strip binary (deploy)
+        if: runner.os != 'Windows'
+        run: strip target/${{ matrix.target }}/release-deploy/meta-ast${{ matrix.ext }}
+
+      - name: Collect artifacts
         shell: bash
         run: |
           mkdir -p release
           cp target/${{ matrix.target }}/release/meta-ast${{ matrix.ext }} release/meta-ast-${{ matrix.target }}${{ matrix.ext }}
+          cp target/${{ matrix.target }}/release-deploy/meta-ast${{ matrix.ext }} release/meta-ast-${{ matrix.target }}-deploy${{ matrix.ext }}
 
-      - name: Upload artifact
+      - name: Upload core artifact
         uses: actions/upload-artifact@v4
         with:
           name: meta-ast-${{ matrix.target }}
           path: release/meta-ast-${{ matrix.target }}${{ matrix.ext }}
-          if-no-files-found: error
+          if-no-files-match-files: error
+
+      - name: Upload deploy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta-ast-${{ matrix.target }}-deploy
+          path: release/meta-ast-${{ matrix.target }}-deploy${{ matrix.ext }}
+          if-no-files-match-files: error
 
   release:
     name: release
