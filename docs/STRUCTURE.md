@@ -53,18 +53,22 @@ src/
 │   ├── emitter.rs            EmitConfig, emit_inspect(), emit_graph() - CLI output dispatch
 │   ├── inspect.rs            Inspect-compatible JSON/YAML emission
 │   ├── graph.rs              GraphOutput + SCC serialization (metadata, nodes, edges, sccs)
-│   └── dashboard.rs          Interactive HTML dashboard (Cytoscape.js, --html, --self-contained)
+│   └── dashboard.rs          Interactive HTML dashboard (Cytoscape.js via CDN, --html)
 │
 └── interface/
     ├── mod.rs                CLI module root
-    └── args.rs               Clap derive structs (Inspect, Graph, Deploy + --format, --html, --self-contained)
+    └── args.rs               Clap derive structs (Inspect, Graph, Deploy + --format, --html)
 │
 └── deploy/                   [feature: metacall-deploy] See docs/DEPLOY.md
-    ├── mod.rs                Entry: run_deploy(), DeployConfig
-    ├── scanner.rs            tree-sitter call site detection, CallSite, CallSiteVariant, confidence
-    ├── manifest.rs           DeployManifest, RootManifest, generate_manifests()
-    ├── mesh.rs               MeshAnnotation, DeploymentUnit, CrossLanguageEdge, generate_mesh_annotation()
-    ├── check.rs              check_manifests() - diff generated vs on-disk manifests
+    ├── mod.rs                Entry: run_deploy(), DeployConfig, add_metacall_edge()
+    ├── scanner.rs            tree-sitter call-site detection, CallSite, CallSiteVariant, confidence
+    ├── pod.rs                Union-Find partition_into_pods(), PodPartition, InterPodEdge
+    ├── cut.rs                find_cross_language_cuts(), find_oversized_pod_cut(), CutEdge
+    ├── dependency.rs         classify_external(), resolve_dependencies(), per-language resolvers
+    ├── metrics.rs            compute_file_metrics(), compute_pod_metrics(), FileMetrics
+    ├── manifest.rs           generate_pod_manifest(), PodManifest, ManifestEdge
+    ├── mesh.rs               generate_mesh_annotation(), DeploymentUnit, CrossLanguageEdge
+    ├── check.rs              check_cut_fairness() - bijection check between cuts and rpc_stub edges
     └── tags.rs               LangId <-> MetaCall runtime tag mapping
 ```
 
@@ -478,7 +482,7 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 
 | Feature | Purpose |
 |---------|---------|
-| `embed-cytoscape` | Embed Cytoscape.js directly in HTML dashboard (for offline use) |
+| `metacall-deploy` | Generate MetaCall deployment manifests and mesh annotations |
 
 ---
 
@@ -524,6 +528,8 @@ tests/
     │   └── deep_nesting.go
     ├── mixed/                      Multi-language single-directory fixtures
     │   ├── app.py, index.js, main.rs, test.generated.py
+    │   └── auth_microservice{,_level2,_level3}  Deploy edge-case fixtures
+    │       (star / cross-language SCC cycle / full-module stress)
     └── multi/                      Multi-file cross-language fixtures
         ├── main.py, lib.py, app.js, util.js
         ├── c_app/, cpp_app/, go_app/, rust_crate/, ts_app/, tsx_app/
@@ -545,4 +551,5 @@ language module generates snapshots via inline unit tests. Update workflow: `car
 | JSON output contract | `insta` snapshots in `src/language/snapshots/` | Regression detection |
 | Error recovery | Fixture with invalid syntax | Partial results, no panics |
 | End-to-end pipeline | Integration tests | Full discover -> output flow |
+| Deploy module | Tiered `mixed/auth_microservice*` fixtures + `cut.rs` unit tests | Cross-language SCC cut, intra-language collapse, oversized-pod, load variants, dependency classification |
 | Performance | `criterion` benchmarks | Extraction throughput |

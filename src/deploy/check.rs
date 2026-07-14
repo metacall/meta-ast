@@ -1,98 +1,61 @@
-use crate::deploy::manifest::{DeployManifest, RootManifest};
-use std::collections::HashMap;
-use std::path::Path;
+//! Manifest validation and cut-edge fairness checks.
+//!
+//! Verifies that every edge cut in the deployment plan has a
+//! corresponding RPC stub entry in the manifest, so a forced split
+//! can never silently drop a call.
 
-pub fn check_manifests(
-    root: &Path,
-    generated_manifests: &HashMap<String, DeployManifest>,
-    generated_root: &RootManifest,
-) -> anyhow::Result<Vec<String>> {
+use std::collections::HashSet;
+
+use crate::deploy::cut::CutEdge;
+use crate::deploy::manifest::PodManifest;
+
+/// Verify that every cut edge has a corresponding manifest entry.
+///
+/// Principles (aligned with ADR 0003):
+/// - Every cut edge must appear in `manifest.edges[]` with `cut_annotation`.
+/// - No non-cut edge may have a `cut_annotation`.
+/// - Every cut edge must have `kind: "rpc_stub"`.
+pub fn check_cut_fairness(manifest: &PodManifest, cuts: &[CutEdge]) -> Vec<String> {
     let mut diagnostics = Vec::new();
 
-    // 1. Check Root Manifest
-    let root_path = root.join("metacall.json");
-    if root_path.exists() {
-        let content = std::fs::read_to_string(&root_path)?;
-        match serde_json::from_str::<RootManifest>(&content) {
-            Ok(existing_root) => {
-                // Check primary language
-                if existing_root.language_id != generated_root.language_id {
-                    diagnostics.push(format!(
-                        "Root manifest language mismatch: expected '{}', found '{}'",
-                        generated_root.language_id, existing_root.language_id
-                    ));
-                }
+    let cut_pairs: HashSet<(usize, usize)> = cuts.iter().map(|c| (c.from_pod, c.to_pod)).collect();
 
-                // Check packages/scripts
-                if let (Some(gen_pkgs), Some(ext_pkgs)) =
-                    (&generated_root.packages, &existing_root.packages)
-                {
-                    for (lang, gen_scripts) in gen_pkgs {
-                        if let Some(ext_scripts) = ext_pkgs.get(lang) {
-                            for script in gen_scripts {
-                                if !ext_scripts.contains(script) {
-                                    diagnostics.push(format!(
-                                        "Missing script in root manifest for '{}': {}",
-                                        lang, script
-                                    ));
-                                }
-                            }
-                            for script in ext_scripts {
-                                if !gen_scripts.contains(script) {
-                                    diagnostics.push(format!(
-                                        "Extra script in root manifest for '{}': {}",
-                                        lang, script
-                                    ));
-                                }
-                            }
-                        } else {
-                            diagnostics.push(format!(
-                                "Missing language package in root manifest: '{}'",
-                                lang
-                            ));
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                diagnostics.push(format!("Failed to parse existing metacall.json: {}", e));
-            }
+    for cut in cuts {
+        let present = manifest.edges.iter().any(|e| {
+            e.from_pod == cut.from_pod && e.to_pod == cut.to_pod && e.cut_annotation.is_some()
+        });
+        if !present {
+            diagnostics.push(format!(
+                "cut edge ({}, {}) missing from manifest or missing cut_annotation",
+                cut.from_pod, cut.to_pod
+            ));
         }
-    } else {
-        diagnostics.push("Root manifest (metacall.json) is missing".to_string());
-    }
 
-    // 2. Check Per-Language Manifests
-    for (lang, gen_manifest) in generated_manifests {
-        let manifest_name = format!("metacall.{}.json", lang);
-        let manifest_path = root.join(&manifest_name);
-
-        if manifest_path.exists() {
-            let content = std::fs::read_to_string(&manifest_path)?;
-            match serde_json::from_str::<DeployManifest>(&content) {
-                Ok(existing_manifest) => {
-                    for script in &gen_manifest.scripts {
-                        if !existing_manifest.scripts.contains(script) {
-                            diagnostics
-                                .push(format!("Missing script in {}: {}", manifest_name, script));
-                        }
-                    }
-                    for script in &existing_manifest.scripts {
-                        if !gen_manifest.scripts.contains(script) {
-                            diagnostics
-                                .push(format!("Extra script in {}: {}", manifest_name, script));
-                        }
-                    }
-                }
-                Err(e) => {
-                    diagnostics.push(format!("Failed to parse {}: {}", manifest_name, e));
-                }
-            }
-        } else {
-            // Not strictly required by MetaCall but we can flag it
-            diagnostics.push(format!("Missing per-language manifest: {}", manifest_name));
+        // An RPC boundary between two pods is symmetric at the fairness level:
+        // the cut direction is chosen by the SCC's lowest-confidence edge and
+        // may be the reverse of the call-site-derived rpc_stub. A stub in
+        // either direction proves the cross-boundary call is preserved.
+        let has_rpc_stub = manifest.edges.iter().any(|e| {
+            e.kind == "rpc_stub"
+                && ((e.from_pod == cut.from_pod && e.to_pod == cut.to_pod)
+                    || (e.from_pod == cut.to_pod && e.to_pod == cut.from_pod))
+        });
+        if !has_rpc_stub {
+            diagnostics.push(format!(
+                "cut edge ({}, {}) has no corresponding 'rpc_stub' entry",
+                cut.from_pod, cut.to_pod
+            ));
         }
     }
 
-    Ok(diagnostics)
+    for edge in &manifest.edges {
+        if edge.cut_annotation.is_some() && !cut_pairs.contains(&(edge.from_pod, edge.to_pod)) {
+            diagnostics.push(format!(
+                "edge ({}, {}) has cut_annotation but is not in the cut list",
+                edge.from_pod, edge.to_pod
+            ));
+        }
+    }
+
+    diagnostics
 }

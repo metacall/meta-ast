@@ -1,141 +1,177 @@
-use crate::deploy::scanner::CallSite;
-use serde::{Deserialize, Serialize};
+//! Pod-level deployment manifest generation.
+//!
+//! pod-based schema: `PodManifest` contains `deployments` (one per pod),
+//! `edges` (inter-pod dependency edges with optional cut annotations),
+//! and `metrics` (global aggregate).
+
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
-/// A single per-language deploy manifest (metacall.{tag}.json).
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct DeployManifest {
-    pub language_id: String,
-    pub path: String,
-    pub scripts: Vec<String>,
+use serde::Serialize;
+
+use crate::deploy::cut::{CutAnnotation, CutEdge};
+use crate::deploy::dependency::DependencyEntry;
+use crate::deploy::metrics::PodMetrics;
+use crate::deploy::pod::PodPartition;
+use crate::graph::CodeGraph;
+
+/// The top-level pod-based deployment manifest.
+#[derive(Debug, Clone, Serialize)]
+pub struct PodManifest {
+    pub version: String,
+    pub deployments: Vec<PodDeployment>,
+    pub edges: Vec<ManifestEdge>,
+    pub metrics: GlobalMetrics,
 }
 
-/// The root manifest composing all per-language manifests.
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct RootManifest {
-    pub language_id: String,
-    pub path: String,
-    pub scripts: Vec<String>,
+/// A single pod deployment - an independently deployable unit.
+#[derive(Debug, Clone, Serialize)]
+pub struct PodDeployment {
+    pub id: usize,
+    pub language: String,
+    pub files: Vec<String>,
+    pub metrics: PodMetrics,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<DependencyEntry>,
+}
+
+/// An inter-pod edge in the manifest.
+#[derive(Debug, Clone, Serialize)]
+pub struct ManifestEdge {
+    pub from_pod: usize,
+    pub to_pod: usize,
+    pub kind: String,
+    pub confidence: f32,
+    pub is_cross_language: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub packages: Option<HashMap<String, Vec<String>>>,
+    pub cut_annotation: Option<CutAnnotation>,
 }
 
-pub fn generate_manifests(
-    root: &Path,
-    files: &[(PathBuf, crate::language::LangId)],
-    call_sites: &[CallSite],
-) -> (HashMap<String, DeployManifest>, RootManifest) {
-    let mut language_groups: HashMap<String, Vec<String>> = HashMap::new();
-    let mut primary_lang = "node".to_string();
+/// Global aggregate metrics for the entire manifest.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct GlobalMetrics {
+    pub total_pods: usize,
+    pub cross_language_edges: usize,
+    pub total_ast_nodes: usize,
+}
 
-    // 1. Map all discovered files to their MetaCall tags
-    for (path, lang) in files {
-        let tag = crate::deploy::tags::metacall_tag(*lang).to_string();
-        let scripts = language_groups.entry(tag.clone()).or_default();
+/// Generate a `PodManifest` from partition, metrics, cuts, and dependencies.
+pub fn generate_pod_manifest(
+    partition: &PodPartition,
+    pod_metrics: &[PodMetrics],
+    cuts: &[CutEdge],
+    dependencies: &HashMap<usize, Vec<DependencyEntry>>,
+    graph: &CodeGraph,
+) -> PodManifest {
+    let mut deployments = Vec::with_capacity(partition.pods.len());
 
-        // Use relative path for scripts
-        let rel_path: &Path = path.strip_prefix(root).unwrap_or(path);
-        let rel_str = rel_path.to_string_lossy().replace('\\', "/");
-        if !scripts.contains(&rel_str) {
-            scripts.push(rel_str);
-        }
+    for (i, pod) in partition.pods.iter().enumerate() {
+        let tag = crate::deploy::tags::metacall_tag(pod.language);
+        let files: Vec<String> = pod
+            .files
+            .iter()
+            .filter_map(|fid| {
+                graph
+                    .file_node(*fid)
+                    .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+            })
+            .collect();
 
-        // Heuristic for primary language: the one with files in the root
-        if path.parent() == Some(root) {
-            primary_lang = tag;
-        }
+        let deps = dependencies.get(&pod.id).cloned().unwrap_or_default();
+        let pm = pod_metrics.get(i).cloned().unwrap_or(PodMetrics {
+            total_ast_nodes: 0,
+            file_count: 0,
+            symbol_count: 0,
+        });
+
+        deployments.push(PodDeployment {
+            id: pod.id,
+            language: tag.to_string(),
+            files,
+            metrics: pm,
+            dependencies: deps,
+        });
     }
 
-    // 2. Ensure all target languages from call sites are represented and their scripts added
-    for site in call_sites {
-        if site.variant == crate::deploy::scanner::CallSiteVariant::LoadFromConfiguration {
-            if let Some(config_path_raw) = &site.target_lang {
-                let config_path = root.join(config_path_raw);
-                if config_path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&config_path) {
-                        // Try to parse as RootManifest first (more general)
-                        if let Ok(config_root) = serde_json::from_str::<RootManifest>(&content) {
-                            if let Some(pkgs) = config_root.packages {
-                                for (lang, pkg_scripts) in pkgs {
-                                    let scripts = language_groups.entry(lang).or_default();
-                                    for s in pkg_scripts {
-                                        if !scripts.contains(&s) {
-                                            scripts.push(s);
-                                        }
-                                    }
-                                }
-                            }
-                            // Also handle the top-level scripts in the config if it's a single-lang config
-                            let scripts =
-                                language_groups.entry(config_root.language_id).or_default();
-                            for s in config_root.scripts {
-                                if !scripts.contains(&s) {
-                                    scripts.push(s);
-                                }
-                            }
-                        } else if let Ok(config_dep) =
-                            serde_json::from_str::<DeployManifest>(&content)
-                        {
-                            let scripts =
-                                language_groups.entry(config_dep.language_id).or_default();
-                            for s in config_dep.scripts {
-                                if !scripts.contains(&s) {
-                                    scripts.push(s);
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    tracing::warn!(
-                        "metacall_load_from_configuration target missing: {}",
-                        config_path.display()
-                    );
+    // Build inter-pod edges, annotating cuts where applicable.
+    let mut cut_lookup: HashMap<(usize, usize), &CutAnnotation> = HashMap::new();
+    for cut in cuts {
+        cut_lookup.insert((cut.from_pod, cut.to_pod), &cut.annotation);
+    }
+
+    let mut edges: Vec<ManifestEdge> = partition
+        .inter_pod_edges
+        .iter()
+        .map(|ip| {
+            let kind = match ip.kind {
+                crate::graph::EdgeKind::Import => "import".to_string(),
+                crate::graph::EdgeKind::Reference => "reference".to_string(),
+                crate::graph::EdgeKind::Ownership => "ownership".to_string(),
+            };
+            let annotation = cut_lookup
+                .get(&(ip.from_pod, ip.to_pod))
+                .map(|a| (*a).clone());
+            ManifestEdge {
+                from_pod: ip.from_pod,
+                to_pod: ip.to_pod,
+                kind,
+                confidence: ip.confidence,
+                is_cross_language: ip.is_cross_language,
+                cut_annotation: annotation,
+            }
+        })
+        .collect();
+
+    // Mark cut edges that weren't already in inter_pod_edges as rpc_stub edges.
+    let inter_pod_pairs: std::collections::HashSet<(usize, usize)> = partition
+        .inter_pod_edges
+        .iter()
+        .map(|ip| (ip.from_pod, ip.to_pod))
+        .collect();
+
+    for cut in cuts {
+        // Every cut must surface as a `rpc_stub` edge (ADR 0003: a forced
+        // split is only safe if the call boundary is explicitly represented).
+        // This holds even when an `import` edge for the same pod pair already
+        // exists - the import edge keeps its annotation, and a distinct
+        // `rpc_stub` edge records the split boundary.
+        edges.push(ManifestEdge {
+            from_pod: cut.from_pod,
+            to_pod: cut.to_pod,
+            kind: "rpc_stub".to_string(),
+            confidence: cut.annotation.original_confidence,
+            is_cross_language: matches!(
+                cut.annotation.cut_reason,
+                crate::deploy::cut::CutReason::CrossLanguageScc
+            ),
+            cut_annotation: Some(cut.annotation.clone()),
+        });
+
+        // Also annotate the matching import/reference edge so the existing
+        // cross-language link carries the cut reason.
+        if inter_pod_pairs.contains(&(cut.from_pod, cut.to_pod)) {
+            for edge in &mut edges {
+                if edge.from_pod == cut.from_pod
+                    && edge.to_pod == cut.to_pod
+                    && edge.cut_annotation.is_none()
+                {
+                    edge.cut_annotation = Some(cut.annotation.clone());
                 }
             }
-            continue;
-        }
-
-        if let Some(target_lang) = &site.target_lang {
-            let scripts = language_groups.entry(target_lang.clone()).or_default();
-            for script in &site.scripts {
-                if !scripts.contains(script) {
-                    scripts.push(script.clone());
-                }
-            }
-
-            // Refine primary lang: the one that calls others is often the entry point
-            primary_lang = crate::deploy::tags::metacall_tag(site.caller_lang).to_string();
         }
     }
 
-    let mut manifests = HashMap::new();
-    for (lang, scripts) in &language_groups {
-        manifests.insert(
-            lang.clone(),
-            DeployManifest {
-                language_id: lang.clone(),
-                path: ".".to_string(), // In real-world, we might need to resolve this
-                scripts: scripts.clone(),
-            },
-        );
-    }
+    let total_ast_nodes = pod_metrics.iter().map(|m| m.total_ast_nodes).sum();
+    let cross_language_edges = edges.iter().filter(|e| e.is_cross_language).count();
+    let total_pods = deployments.len();
 
-    let mut packages = HashMap::new();
-    for (lang, scripts) in &language_groups {
-        packages.insert(lang.clone(), scripts.clone());
-    }
-
-    let root_manifest = RootManifest {
-        language_id: primary_lang,
-        path: ".".to_string(),
-        scripts: Vec::new(), // Root script list might be empty if it only loads others
-        packages: if packages.is_empty() {
-            None
-        } else {
-            Some(packages)
+    PodManifest {
+        version: "1.0".to_string(),
+        deployments,
+        edges,
+        metrics: GlobalMetrics {
+            total_pods,
+            cross_language_edges,
+            total_ast_nodes,
         },
-    };
-
-    (manifests, root_manifest)
+    }
 }

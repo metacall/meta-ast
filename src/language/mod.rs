@@ -38,7 +38,9 @@ pub struct DocCommentConfig {
     pub strip_continuation_marker: bool,
 }
 
+/// Default visibility assumed when a symbol declares no explicit modifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DefaultVisibility {
     /// When visibility is None, treat the symbol as public (Python, C functions).
     PublicByDefault,
@@ -84,15 +86,7 @@ impl LangId {
 
     #[cfg(feature = "metacall-deploy")]
     pub fn metacall_tag(self) -> &'static str {
-        match self {
-            LangId::Python => "py",
-            LangId::JavaScript => "node",
-            LangId::TypeScript | LangId::Tsx => "ts",
-            LangId::C => "c",
-            LangId::Cpp => "cpp",
-            LangId::Rust => "rs",
-            LangId::Go => "go",
-        }
+        crate::deploy::tags::metacall_tag(self)
     }
 }
 

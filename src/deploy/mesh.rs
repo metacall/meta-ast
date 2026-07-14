@@ -3,6 +3,7 @@ use crate::graph::edge::EdgeKind;
 use crate::graph::node::NodeData;
 use crate::pipeline::GraphAnalysis;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 #[derive(Serialize)]
@@ -57,15 +58,27 @@ pub fn generate_mesh_annotation(
     let mut languages = HashSet::new();
     let mut cross_language_units_count = 0;
     let mut independent_candidates_count = 0;
+    // Maps SCC component index -> emitted deployment unit id. Only components
+    // with deployable (symbol/file/external) nodes are emitted, so this is a
+    // strict subset of all component indices. Cross-language edges use raw SCC
+    // indices; without this map they would reference skipped components.
+    let mut component_to_unit: HashMap<usize, usize> = HashMap::new();
+    // Maps a file path -> the emitted unit id that owns its symbols. Used to
+    // anchor cross-language edges whose endpoints land on file-only SCCs
+    // (e.g. a metacall_load_from_file call site) so they resolve to a real
+    // unit instead of a skipped component index.
+    let mut file_to_unit: HashMap<String, usize> = HashMap::new();
 
     for (idx, scc) in analysis.scc.components.iter().enumerate() {
         let mut symbols = Vec::new();
         let mut unit_languages = HashSet::new();
+        let mut has_real_node = false;
 
         for &node_idx in &scc.nodes {
             let node_data = &analysis.graph.graph[node_idx];
             match node_data {
                 NodeData::Symbol(sym) => {
+                    has_real_node = true;
                     let file_node =
                         analysis
                             .graph
@@ -93,6 +106,7 @@ pub fn generate_mesh_annotation(
                     });
                 }
                 NodeData::File(f) => {
+                    has_real_node = true;
                     let lang_tag = crate::deploy::tags::metacall_tag(f.language);
                     languages.insert(lang_tag.to_string());
                     unit_languages.insert(lang_tag.to_string());
@@ -124,57 +138,145 @@ pub fn generate_mesh_annotation(
             cross_language_units_count += 1;
         }
 
+        // Skip SCCs composed entirely of ExternalNodes -- they have
+        // no file/symbol content to deploy.
+        if !has_real_node {
+            continue;
+        }
+
         let is_mesh_candidate = scc.hint == crate::graph::scc::DeployabilityHint::Independent;
         if is_mesh_candidate {
             independent_candidates_count += 1;
         }
 
+        let unit_id = deployment_units.len();
+        component_to_unit.insert(idx, unit_id);
+        // Anchor every real file in this unit so file-only SCCs (call sites,
+        // loaded targets) resolve to this unit via file ownership.
+        for s in &symbols {
+            if s.kind != "external" {
+                file_to_unit.insert(s.file.clone(), unit_id);
+            }
+        }
+
         deployment_units.push(DeploymentUnit {
-            id: idx,
+            id: unit_id,
             symbols,
             is_cross_language,
             is_mesh_candidate,
-            deployability: format!("{:?}", scc.hint).to_lowercase(),
+            deployability: scc.hint.to_string(),
         });
     }
 
-    // Detect cross-language edges from graph
+    // Build path -> component lookup for cross-language edge annotation.
+    let mut file_to_component: HashMap<String, usize> = HashMap::new();
+    for (idx, scc) in analysis.scc.components.iter().enumerate() {
+        for &node_idx in &scc.nodes {
+            if let NodeData::File(f) = &analysis.graph.graph[node_idx] {
+                let path_str = f.path.to_string_lossy().replace('\\', "/");
+                file_to_component.insert(path_str, idx);
+            }
+        }
+    }
+
+    // Resolves a component index to an emitted unit id. Skipped
+    // (file-only / external-only) components have no direct mapping, so we
+    // fall back to file ownership: the endpoint's file nodes anchor to the
+    // unit that owns their symbols. Returns None only when no anchor exists.
+    let resolve_unit = |comp: usize| -> Option<usize> {
+        if let Some(&uid) = component_to_unit.get(&comp) {
+            return Some(uid);
+        }
+        for &node_idx in &analysis.scc.components[comp].nodes {
+            if let NodeData::File(f) = &analysis.graph.graph[node_idx] {
+                let path_str = f.path.to_string_lossy().replace('\\', "/");
+                if let Some(&uid) = file_to_unit.get(&path_str) {
+                    return Some(uid);
+                }
+            }
+        }
+        None
+    };
+
+    // Detect cross-language edges from graph, annotated with call-site info.
+    let mut seen_edges: HashSet<(usize, usize, &str, &str)> = HashSet::new();
     for edge_idx in analysis.graph.graph.edge_indices() {
         let weight = &analysis.graph.graph[edge_idx];
         if weight.kind == EdgeKind::Ownership {
             continue;
         }
 
-        let (u, v) = analysis.graph.graph.edge_endpoints(edge_idx).unwrap();
-        let u_comp = analysis.scc.component_of(u).unwrap();
-        let v_comp = analysis.scc.component_of(v).unwrap();
+        let Some((u, v)) = analysis.graph.graph.edge_endpoints(edge_idx) else {
+            continue;
+        };
+        let (Some(u_comp), Some(v_comp)) =
+            (analysis.scc.component_of(u), analysis.scc.component_of(v))
+        else {
+            continue;
+        };
 
         if u_comp != v_comp {
             let u_lang = get_node_language(&analysis.graph.graph[u], &analysis.graph);
             let v_lang = get_node_language(&analysis.graph.graph[v], &analysis.graph);
 
+            // Remap raw SCC indices to emitted unit ids. Edges whose
+            // endpoints are skipped components anchor to the unit owning their
+            // file's symbols; edges with no anchor are not part of the mesh.
+            let (Some(from_unit), Some(to_unit)) = (resolve_unit(u_comp), resolve_unit(v_comp))
+            else {
+                continue;
+            };
+
             if u_lang != v_lang && u_lang != "unknown" && v_lang != "unknown" {
+                // Parallel graph edges (e.g. a duplicated load call) must
+                // not produce duplicate mesh edges.
+                let key = (from_unit, to_unit, u_lang, v_lang);
+                if !seen_edges.insert(key) {
+                    continue;
+                }
+
+                // Find the call site whose source_file is in u_comp and
+                // whose scripts target v_comp (or match the file name).
+                let call_site_file = call_sites.iter().find_map(|site| {
+                    let site_path = site.source_file.to_string_lossy().replace('\\', "/");
+                    if file_to_component.get(&site_path) != Some(&u_comp) {
+                        return None;
+                    }
+                    let site_target_lang = site.target_lang.as_ref().map(|t| {
+                        crate::deploy::tags::metacall_tag(
+                            crate::deploy::tags::from_metacall_tag(t).unwrap_or(site.caller_lang),
+                        )
+                    });
+                    if site_target_lang == Some(v_lang) {
+                        Some(site_path)
+                    } else if let NodeData::File(dst_file) = &analysis.graph.graph[v] {
+                        let dst_name = dst_file
+                            .path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("");
+                        if site
+                            .scripts
+                            .iter()
+                            .any(|s| s.contains(dst_name) || dst_name.contains(s.as_str()))
+                        {
+                            Some(site_path)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                });
+
                 cross_language_edges.push(CrossLanguageEdge {
-                    from_unit: u_comp,
-                    to_unit: v_comp,
+                    from_unit,
+                    to_unit,
                     from_language: u_lang.to_string(),
                     to_language: v_lang.to_string(),
-                    call_site: None, // We don't easily have the source file here without more work
+                    call_site: call_site_file,
                     confidence: weight.confidence as f64,
                 });
-            }
-        }
-    }
-
-    // Also add edges from call sites if they represent cross-language dependencies
-    // (This might overlap with graph edges if the resolver caught them)
-    for site in call_sites {
-        if let Some(target_lang) = &site.target_lang {
-            let caller_lang = crate::deploy::tags::metacall_tag(site.caller_lang);
-            if caller_lang != target_lang {
-                // Find unit containing the call site
-                // This is harder because we need to find the node for site.source_file
-                // For now, we skip adding them here if they are already in graph.
             }
         }
     }

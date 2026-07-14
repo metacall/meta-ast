@@ -58,7 +58,6 @@ tempfile = "3.27"
 
 [features]
 default = []
-embed-cytoscape = []
 metacall-deploy = []
 
 [profile.bench]

@@ -1,7 +1,9 @@
 use crate::model::output::InspectOutput;
 use crate::model::{Symbol, SymbolKind};
 
-pub fn symbols_to_inspect_output(symbols: &[Symbol]) -> InspectOutput {
+/// Builds the inspect output by consuming owned `Symbol`s, moving their
+/// fields into the bucketed output instead of cloning the immutable IR.
+pub fn symbols_to_inspect_output(symbols: Vec<Symbol>) -> InspectOutput {
     let mut output = InspectOutput {
         funcs: Vec::new(),
         classes: Vec::new(),
@@ -12,11 +14,11 @@ pub fn symbols_to_inspect_output(symbols: &[Symbol]) -> InspectOutput {
         match symbol.kind {
             SymbolKind::Function | SymbolKind::Method => {
                 output.funcs.push(crate::model::output::FuncEntry {
-                    name: symbol.name.clone(),
-                    source_range: symbol.source_range.clone(),
+                    name: symbol.name,
+                    source_range: symbol.source_range,
                     visibility: symbol.visibility,
-                    signature: symbol.signature.clone(),
-                    docstring: symbol.docstring.clone(),
+                    signature: symbol.signature,
+                    docstring: symbol.docstring,
                     is_async: symbol.is_async,
                 });
             }
@@ -26,11 +28,11 @@ pub fn symbols_to_inspect_output(symbols: &[Symbol]) -> InspectOutput {
             | SymbolKind::Trait
             | SymbolKind::Enum => {
                 output.classes.push(crate::model::output::ClassEntry {
-                    name: symbol.name.clone(),
-                    source_range: symbol.source_range.clone(),
+                    name: symbol.name,
+                    source_range: symbol.source_range,
                     visibility: symbol.visibility,
-                    signature: symbol.signature.clone(),
-                    docstring: symbol.docstring.clone(),
+                    signature: symbol.signature,
+                    docstring: symbol.docstring,
                 });
             }
             SymbolKind::Object
@@ -40,11 +42,11 @@ pub fn symbols_to_inspect_output(symbols: &[Symbol]) -> InspectOutput {
             | SymbolKind::Namespace
             | SymbolKind::TypeAlias => {
                 output.objects.push(crate::model::output::ObjectEntry {
-                    name: symbol.name.clone(),
-                    source_range: symbol.source_range.clone(),
+                    name: symbol.name,
+                    source_range: symbol.source_range,
                     visibility: symbol.visibility,
-                    signature: symbol.signature.clone(),
-                    docstring: symbol.docstring.clone(),
+                    signature: symbol.signature,
+                    docstring: symbol.docstring,
                 });
             }
         }
@@ -54,10 +56,10 @@ pub fn symbols_to_inspect_output(symbols: &[Symbol]) -> InspectOutput {
 }
 
 pub fn serialize_inspect(
-    symbols: &[Symbol],
+    symbols: &mut Vec<Symbol>,
     format: &crate::output::OutputFormat,
 ) -> anyhow::Result<String> {
-    let output = symbols_to_inspect_output(symbols);
+    let output = symbols_to_inspect_output(std::mem::take(symbols));
     format.serialize(&output)
 }
 
@@ -93,7 +95,7 @@ mod tests {
 
     #[test]
     fn empty_symbols_produces_empty_json() {
-        let json = serialize_inspect(&[], &OutputFormat::Json).unwrap();
+        let json = serialize_inspect(&mut Vec::new(), &OutputFormat::Json).unwrap();
         assert_eq!(
             json,
             "{\n  \"funcs\": [],\n  \"classes\": [],\n  \"objects\": []\n}"
@@ -112,7 +114,7 @@ mod tests {
 
         for (name, kind, funcs, classes, objects) in cases {
             let sym = make_symbol(1, name, kind);
-            let output = symbols_to_inspect_output(&[sym]);
+            let output = symbols_to_inspect_output(vec![sym]);
             assert_eq!(output.funcs.len(), funcs, "unexpected funcs for {name}");
             assert_eq!(
                 output.classes.len(),
@@ -138,12 +140,12 @@ mod tests {
 
     #[test]
     fn to_inspect_json_valid() {
-        let symbols = vec![
+        let mut symbols = vec![
             make_symbol(1, "f1", SymbolKind::Function),
             make_symbol(2, "C1", SymbolKind::Class),
             make_symbol(3, "OBJ", SymbolKind::Constant),
         ];
-        let json = serialize_inspect(&symbols, &OutputFormat::Json).unwrap();
+        let json = serialize_inspect(&mut symbols, &OutputFormat::Json).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed.is_object());
         assert!(parsed["funcs"].is_array());
@@ -153,7 +155,7 @@ mod tests {
 
     #[test]
     fn inspect_output_required_keys() {
-        let json = serialize_inspect(&[], &OutputFormat::Json).unwrap();
+        let json = serialize_inspect(&mut Vec::new(), &OutputFormat::Json).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         let keys: std::collections::HashSet<&str> = parsed
             .as_object()

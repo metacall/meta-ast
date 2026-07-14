@@ -47,17 +47,15 @@ Goals:
 
 - Structured output (JSON + YAML) with `--format` flag.
 - Interactive HTML dashboard with Cytoscape.js via `--html` flag.
-- `--self-contained` embeds Cytoscape.js offline (requires `embed-cytoscape` feature).
 - Watch mode and incremental-update strategy.
 - C ABI scaffolding and header generation.
 
 Exit gates:
 
 1. ~~`--format json|yaml` works for analysis output.~~ DONE
-2. ~~`--html` generates a self-contained dashboard with SCC/Deployment Unit coloring,
+2. ~~`--html` generates a dashboard with SCC/Deployment Unit coloring,
    auto-opens in browser.~~ DONE
-3. ~~`--self-contained` embeds Cytoscape.js offline (requires `embed-cytoscape` feature).~~ DONE
-4. Watch-mode stability tests pass. NOT YET STARTED
+3. Watch-mode stability tests pass. NOT YET STARTED
 5. C ABI smoke tests pass. NOT YET STARTED
 6. Incremental performance target evidence captured. NOT YET STARTED
 
@@ -67,26 +65,31 @@ _Requires `--features metacall-deploy`. Full documentation in [DEPLOY.md](DEPLOY
 
 Goals:
 
-- Implement Cross-Language Call Site detection across all supported language ports
+- Implement cross-language call-site detection across all 8 supported language ports
   (`metacall_load_from_file`, `metacall_load_from_memory`, `metacall_load_from_package`,
-  `metacall_load_from_configuration`).
-- Generate per-language Deploy Manifests (`metacall.{tag}.json`) and Root Manifest
-  (`metacall.json`).
-- Emit Mesh Annotation (`metacall.mesh.json`) from SCC Deployment Unit analysis,
-  classifying independent Function Mesh candidates vs. co-deployment-required groups.
-- Implement `--check` validation mode: diff generated manifests against any existing
-  `metacall.json` in the project tree.
-- Inline `metacall_load_from_configuration` targets when present; annotate as
-  low-confidence when target is absent from the analyzed tree.
+  `metacall_load_from_configuration`), including CommonJS `require()` for JS/TS and
+  bare-name call detection for Rust after `use` import.
+- Partition files into same-language pods via Union-Find over dependency edges.
+- Resolve external dependencies per-language from lockfiles (preferred for exact
+  version pinning) and package manifests (fallback).
+- Generate pod manifest (`metacall.pods.json`) with per-pod deployments, inter-pod
+  edges with fused confidence scores, and scoped dependency lists.
+- Emit mesh annotation (`metacall.mesh.json`) from SCC deployment unit analysis,
+  classifying independent Function Mesh candidates vs. co-deployment-required groups
+  with cross-language call-site attribution.
+- Implement `--check` validation mode: fairness check ensuring every cut edge has a
+  corresponding RPC stub entry in the manifest (bijection check, ADR 0003 pattern).
 
 Exit gates:
 
-1. Deploy Manifests generated match expected fixtures for all projects in
-   `assets/examples/`. DONE
-2. Mesh Annotation correctly classifies Deployment Units for `auth-function-mesh`
-   fixture. DONE
-3. `--check` detects manifest/source divergence and reports structured diagnostics. DONE
-4. Dynamic call site arguments emit low-confidence annotation rather than hard failure. DONE
+1. Pod manifests generated match expected fixtures for all projects in
+   `tests/fixtures/mixed/`. DONE
+2. Mesh annotation correctly classifies deployment units for `auth-function-mesh`
+   fixture with call-site attribution. DONE
+3. `--check` detects missing RPC stubs for cut edges and reports structured diagnostics. DONE
+4. Dynamic call-site arguments emit low-confidence annotation rather than hard failure. DONE
+5. External dependency resolution identifies `jsonwebtoken` from `package.json`/lockfile
+   in the `auth-function-mesh` fixture with exact version pinning. DONE
 
 ## Phase 6 - Language expansion [NOT STARTED]
 

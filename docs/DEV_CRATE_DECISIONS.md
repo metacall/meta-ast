@@ -62,7 +62,7 @@
 
 ## 4. Feature flags
 
-- `embed-cytoscape` - when enabled, bundles the Cytoscape.js assets into the binary so the HTML dashboard can be generated without external file dependencies.
+- `metacall-deploy` - when enabled, includes the deploy scanner/manifest/mesh generators so MetaCall deployment manifests can be produced.
 
 ## 5. Recommended additions
 

@@ -67,32 +67,32 @@ The project will provide a stable C ABI header (`mc_ast.h`) for embedding scenar
 
 The project will support exporting a datagraph model suitable for external graph sinks (including Dgraph) in a later phase.
 
-### FR-9: Deploy Manifest generation (feature-gated: `metacall-deploy`, Planned)
+### FR-9: Deploy Manifest generation (feature-gated: `metacall-deploy`, Implemented)
 
-When built with `--features metacall-deploy`, the `deploy` subcommand will support generating manifests:
+When built with `--features metacall-deploy`, the `deploy` subcommand:
 
-- Scan source files for Cross-Language Call Sites
+- Scans source files for cross-language call sites
   (`metacall_load_from_file`, `metacall_load_from_memory`,
   `metacall_load_from_package`, `metacall_load_from_configuration`)
-- Extract `(language_tag, script_paths[])` pairs from call site arguments
-- Generate one Deploy Manifest (`metacall.{tag}.json`) per detected language group
-- Generate a Root Manifest (`metacall.json`) referencing all per-language manifests
-- Inline referenced `metacall_load_from_configuration` targets when present in tree;
-  emit a low-confidence annotation when the target is absent
-- Validate an existing `metacall.json` against static analysis when `--check` is passed
+- Extracts `(language_tag, script_paths[])` pairs from call-site arguments
+- Partitions files into same-language pods via Union-Find over dependency edges
+- Resolves external dependencies per-language from lockfiles and package manifests
+- Generates a pod manifest (`metacall.pods.json`) with per-pod deployments, inter-pod
+  edges with fused confidence scores, and scoped dependency lists with pinned versions
+- Inlines referenced `metacall_load_from_configuration` targets when present; emits
+  low-confidence annotations for computed/dynamic arguments
+- Runs fairness checks when `--check` is passed: every cut edge must have a
+  corresponding RPC stub entry in the manifest
 
-*Note: This feature is planned for Phase 5 of the roadmap and is not yet implemented.*
+### FR-10: Mesh Annotation (feature-gated: `metacall-deploy`, Implemented)
 
-### FR-10: Mesh Annotation (feature-gated: `metacall-deploy`, Planned)
-
-When built with `--features metacall-deploy`, the `deploy` subcommand will also emit
+When built with `--features metacall-deploy`, the `deploy` subcommand also emits
 `metacall.mesh.json` containing:
 
-- SCC-derived Deployment Units with constituent symbol lists
+- SCC-derived deployment units with constituent symbol lists
 - Cross-language boundary flags per unit
 - Independent mesh candidate classification per unit
-
-*Note: This feature is planned for Phase 5 of the roadmap and is not yet implemented.*
+- Cross-language edges with call-site file attribution
 
 ## 3. Non-functional requirements
 
@@ -126,7 +126,7 @@ debugging.
 2. Correct SCC identification for multi-language project fixtures.
 3. CI pipeline green on Linux/macOS/Windows.
 4. *(Planned)* Incremental-update target under 100ms for files below 5k LOC.
-5. *(Planned with `metacall-deploy`)* Deploy Manifests generated match expected fixtures for all example projects in `assets/examples/`.
+5. *(Planned with `metacall-deploy`)* Deploy Manifests generated match expected fixtures for all example projects in `tests/fixtures/mixed/`.
 6. *(Planned with `metacall-deploy`)* Mesh Annotation correctly classifies Deployment Units for the `auth-function-mesh` fixture.
 
 ## 5. Out-of-scope for MVP

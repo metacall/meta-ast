@@ -39,6 +39,8 @@ pub struct FileExtraction {
     pub imports: Vec<UnresolvedImport>,
     pub references: Vec<UnresolvedReference>,
     pub diagnostics: Vec<crate::error::Diagnostic>,
+    /// Total number of tree-sitter AST nodes in the parse tree.
+    pub ast_node_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

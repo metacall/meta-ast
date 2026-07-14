@@ -202,17 +202,18 @@ impl FlattenedScopeCache {
 
 /// Resolve all references across extracted files.
 ///
-/// Returns a list of (source_symbol_id, target_symbol_id) pairs
-/// representing ReferenceEdges to add. Warnings for unresolved references
-/// are appended to `diagnostics`.
+/// Returns a list of (source_symbol_id, target_symbol_id, confidence) triples
+/// representing ReferenceEdges to add. Confidence is threaded from the
+/// FlattenedScopeCache (1.0 local/direct, 0.8 transitive, 0.6 cross-language).
+/// Warnings for unresolved references are appended to `diagnostics`.
 pub fn resolve_all_references(
     extractions: &[FileExtraction],
     path_to_file_id: &HashMap<PathBuf, FileId>,
     scope_cache: &FlattenedScopeCache,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<(SymbolId, SymbolId)> {
+) -> Vec<(SymbolId, SymbolId, f32)> {
     #[allow(clippy::type_complexity)]
-    let results: Vec<(Vec<(SymbolId, SymbolId)>, Vec<Diagnostic>)> = extractions
+    let results: Vec<(Vec<(SymbolId, SymbolId, f32)>, Vec<Diagnostic>)> = extractions
         .par_iter()
         .map(|file_ext| {
             let mut local_edges = Vec::new();
@@ -234,10 +235,10 @@ pub fn resolve_all_references(
                     });
 
                     if let Some(source) = source_sym {
-                        for &(target_id, _confidence) in matches {
+                        for &(target_id, confidence) in matches {
                             // Don't add self-references (symbol to itself)
                             if source.id != target_id {
-                                local_edges.push((source.id, target_id));
+                                local_edges.push((source.id, target_id, confidence));
                             }
                         }
                     }
@@ -260,10 +261,18 @@ pub fn resolve_all_references(
         diagnostics.extend(local_diags);
     }
 
-    // Deduplicate
-    let seen: HashSet<(SymbolId, SymbolId)> = edges.iter().copied().collect();
-    let mut deduped: Vec<_> = seen.into_iter().collect();
-    deduped.sort_by_key(|(a, b)| (a.0, b.0));
+    // Deduplicate: max-merge confidence for same (src, dst) pairs
+    let mut seen: HashMap<(SymbolId, SymbolId), f32> = HashMap::with_capacity(edges.len());
+    for (src, dst, conf) in edges {
+        seen.entry((src, dst))
+            .and_modify(|e| *e = e.max(conf))
+            .or_insert(conf);
+    }
+    let mut deduped: Vec<_> = seen
+        .into_iter()
+        .map(|((src, dst), conf)| (src, dst, conf))
+        .collect();
+    deduped.sort_by_key(|(a, b, _)| (a.0, b.0));
     deduped
 }
 
@@ -490,6 +499,7 @@ mod tests {
                 },
             }],
             diagnostics: vec![],
+            ast_node_count: 0,
         };
 
         let mut path_to_file_id = HashMap::new();
@@ -504,6 +514,8 @@ mod tests {
 
         let edges = resolve_all_references(&[file], &path_to_file_id, &cache, &mut Vec::new());
         assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0], (SymbolId(1), SymbolId(99)));
+        assert_eq!(edges[0].0, SymbolId(1));
+        assert_eq!(edges[0].1, SymbolId(99));
+        assert_eq!(edges[0].2, 1.0);
     }
 }

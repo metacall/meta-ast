@@ -28,7 +28,8 @@ fn sample_symbol(id: u32, name: &str, kind: SymbolKind) -> Symbol {
 
 #[test]
 fn yaml_serialize_empty_inspect() {
-    let yaml = meta_ast::output::inspect::serialize_inspect(&[], &OutputFormat::Yaml).unwrap();
+    let yaml =
+        meta_ast::output::inspect::serialize_inspect(&mut Vec::new(), &OutputFormat::Yaml).unwrap();
     let parsed: yaml_serde::Value = yaml_serde::from_str(&yaml).unwrap();
     assert!(parsed["funcs"].is_sequence());
     assert!(parsed["classes"].is_sequence());
@@ -37,11 +38,12 @@ fn yaml_serialize_empty_inspect() {
 
 #[test]
 fn yaml_serialize_inspect_with_symbols() {
-    let symbols = vec![
+    let mut symbols = vec![
         sample_symbol(1, "func_a", SymbolKind::Function),
         sample_symbol(2, "MyClass", SymbolKind::Class),
     ];
-    let yaml = meta_ast::output::inspect::serialize_inspect(&symbols, &OutputFormat::Yaml).unwrap();
+    let yaml =
+        meta_ast::output::inspect::serialize_inspect(&mut symbols, &OutputFormat::Yaml).unwrap();
 
     let parsed: yaml_serde::Value = yaml_serde::from_str(&yaml).unwrap();
     let funcs = parsed["funcs"].as_sequence().unwrap();
@@ -87,13 +89,16 @@ fn output_format_json_not_equal_yaml() {
 
 #[test]
 fn yaml_json_semantic_equivalence() {
-    let symbols = vec![
+    let mut symbols = vec![
         sample_symbol(1, "func_a", SymbolKind::Function),
         sample_symbol(2, "MyClass", SymbolKind::Class),
     ];
 
-    let json = meta_ast::output::inspect::serialize_inspect(&symbols, &OutputFormat::Json).unwrap();
-    let yaml = meta_ast::output::inspect::serialize_inspect(&symbols, &OutputFormat::Yaml).unwrap();
+    let json =
+        meta_ast::output::inspect::serialize_inspect(&mut symbols.clone(), &OutputFormat::Json)
+            .unwrap();
+    let yaml =
+        meta_ast::output::inspect::serialize_inspect(&mut symbols, &OutputFormat::Yaml).unwrap();
 
     let json_parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     let yaml_parsed: yaml_serde::Value = yaml_serde::from_str(&yaml).unwrap();

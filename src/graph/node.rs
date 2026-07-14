@@ -13,6 +13,7 @@ use crate::model::{FileId, SnapshotId, SourceRange, SymbolId, SymbolKind, Visibi
 
 /// Unified node data enum for the dependency graph.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum NodeData {
     File(FileNode),
     Symbol(SymbolNode),
@@ -87,6 +88,31 @@ pub struct ExternalNode {
     pub raw_path: String,
     /// Language of the importing file
     pub language: LangId,
+    /// Classification result - `None` until dependency resolution runs.
+    pub classification: Option<ExternalClassification>,
+}
+
+/// Classification of an external dependency.
+#[derive(Debug, Clone, serde::Serialize)]
+#[non_exhaustive]
+pub enum ExternalClassification {
+    /// Successfully resolved to a known package (lockfile or manifest).
+    Classified {
+        package_name: String,
+        version: Option<String>,
+        language: LangId,
+        source: DependencySource,
+    },
+    /// Best-effort failed; kept as unresolved for transparency.
+    Unresolved { raw_path: String, reason: String },
+}
+
+/// Where the dependency information came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[non_exhaustive]
+pub enum DependencySource {
+    Lockfile,
+    Manifest,
 }
 
 /// Represents an extracted symbol in the dependency graph.

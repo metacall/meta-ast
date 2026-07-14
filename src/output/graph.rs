@@ -242,12 +242,7 @@ impl GraphOutput {
             .iter()
             .map(|scc| {
                 let nodes: Vec<usize> = scc.nodes.iter().map(|n| n.index()).collect();
-                let hint_str = match scc.hint {
-                    DeployabilityHint::Independent => "Independent",
-                    DeployabilityHint::AcyclicDependency => "AcyclicDependency",
-                    DeployabilityHint::CyclicCluster => "CyclicCluster",
-                    DeployabilityHint::SelfLoop => "SelfLoop",
-                };
+                let hint_str = scc.hint.to_string();
 
                 SerializedScc {
                     index: scc.index,
@@ -406,8 +401,8 @@ mod tests {
         builder.add_symbol(&sym2).unwrap();
 
         // Create a cycle via reference edges between the symbols
-        builder.add_reference(sym1.id, sym2.id);
-        builder.add_reference(sym2.id, sym1.id);
+        builder.add_reference(sym1.id, sym2.id, 1.0);
+        builder.add_reference(sym2.id, sym1.id, 1.0);
 
         let graph = builder.build();
         let scc_result = SccAnalysis::analyze(&graph.graph);
@@ -425,8 +420,8 @@ mod tests {
         );
         assert_eq!(
             cyclic_scc.unwrap()["hint"],
-            "CyclicCluster",
-            "Cyclic SCC should have CyclicCluster hint"
+            "cyclic_cluster",
+            "Cyclic SCC should have cyclic_cluster hint"
         );
     }
 }

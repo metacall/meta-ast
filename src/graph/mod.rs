@@ -40,9 +40,10 @@ use std::collections::HashMap;
 
 pub use builder::GraphBuilder;
 pub use edge::{EdgeData, EdgeKind};
-pub use node::{ExternalNode, FileNode, NodeData, SymbolNode};
+pub use node::{ExternalClassification, ExternalNode, FileNode, NodeData, SymbolNode};
 pub use scc::{DeployabilityHint, Scc, SccAnalysis};
 
+use crate::language::LangId;
 use crate::model::{FileId, SnapshotId, SymbolId};
 use petgraph::graph::{DiGraph, NodeIndex};
 
@@ -106,6 +107,40 @@ impl CodeGraph {
     }
     pub fn edge_count(&self) -> usize {
         self.graph.edge_count()
+    }
+    /// Resolves or creates the `External` node for a raw unresolved path, keeping
+    /// `external_index` consistent so repeated loads reuse a single node.
+    pub fn get_or_create_external_node(&mut self, raw_path: String, language: LangId) -> NodeIndex {
+        if let Some(&idx) = self.external_index.get(&raw_path) {
+            return idx;
+        }
+        let node = NodeData::External(ExternalNode {
+            raw_path: raw_path.clone(),
+            language,
+            classification: None,
+        });
+        let idx = self.graph.add_node(node);
+        self.external_index.insert(raw_path, idx);
+        idx
+    }
+    /// Adds an edge, normalizing duplicate `(src, dst, kind)` triples by max-merging
+    /// confidence so injected edges obey the same invariant as builder-constructed ones.
+    pub fn add_edge_normalized(
+        &mut self,
+        source: NodeIndex,
+        target: NodeIndex,
+        kind: EdgeKind,
+        confidence: f32,
+    ) {
+        if let Some(edge_idx) = self.graph.find_edge(source, target) {
+            let existing = &mut self.graph[edge_idx];
+            if existing.kind == kind {
+                existing.confidence = existing.confidence.max(confidence);
+                return;
+            }
+        }
+        self.graph
+            .add_edge(source, target, EdgeData { kind, confidence });
     }
     pub fn files(&self) -> impl Iterator<Item = (FileId, &FileNode)> + '_ {
         self.file_to_index.iter().filter_map(|(file_id, &idx)| {

@@ -1,6 +1,16 @@
 //! SCC (Strongly Connected Components) analysis for dependency graphs.
 //!
 //! This module implements Tarjan's SCC algorithm on the dependency subgraph
+//! (Import and Reference edges only; Ownership edges are excluded via
+//! `EdgeFiltered`).
+//!
+//! ## SCC as atomic deployment unit
+//!
+//! An SCC entirely within one language is never subdivided regardless of
+//! size. Cross-language SCCs may be split at the lowest-confidence edge
+//! (see `deploy::cut`), but same-language SCCs are always kept together.
+//! This guarantees that cycles - a known source of tight coupling - are
+//! preserved as a single deployment unit whenever possible.
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeFiltered;
@@ -24,6 +34,7 @@ pub struct Scc {
 
 /// Deployability classification for an SCC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum DeployabilityHint {
     /// Single node, no self-loop, no dependencies - can deploy independently
     Independent,
@@ -38,10 +49,10 @@ pub enum DeployabilityHint {
 impl std::fmt::Display for DeployabilityHint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DeployabilityHint::Independent => write!(f, "Independent"),
-            DeployabilityHint::AcyclicDependency => write!(f, "AcyclicDependency"),
-            DeployabilityHint::CyclicCluster => write!(f, "CyclicCluster"),
-            DeployabilityHint::SelfLoop => write!(f, "SelfLoop"),
+            DeployabilityHint::Independent => write!(f, "independent"),
+            DeployabilityHint::AcyclicDependency => write!(f, "acyclic_dependency"),
+            DeployabilityHint::CyclicCluster => write!(f, "cyclic_cluster"),
+            DeployabilityHint::SelfLoop => write!(f, "self_loop"),
         }
     }
 }
@@ -440,15 +451,15 @@ mod tests {
 
     #[test]
     fn deployability_hint_display() {
-        assert_eq!(format!("{}", DeployabilityHint::Independent), "Independent");
+        assert_eq!(format!("{}", DeployabilityHint::Independent), "independent");
         assert_eq!(
             format!("{}", DeployabilityHint::CyclicCluster),
-            "CyclicCluster"
+            "cyclic_cluster"
         );
-        assert_eq!(format!("{}", DeployabilityHint::SelfLoop), "SelfLoop");
+        assert_eq!(format!("{}", DeployabilityHint::SelfLoop), "self_loop");
         assert_eq!(
             format!("{}", DeployabilityHint::AcyclicDependency),
-            "AcyclicDependency"
+            "acyclic_dependency"
         );
     }
 }
