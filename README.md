@@ -32,17 +32,16 @@ The binary is at `./target/release/meta-ast`.
 view of their structure without executing any user code. Its objectives:
 
 - **Parse 8 languages with one tool.** Python, JavaScript, TypeScript, TSX, C,
-  C++, Rust, and Go are handled through a uniform tree-sitter pipeline, so a
-  mixed Python/JS/Rust project is analyzed as one graph rather than with
-  per-language glue.
+  C++, Rust, and Go flow through a uniform tree-sitter pipeline. A mixed
+  Python/JS/Rust project is one graph, not three glued together.
 - **Normalize to a stable IR.** Every declaration becomes a `Symbol` with a
-  consistent shape and a stable JSON/YAML output contract, enabling downstream
-  tooling to consume results without caring about the source language.
+  consistent shape and a stable JSON/YAML output contract. Downstream tooling
+  consumes results without caring about the source language.
 - **Surface deployment structure.** Cross-file dependency graphs plus Tarjan
-  SCC reveal cyclic import clusters and independent units, which feed the
-  MetaCall Function Mesh deployment model.
+  SCC reveal cyclic import clusters and independent units. These feed the
+  MetaCall Function Mesh deployment model via pod-based manifests.
 - **Recover, never abort.** Partial or malformed trees are parsed as far as
-  possible and any parse/extraction gaps are accumulated as diagnostics; a
+  possible and any parse/extraction gaps are accumulated as diagnostics. A
   broken file never takes down the whole analysis.
 - **Stay standalone and safe.** No runtime execution of target code, no network,
   no external services. Pure static analysis driven by CLI or library API.
@@ -56,10 +55,13 @@ view of their structure without executing any user code. Its objectives:
 - Syntactic symbol extraction (functions, classes, objects, methods, structs,
   enums, interfaces, namespaces) and their visibility/doc metadata.
 - Cross-file import resolution, reference resolution, and dependency graph
-  assembly.
+  assembly with confidence-weighted edges.
 - Cyclic-import detection (Tarjan SCC) and deployment-unit classification.
-- MetaCall deployment manifest generation (`metacall.json`, per-language
-  manifests, mesh annotation) behind the `metacall-deploy` feature.
+- MetaCall pod-based deployment manifest generation (`metacall.pods.json`) and
+  Function Mesh annotation (`metacall.mesh.json`) behind the `metacall-deploy`
+  feature.
+- External dependency resolution: per-language lockfile/manifest parsing to
+  pin dependencies with exact versions.
 - Single-snapshot analysis of a directory tree via CLI or `analyze_graph`.
 
 ---
@@ -74,7 +76,7 @@ view of their structure without executing any user code. Its objectives:
   turns detected cross-language `metacall_load_from_*` call sites and SCC units
   into manifests that drive co-deployment vs. independent-function decisions.
 - **Documentation & visualization.** Emit an interactive Cytoscape.js dashboard
-  (`--html`, offline via `--self-contained`) to explore ownership, references,
+  (`--html`, loaded from a CDN and cached by the browser) to explore ownership, references,
   and deployment units visually.
 - **Library integration.** Consume `meta-ast` as a crate: `analyze_graph`
   returns a `GraphAnalysis` (`CodeGraph` + `SccAnalysis`) for custom tooling,
@@ -98,30 +100,28 @@ Builds the cross-file dependency graph, resolves imports, and runs Tarjan SCC to
 
 ```bash
 meta-ast graph <path> [-f json|yaml] [-o graph.json]
-meta-ast graph <path> --html                    # interactive Cytoscape.js dashboard
-meta-ast graph <path> --html --self-contained   # offline, no CDN (embed-cytoscape feature)
+meta-ast graph <path> --html                    # interactive Cytoscape.js dashboard (CDN, browser-cached)
 ```
 
 ### `deploy` *(requires `--features metacall-deploy`)*
 
-Scans for cross-language `metacall_load_from_*` call sites and generates the full MetaCall manifest suite.
+Scans for cross-language `metacall_load_from_*` call sites, resolves external dependencies from lockfiles and package manifests, partitions files into same-language pods, and generates deployment artifacts.
 
 ```bash
 cargo build --release --features metacall-deploy
 
 meta-ast deploy <path> --out ./out      # generate manifests
-meta-ast deploy <path> --check          # CI validation against existing metacall.json
+meta-ast deploy <path> --check          # CI validation: verify every cut edge has an RPC stub
 ```
 
-Generates three artifacts:
+Generates two artifacts:
 
 | File | Description |
 |---|---|
-| `metacall.json` | Root manifest composing all language groups |
-| `metacall.<tag>.json` | Per-language manifest (e.g. `metacall.py.json`) |
-| `metacall.mesh.json` | SCC-derived Function Mesh topology annotation |
+| `metacall.pods.json` | Pod manifest: language-based deployment units, inter-pod edges with confidence scores, per-pod dependency lists with pinned versions, and AST node metrics |
+| `metacall.mesh.json` | SCC-derived Function Mesh topology annotation with cross-language call-site attribution |
 
-See [docs/DEPLOY.md](docs/DEPLOY.md) for full scanner details, confidence scoring, mesh annotation schema, and extension guide.
+See [docs/DEPLOY.md](docs/DEPLOY.md) for scanner details, confidence scoring, pod partitioning, manifest schema, and the fairness check used in CI.
 
 ---
 
@@ -142,7 +142,7 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for full scanner details, confidence scorin
 ## Roadmap
 
 - **Phase 4 (In Progress)**: Watch mode, incremental analysis, C ABI.
-- **Phase 5 (Implemented, feature-gated)**: `metacall-deploy` - call site scanning, manifests, Function Mesh annotation.
+- **Phase 5 (Complete)**: `metacall-deploy` - call-site scanning, pod partitioning, dependency resolution, pod manifests, Function Mesh annotation, fairness checking.
 - **Phase 6 (Planned)**: Language expansion (C#, Java).
 
 Full details in [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -154,9 +154,9 @@ Full details in [docs/ROADMAP.md](docs/ROADMAP.md).
 Performance is measured with [criterion](https://github.com/japaric/criterion.rs)
 via two benchmark suites (`harness = false`):
 
-- `benches/pipeline.rs` — end-to-end extraction across the per-language fixtures
+- `benches/pipeline.rs` - end-to-end extraction across the per-language fixtures
   (python, javascript, typescript, tsx, rust, go, c, cpp, mixed).
-- `benches/graph.rs` — graph construction, Tarjan SCC on varied topologies
+- `benches/graph.rs` - graph construction, Tarjan SCC on varied topologies
   (acyclic chains, single/multiple cycles, dense graphs), edge deduplication,
   and node lookup at scale (up to 10k nodes / 10k duplicates).
 

@@ -23,7 +23,7 @@
 | Deployment Unit classification | `specs/requirements.md` FR-4 | independent vs. co-deploy fixture assertions |
 | Incremental update target | `ARCHITECTURE.md` + `rfcs/0003-incremental-parsing-strategy.md` | benchmark harness and thresholds |
 | Linux/macOS/Windows portability | `CI_CD.md` | CI matrix status |
-| Deploy Manifest fixture match | `specs/requirements.md` FR-9 | `assets/examples/` manifest comparison |
+| Deploy Manifest fixture match | `specs/requirements.md` FR-9 | `tests/fixtures/mixed/` manifest comparison |
 | Mesh Annotation correctness | `specs/requirements.md` FR-10 | `auth-function-mesh` unit classification |
 
 ## Decision traceability

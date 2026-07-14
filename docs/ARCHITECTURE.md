@@ -18,7 +18,7 @@
 7. Cross-file reference resolution via `FlattenedScopeCache` (DFS the import graph once per file, then O(1) scope lookups).
 8. SCC analysis (Tarjan) and Deployment Unit annotation.
 9. Output emission (JSON, YAML, or interactive HTML dashboard).
-10. _(Requires `metacall-deploy` feature)_ Cross-Language Call Site detection (scanner), Deploy Manifest generation, and Mesh Annotation emission. See `docs/DEPLOY.md`.
+10. _(Requires `metacall-deploy` feature)_ Cross-language call-site scanning, pod partitioning, dependency resolution from lockfiles, pod-and-mesh manifest generation, and CI fairness checking. See `docs/DEPLOY.md`.
 
 ## 3. Component boundaries
 
@@ -31,7 +31,7 @@
 - **Resolver layer:** cross-file reference resolution via `FlattenedScopeCache` (`graph/resolver.rs`).
 - **Output layer:** serialization and optional adapters.
 - **Interface layer:** CLI + library API (future: C ABI).
-- **Deploy layer** _(feature-gated: `metacall-deploy`)_: Cross-Language Call Site scanner (`scanner.rs`), Deploy Manifest writer (`manifest.rs`), Root Manifest assembler, Mesh Annotation emitter (`mesh.rs`), CI check mode (`check.rs`). Fully implemented. See `docs/DEPLOY.md`.
+- **Deploy layer** _(feature-gated: `metacall-deploy`)_: Cross-language call-site scanner (`scanner.rs`), pod partitioning via Union-Find over same-language edges (`pod.rs`), cross-language SCC cut detection and oversized-pod rebalancing (`cut.rs`), per-language external dependency resolution from lockfiles and manifests (`dependency.rs`), pod manifest generation (`manifest.rs`), Function Mesh annotation (`mesh.rs`), and CI fairness checking for RPC-converted cut edges (`check.rs`). See `docs/DEPLOY.md`.
 
 Detailed module layout, data structures, and dependency direction are defined in `STRUCTURE.md`.
 
@@ -50,9 +50,8 @@ Static extensions:
 
 Deploy output _(feature-gated: `metacall-deploy`)_:
 
-- `metacall.{tag}.json` per detected language group (Deploy Manifest)
-- `metacall.json` root manifest (Root Manifest)
-- `metacall.mesh.json` (Mesh Annotation - SCC-derived Deployment Unit advisory)
+- `metacall.pods.json` - pod manifest with per-pod deployments, inter-pod edges, dependency lists, and AST node metrics
+- `metacall.mesh.json` - Function Mesh topology annotation with SCC-derived deployment units and cross-language call-site attribution
 
 See [DEPLOY.md](DEPLOY.md) for schema details and the call site scanner reference.
 
@@ -80,7 +79,7 @@ Parallel parse + extract uses rayon per-file; graph assembly is sequential. See 
 The CLI supports JSON and YAML for programmatic consumption, plus an interactive HTML dashboard for visual analysis.
 
 - **JSON / YAML:** Controlled by the `--format` flag. JSON is the default. YAML requires no extra setup - just pass `--format yaml`.
-- **HTML dashboard:** Separate concern, activated with `--html`. Generates a single `.html` file with an embedded Cytoscape.js graph. The browser auto-opens unless you redirect. Use `--self-contained` (requires `embed-cytoscape` feature) to bundle the JS library directly for offline use.
+- **HTML dashboard:** Separate concern, activated with `--html`. Generates a single `.html` file with an interactive Cytoscape.js graph loaded from a CDN (cached by the browser after first fetch). The browser auto-opens unless you redirect.
 
 The dashboard turns SCC analysis into something you can actually see. Nodes in cyclic clusters (co-deployment required) are colored red. Independent Deployment Units are green. This is the difference between "your code has cycles" and "here is the exact knot you need to untangle before you can split this into independent mesh units."
 

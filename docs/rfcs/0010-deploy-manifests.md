@@ -4,7 +4,7 @@ _Research synthesis. 2026-06-24._
 
 ## Status
 
-Implemented
+Superseded. The original per-language manifest model (`metacall.json` + `metacall.{tag}.json`) was replaced by a pod-based model (`metacall.pods.json`) that partitions files by language via Union-Find and scopes dependencies per pod. The pod model is documented in [DEPLOY.md](../DEPLOY.md). This RFC is retained as a design record of the original rationale and trade-offs.
 
 ---
 
@@ -49,7 +49,7 @@ data into deploy manifest generation.
 
 ### 1.3 The Reference Fixture
 
-`assets/examples/auth-function-mesh/` demonstrates the target pattern:
+`tests/fixtures/mixed/auth_microservice/` demonstrates the target pattern:
 
 - `auth.py` (Python) calls `metacall_load_from_file('node', ['auth/auth.js'])` to
   load Node.js functions, then calls `metacall('sign', text)` and
@@ -226,7 +226,7 @@ as structured diagnostics.
 
 ### 7.1 Example Validation Matrix
 
-Verified against all fixtures in `assets/examples/`:
+Verified against all fixtures in `tests/fixtures/mixed/`:
 
 | Example | Status | Target Manifests | Mesh Expectation |
 |---------|--------|------------------|------------------|
