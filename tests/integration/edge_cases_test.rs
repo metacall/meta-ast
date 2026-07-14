@@ -126,11 +126,24 @@ fn unreadable_file_accumulates_diagnostic() {
     std::fs::create_dir_all(&tmp).expect("temp dir");
 
     let file = write(&tmp, "good.py", "def ok(): pass\n");
-    // Make the file unreadable.
+    // Make the file unreadable. On Unix, strip read permissions. On Windows,
+    // chmod does not deny reads, so hold an exclusive (share_mode 0) handle so
+    // the extractor's own read fails with a sharing violation.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(&file)
+            .expect("hold exclusive handle");
+        std::mem::forget(held);
     }
     let (analysis, diags) =
         pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId(1)).expect("no panic");
@@ -142,7 +155,8 @@ fn unreadable_file_accumulates_diagnostic() {
     );
     let _ = analysis;
 
-    // Restore perms so cleanup works.
+    // Windows holds an exclusive handle (leaked above); on Unix restore perms
+    // so cleanup works.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

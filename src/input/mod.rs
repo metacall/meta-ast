@@ -49,7 +49,9 @@ pub fn discover_files(
         .build()
         .filter_map(|e| e.ok())
     {
-        let path = entry.into_path();
+        // Strip the verbatim `\\?\` prefix on Windows so downstream std::fs
+        // reads and tree-sitter paths resolve consistently.
+        let path = dunce::simplified(&entry.into_path()).to_path_buf();
         if !path.is_file() {
             continue;
         }

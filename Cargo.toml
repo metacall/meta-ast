@@ -50,6 +50,7 @@ rayon = "1.10"
 
 # Filesystem
 ignore = "0.4"
+dunce = "1"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
