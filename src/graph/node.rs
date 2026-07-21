@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use crate::language::LangId;
-use crate::model::{FileId, SnapshotId, SourceRange, SymbolId, SymbolKind, Visibility};
+use crate::model::{DataNodeId, FileId, SnapshotId, SourceRange, SymbolId, SymbolKind, Visibility};
 
 /// Unified node data enum for the dependency graph.
 #[derive(Debug, Clone)]
@@ -18,6 +18,7 @@ pub enum NodeData {
     File(FileNode),
     Symbol(SymbolNode),
     External(ExternalNode),
+    Data(DataGraphNode),
 }
 
 impl NodeData {
@@ -27,6 +28,7 @@ impl NodeData {
             NodeData::File(_) => "file",
             NodeData::Symbol(_) => "symbol",
             NodeData::External(_) => "external",
+            NodeData::Data(_) => "data",
         }
     }
 
@@ -52,6 +54,15 @@ impl NodeData {
     pub fn as_external(&self) -> Option<&ExternalNode> {
         if let NodeData::External(e) = self {
             Some(e)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the DataGraphNode if this is a Data node.
+    pub fn as_data(&self) -> Option<&DataGraphNode> {
+        if let NodeData::Data(d) = self {
+            Some(d)
         } else {
             None
         }
@@ -135,6 +146,17 @@ pub struct SymbolNode {
     pub source_range: SourceRange,
 }
 
+/// Represents a data-bearing node in the data/flow subgraph.
+#[derive(Debug, Clone)]
+pub struct DataGraphNode {
+    pub id: DataNodeId,
+    pub symbol_id: Option<SymbolId>,
+    pub name: Option<String>,
+    pub scope: crate::model::DataScope,
+    pub type_hint: Option<String>,
+    pub source_range: SourceRange,
+}
+
 impl FileNode {
     /// Creates a new FileNode with the given properties.
     pub fn new(id: FileId, path: PathBuf, language: LangId, snapshot_id: SnapshotId) -> Self {
@@ -169,6 +191,20 @@ impl SymbolNode {
             file_id,
             visibility: symbol.visibility,
             source_range: symbol.source_range.clone(),
+        }
+    }
+}
+
+impl DataGraphNode {
+    /// Creates a new DataGraphNode from an extracted DataNode.
+    pub fn from_data_node(data: &crate::model::DataNode) -> Self {
+        Self {
+            id: data.id,
+            symbol_id: data.symbol_id,
+            name: data.name.clone(),
+            scope: data.scope,
+            type_hint: data.type_hint.clone(),
+            source_range: data.source_range.clone(),
         }
     }
 }
@@ -287,5 +323,42 @@ mod tests {
         assert!(node_data.as_file().is_none());
         assert_eq!(node_data.file_path(), None);
         assert_eq!(node_data.symbol_name(), Some("my_func"));
+    }
+
+    #[test]
+    fn data_graph_node_from_model() {
+        use crate::model::{DataNode, DataNodeId, DataScope};
+        let data = DataNode {
+            id: DataNodeId(5),
+            symbol_id: None,
+            name: Some("var_x".into()),
+            scope: DataScope::Local,
+            type_hint: Some("int".into()),
+            source_range: test_source_range(),
+        };
+        let gnode = DataGraphNode::from_data_node(&data);
+        assert_eq!(gnode.id, DataNodeId(5));
+        assert_eq!(gnode.name.as_deref(), Some("var_x"));
+        assert_eq!(gnode.scope, DataScope::Local);
+        assert_eq!(gnode.type_hint.as_deref(), Some("int"));
+        assert!(gnode.symbol_id.is_none());
+    }
+
+    #[test]
+    fn node_data_data_variant() {
+        let dnode = DataGraphNode {
+            id: crate::model::DataNodeId(1),
+            symbol_id: Some(SymbolId::from(3)),
+            name: Some("param".into()),
+            scope: crate::model::DataScope::Parameter,
+            type_hint: Some("str".into()),
+            source_range: test_source_range(),
+        };
+        let node_data = NodeData::Data(dnode);
+        assert_eq!(node_data.kind_str(), "data");
+        assert!(node_data.as_data().is_some());
+        assert!(node_data.as_file().is_none());
+        assert!(node_data.as_symbol().is_none());
+        assert_eq!(node_data.as_data().unwrap().name.as_deref(), Some("param"));
     }
 }

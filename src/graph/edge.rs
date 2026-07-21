@@ -27,6 +27,9 @@ pub enum EdgeKind {
 
     /// Reference edge: Symbol references/uses another symbol.
     Reference,
+
+    /// Flow edge: DataNode def-use or dataflow relationship.
+    Flow,
 }
 
 impl EdgeKind {
@@ -46,6 +49,7 @@ impl EdgeKind {
             EdgeKind::Ownership => "ownership",
             EdgeKind::Import => "import",
             EdgeKind::Reference => "reference",
+            EdgeKind::Flow => "flow",
         }
     }
 }
@@ -65,24 +69,39 @@ pub struct EdgeData {
     /// Confidence level for the edge resolution.
     /// Used for cross-language and best-effort resolution.
     pub confidence: f32,
+
+    /// Flow kind for dataflow edges (None for non-Flow edges).
+    pub flow_kind: Option<crate::model::FlowKind>,
 }
 
 impl EdgeData {
-    /// Creates a new edge with full confidence (1.0).
+    /// Creates a new edge with full confidence (1.0) and no flow kind.
     pub fn new(kind: EdgeKind) -> Self {
         Self {
             kind,
             confidence: 1.0,
+            flow_kind: None,
         }
     }
 
-    /// Creates a new edge with specified confidence.
+    /// Creates a new edge with specified confidence and no flow kind.
     pub fn with_confidence(kind: EdgeKind, confidence: f32) -> Self {
         Self {
             kind,
             confidence: confidence.clamp(0.0, 1.0),
+            flow_kind: None,
         }
     }
+
+    /// Creates a Flow edge with a flow kind and confidence.
+    pub fn flow(flow_kind: crate::model::FlowKind, confidence: f32) -> Self {
+        Self {
+            kind: EdgeKind::Flow,
+            confidence: confidence.clamp(0.0, 1.0),
+            flow_kind: Some(flow_kind),
+        }
+    }
+
     pub fn participates_in_scc(&self) -> bool {
         self.kind.participates_in_scc()
     }
@@ -110,6 +129,17 @@ mod tests {
         assert_eq!(EdgeKind::Ownership.as_str(), "ownership");
         assert_eq!(EdgeKind::Import.as_str(), "import");
         assert_eq!(EdgeKind::Reference.as_str(), "reference");
+        assert_eq!(EdgeKind::Flow.as_str(), "flow");
+    }
+
+    #[test]
+    fn flow_edge_excluded_from_scc() {
+        assert!(!EdgeKind::Flow.participates_in_scc());
+    }
+
+    #[test]
+    fn flow_edge_not_cross_file() {
+        assert!(!EdgeKind::Flow.is_cross_file());
     }
 
     #[test]
