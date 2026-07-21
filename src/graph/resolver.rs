@@ -227,12 +227,16 @@ pub fn resolve_all_references(
             let file_path = &file_ext.path;
             for ref_ in &file_ext.references {
                 if let Some(matches) = scope_cache.resolve(file_id, &ref_.name) {
-                    // Find the source symbol that contains this reference range
-                    // We use rfind to get the innermost symbol (e.g. method inside class)
-                    let source_sym = file_ext.symbols.iter().rfind(|s| {
-                        s.source_range.byte_start <= ref_.range.byte_start
-                            && s.source_range.byte_end >= ref_.range.byte_end
-                    });
+                    // Find the innermost source symbol that contains this reference range
+                    // Pick the symbol with the smallest byte span length
+                    let source_sym = file_ext
+                        .symbols
+                        .iter()
+                        .filter(|s| {
+                            s.source_range.byte_start <= ref_.range.byte_start
+                                && s.source_range.byte_end >= ref_.range.byte_end
+                        })
+                        .min_by_key(|s| s.source_range.byte_end - s.source_range.byte_start);
 
                     if let Some(source) = source_sym {
                         for &(target_id, confidence) in matches {
@@ -517,5 +521,90 @@ mod tests {
         assert_eq!(edges[0].0, SymbolId(1));
         assert_eq!(edges[0].1, SymbolId(99));
         assert_eq!(edges[0].2, 1.0);
+    }
+
+    #[test]
+    fn resolve_references_selects_innermost_enclosing_symbol_regardless_of_vector_order() {
+        use crate::model::{LineColumn, SourceRange, Symbol, SymbolKind, UnresolvedReference};
+
+        // Inner method (span 40: 10..50)
+        let inner_method = Symbol {
+            id: SymbolId(1),
+            name: "inner_method".into(),
+            kind: SymbolKind::Method,
+            language: LangId::Python,
+            file_path: PathBuf::from("/proj/a.py"),
+            source_range: SourceRange {
+                byte_start: 10,
+                byte_end: 50,
+                start: LineColumn { line: 1, column: 0 },
+                end: LineColumn { line: 3, column: 0 },
+            },
+            visibility: None,
+            signature: None,
+            docstring: None,
+            is_async: false,
+        };
+
+        // Outer class (span 100: 0..100) placed AFTER inner_method in vector
+        let outer_class = Symbol {
+            id: SymbolId(2),
+            name: "OuterClass".into(),
+            kind: SymbolKind::Class,
+            language: LangId::Python,
+            file_path: PathBuf::from("/proj/a.py"),
+            source_range: SourceRange {
+                byte_start: 0,
+                byte_end: 100,
+                start: LineColumn { line: 0, column: 0 },
+                end: LineColumn { line: 5, column: 0 },
+            },
+            visibility: None,
+            signature: None,
+            docstring: None,
+            is_async: false,
+        };
+
+        let file = FileExtraction {
+            path: PathBuf::from("/proj/a.py"),
+            lang: LangId::Python,
+            symbols: vec![inner_method, outer_class], // Order: inner first, outer second
+            imports: vec![],
+            references: vec![UnresolvedReference {
+                name: "helper".into(),
+                range: SourceRange {
+                    byte_start: 20,
+                    byte_end: 26,
+                    start: LineColumn { line: 2, column: 4 },
+                    end: LineColumn {
+                        line: 2,
+                        column: 10,
+                    },
+                },
+            }],
+            diagnostics: vec![],
+            ast_node_count: 0,
+        };
+
+        let mut path_to_file_id = HashMap::new();
+        path_to_file_id.insert(PathBuf::from("/proj/a.py"), FileId(0));
+
+        let mut scopes: HashMap<FileId, ScopeMap> = HashMap::new();
+        let mut scope = HashMap::new();
+        scope.insert("helper".into(), vec![(SymbolId(99), 1.0)]);
+        scopes.insert(FileId(0), scope);
+
+        let cache = FlattenedScopeCache { scopes };
+
+        let edges = resolve_all_references(&[file], &path_to_file_id, &cache, &mut Vec::new());
+        assert_eq!(edges.len(), 1);
+        // Must resolve from SymbolId(1) (inner_method), NOT SymbolId(2) (outer_class)
+        assert_eq!(
+            edges[0].0,
+            SymbolId(1),
+            "Reference should attach to innermost symbol SymbolId(1), but attached to SymbolId({})",
+            edges[0].0.0
+        );
+        assert_eq!(edges[0].1, SymbolId(99));
     }
 }

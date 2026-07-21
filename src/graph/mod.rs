@@ -132,12 +132,14 @@ impl CodeGraph {
         kind: EdgeKind,
         confidence: f32,
     ) {
-        if let Some(edge_idx) = self.graph.find_edge(source, target) {
-            let existing = &mut self.graph[edge_idx];
-            if existing.kind == kind {
-                existing.confidence = existing.confidence.max(confidence);
+        let mut edge_idx = self.graph.first_edge(source, petgraph::Direction::Outgoing);
+        while let Some(e) = edge_idx {
+            let (_src, dst) = self.graph.edge_endpoints(e).unwrap();
+            if dst == target && self.graph[e].kind == kind {
+                self.graph[e].confidence = self.graph[e].confidence.max(confidence);
                 return;
             }
+            edge_idx = self.graph.next_edge(e, petgraph::Direction::Outgoing);
         }
         self.graph
             .add_edge(source, target, EdgeData { kind, confidence });
@@ -295,5 +297,40 @@ mod tests {
 
         assert_eq!(ownership_edges.len(), 0); // No symbols added
         assert_eq!(import_edges.len(), 1);
+    }
+
+    #[test]
+    fn add_edge_normalized_handles_multiple_edge_kinds_between_same_nodes() {
+        let mut graph = CodeGraph::new(SnapshotId(1));
+        let n1 = graph.graph.add_node(NodeData::File(FileNode {
+            id: FileId(1),
+            path: PathBuf::from("a.rs"),
+            language: LangId::Rust,
+            snapshot_id: SnapshotId(1),
+        }));
+        let n2 = graph.graph.add_node(NodeData::File(FileNode {
+            id: FileId(2),
+            path: PathBuf::from("b.rs"),
+            language: LangId::Rust,
+            snapshot_id: SnapshotId(1),
+        }));
+
+        // 1. Add Reference edge with confidence 0.7
+        graph.add_edge_normalized(n1, n2, EdgeKind::Reference, 0.7);
+        // 2. Add Import edge with confidence 0.5 (pushed to head of edge list)
+        graph.add_edge_normalized(n1, n2, EdgeKind::Import, 0.5);
+        // 3. Add Reference edge again with confidence 0.9 (should max-merge into existing Reference edge)
+        graph.add_edge_normalized(n1, n2, EdgeKind::Reference, 0.9);
+
+        let ref_count = graph
+            .graph
+            .edges_connecting(n1, n2)
+            .filter(|e| e.weight().kind == EdgeKind::Reference)
+            .count();
+        assert_eq!(
+            ref_count, 1,
+            "Expected 1 Reference edge, but found {ref_count}"
+        );
+        assert_eq!(graph.edge_count(), 2);
     }
 }
