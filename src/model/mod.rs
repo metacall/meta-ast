@@ -10,7 +10,7 @@ pub mod output;
 
 use std::path::PathBuf;
 
-pub use ids::{FileId, IdGenerator, SnapshotId, SymbolId};
+pub use ids::{DataNodeId, FileId, IdGenerator, SnapshotId, SymbolId};
 pub use output::{ClassEntry, FuncEntry, InspectOutput, ObjectEntry};
 
 use crate::language::LangId;
@@ -43,6 +43,10 @@ pub struct FileExtraction {
     pub ast_node_count: usize,
     #[cfg(feature = "metacall-deploy")]
     pub call_sites: Vec<crate::deploy::scanner::CallSite>,
+    #[cfg(feature = "dataflow")]
+    pub data_nodes: Vec<DataNode>,
+    #[cfg(feature = "dataflow")]
+    pub flow_edges: Vec<FlowEdge>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -96,6 +100,59 @@ pub struct Symbol {
     pub signature: Option<String>,
     pub docstring: Option<String>,
     pub is_async: bool,
+}
+
+/// Classification of a data-bearing entity's visibility scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub enum DataScope {
+    Local,
+    Parameter,
+    Member,
+    Closure,
+    Temporary,
+}
+
+impl DataScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DataScope::Local => "local",
+            DataScope::Parameter => "parameter",
+            DataScope::Member => "member",
+            DataScope::Closure => "closure",
+            DataScope::Temporary => "temporary",
+        }
+    }
+}
+
+/// A value-bearing node for def-use and flow analysis.
+#[derive(Debug, Clone, Serialize)]
+pub struct DataNode {
+    pub id: DataNodeId,
+    pub symbol_id: Option<SymbolId>,
+    pub name: Option<String>,
+    pub scope: DataScope,
+    pub type_hint: Option<String>,
+    pub source_range: SourceRange,
+}
+
+/// A def-use or dataflow edge between two DataNodes.
+#[derive(Debug, Clone, Serialize)]
+pub struct FlowEdge {
+    pub source: DataNodeId,
+    pub target: DataNodeId,
+    pub kind: FlowKind,
+    pub confidence: f32,
+}
+
+/// Semantic kind of a dataflow edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub enum FlowKind {
+    DefUse,
+    Argument,
+    Return,
+    FieldAccess,
 }
 
 #[cfg(test)]
@@ -243,5 +300,102 @@ mod tests {
         assert_eq!(val["name"], "roundtrip_fn");
         assert_eq!(val["kind"], "Method");
         assert_eq!(val["is_async"], false);
+    }
+
+    #[test]
+    fn data_scope_as_str_all_variants() {
+        assert_eq!(DataScope::Local.as_str(), "local");
+        assert_eq!(DataScope::Parameter.as_str(), "parameter");
+        assert_eq!(DataScope::Member.as_str(), "member");
+        assert_eq!(DataScope::Closure.as_str(), "closure");
+        assert_eq!(DataScope::Temporary.as_str(), "temporary");
+    }
+
+    #[test]
+    fn data_scope_serialization() {
+        assert_eq!(
+            serde_json::to_string(&DataScope::Local).unwrap(),
+            "\"Local\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DataScope::Parameter).unwrap(),
+            "\"Parameter\""
+        );
+    }
+
+    #[test]
+    fn flow_kind_serialization() {
+        assert_eq!(
+            serde_json::to_string(&FlowKind::DefUse).unwrap(),
+            "\"DefUse\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FlowKind::Argument).unwrap(),
+            "\"Argument\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FlowKind::Return).unwrap(),
+            "\"Return\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FlowKind::FieldAccess).unwrap(),
+            "\"FieldAccess\""
+        );
+    }
+
+    #[test]
+    fn data_node_construction_and_serde() {
+        let data = DataNode {
+            id: DataNodeId(10),
+            symbol_id: Some(SymbolId(5)),
+            name: Some("x".into()),
+            scope: DataScope::Local,
+            type_hint: Some("int".into()),
+            source_range: sample_source_range(),
+        };
+        let json = serde_json::to_string(&data).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["name"], "x");
+        assert_eq!(val["scope"], "Local");
+        assert_eq!(val["type_hint"], "int");
+    }
+
+    #[test]
+    fn data_node_optional_fields_none() {
+        let data = DataNode {
+            id: DataNodeId(0),
+            symbol_id: None,
+            name: None,
+            scope: DataScope::Temporary,
+            type_hint: None,
+            source_range: sample_source_range(),
+        };
+        assert!(data.symbol_id.is_none());
+        assert!(data.name.is_none());
+        assert!(data.type_hint.is_none());
+    }
+
+    #[test]
+    fn flow_edge_serde() {
+        let edge = FlowEdge {
+            source: DataNodeId(1),
+            target: DataNodeId(2),
+            kind: FlowKind::Argument,
+            confidence: 0.85,
+        };
+        let json = serde_json::to_string(&edge).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["source"], 1);
+        assert_eq!(val["target"], 2);
+        assert_eq!(val["kind"], "Argument");
+        assert_eq!(val["confidence"], 0.85);
+    }
+
+    #[test]
+    fn data_node_id_serde_roundtrip() {
+        let original = DataNodeId(99);
+        let json = serde_json::to_string(&original).unwrap();
+        let roundtrip: DataNodeId = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, roundtrip);
     }
 }
