@@ -5,6 +5,13 @@ use crate::graph::{CodeGraph, GraphBuilder, SccAnalysis};
 use crate::input;
 use crate::model::SnapshotId;
 
+/// Metadata about a snapshot analysis run.
+#[derive(Debug, Clone)]
+pub struct SnapshotMeta {
+    pub id: SnapshotId,
+    pub datagraph_schema_version: u32,
+}
+
 /// Result of the full graph analysis pipeline.
 pub struct GraphAnalysis {
     pub graph: CodeGraph,
@@ -42,4 +49,12 @@ pub fn analyze_graph(
         },
         diagnostics,
     ))
+}
+
+/// Build a SnapshotMeta for the current analysis run.
+pub fn snapshot_meta(snapshot_id: SnapshotId) -> SnapshotMeta {
+    SnapshotMeta {
+        id: snapshot_id,
+        datagraph_schema_version: crate::output::graph::SCHEMA_VERSION,
+    }
 }
