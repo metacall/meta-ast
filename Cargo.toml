@@ -34,13 +34,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Tree-Sitter Dependencies
-tree-sitter = "0.26.9"
-tree-sitter-c = "0.24.1"
+tree-sitter = "0.26.11"
+tree-sitter-c = "0.24.2"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-go = "0.25.0"
 tree-sitter-javascript = "0.25.0"
 tree-sitter-python = "0.25.0"
-tree-sitter-rust = "0.24.0"
+tree-sitter-rust = "0.24.2"
 tree-sitter-typescript = "0.23.2"
 
 # Graph
@@ -50,7 +50,7 @@ petgraph = "0.8.3"
 clap = { version = "4.6", features = ["color", "derive", "env"] }
 
 # Parallelism
-rayon = "1.10"
+rayon = "1.12"
 
 dunce = "1"
 # Filesystem
@@ -58,7 +58,7 @@ ignore = "0.4"
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
-insta = { version = "1.47", features = ["json"] }
+insta = { version = "1.48", features = ["json"] }
 tempfile = "3.27"
 
 [features]
