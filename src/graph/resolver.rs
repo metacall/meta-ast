@@ -504,6 +504,8 @@ mod tests {
             }],
             diagnostics: vec![],
             ast_node_count: 0,
+            #[cfg(feature = "metacall-deploy")]
+            call_sites: vec![],
         };
 
         let mut path_to_file_id = HashMap::new();
@@ -584,6 +586,8 @@ mod tests {
             }],
             diagnostics: vec![],
             ast_node_count: 0,
+            #[cfg(feature = "metacall-deploy")]
+            call_sites: vec![],
         };
 
         let mut path_to_file_id = HashMap::new();

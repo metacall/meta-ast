@@ -41,6 +41,8 @@ pub struct FileExtraction {
     pub diagnostics: Vec<crate::error::Diagnostic>,
     /// Total number of tree-sitter AST nodes in the parse tree.
     pub ast_node_count: usize,
+    #[cfg(feature = "metacall-deploy")]
+    pub call_sites: Vec<crate::deploy::scanner::CallSite>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

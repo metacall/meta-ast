@@ -74,6 +74,8 @@ fn extract_single_file(
                     source_range: None,
                 }],
                 ast_node_count: 0,
+                #[cfg(feature = "metacall-deploy")]
+                call_sites: Vec::new(),
             };
         }
     };
@@ -94,21 +96,22 @@ fn extract_single_file(
                     source_range: None,
                 }],
                 ast_node_count: 0,
+                #[cfg(feature = "metacall-deploy")]
+                call_sites: Vec::new(),
             };
         }
     };
 
-    let ratio = parser::error_ratio(&tree, &source);
-    let node_count = parser::ast_node_count(&tree);
+    let metrics = parser::tree_metrics(&tree, &source);
     let mut diags = Vec::new();
 
-    if ratio > 0.5 {
+    if metrics.error_ratio > 0.5 {
         diags.push(Diagnostic {
             path: path.to_path_buf(),
             severity: Severity::Warning,
             message: format!(
                 "file has {:.0}% parse errors, results may be incomplete",
-                ratio * 100.0
+                metrics.error_ratio * 100.0
             ),
             source_range: None,
         });
@@ -137,6 +140,9 @@ fn extract_single_file(
         crate::language::extract_imports_and_references_for(*lang, &tree, &source, path)
     };
 
+    #[cfg(feature = "metacall-deploy")]
+    let call_sites = crate::deploy::scanner::scan_file(*lang, &tree, &source, path);
+
     FileExtraction {
         path: path.to_path_buf(),
         lang: *lang,
@@ -144,7 +150,9 @@ fn extract_single_file(
         imports,
         references,
         diagnostics: diags,
-        ast_node_count: node_count,
+        ast_node_count: metrics.node_count,
+        #[cfg(feature = "metacall-deploy")]
+        call_sites,
     }
 }
 
