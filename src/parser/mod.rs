@@ -44,39 +44,35 @@ pub(crate) fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tre
     })
 }
 
-pub(crate) fn error_ratio(tree: &tree_sitter::Tree, source: &[u8]) -> f64 {
-    if source.is_empty() {
-        return 0.0;
-    }
-    let root = tree.root_node();
-    if !root.has_error() {
-        return 0.0;
-    }
-    let mut total = 0u32;
-    let mut errors = 0u32;
-    count_nodes(&root, &mut total, &mut errors);
-    if total == 0 {
-        return 0.0;
-    }
-    errors as f64 / total as f64
+/// Unified metrics extracted in a single AST traversal.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TreeMetrics {
+    pub error_ratio: f64,
+    pub node_count: usize,
 }
 
-/// Count total tree-sitter nodes (named + anonymous) in a parse tree.
-///
-/// Walks the tree once, same O(n) pass as `error_ratio` but without the
-/// error-tracking overhead. Useful as a proxy for computational surface
-/// area in deployment metrics.
-///
-/// Iterates with a single reusable cursor instead of allocating a fresh
-/// `TreeCursor` per node, which the recursive `node.children(&mut node.walk())`
-/// form does for every node in the tree.
-pub fn ast_node_count(tree: &tree_sitter::Tree) -> usize {
+/// Calculate parse metrics (error ratio and named node count) in a single AST pass.
+pub fn tree_metrics(tree: &tree_sitter::Tree, source: &[u8]) -> TreeMetrics {
+    if source.is_empty() {
+        return TreeMetrics {
+            error_ratio: 0.0,
+            node_count: 0,
+        };
+    }
     let mut cursor = tree.walk();
     let mut total = 0u32;
+    let mut errors = 0u32;
+    let mut named = 0u32;
     let mut reached_root = false;
+
     while !reached_root {
-        if cursor.node().is_named() {
-            total += 1;
+        let n = cursor.node();
+        total += 1;
+        if n.is_named() {
+            named += 1;
+        }
+        if n.is_error() || n.is_missing() {
+            errors += 1;
         }
         if cursor.goto_first_child() {
             continue;
@@ -95,34 +91,16 @@ pub fn ast_node_count(tree: &tree_sitter::Tree) -> usize {
             }
         }
     }
-    total as usize
-}
 
-fn count_nodes(node: &tree_sitter::Node, total: &mut u32, errors: &mut u32) {
-    let mut cursor = node.walk();
-    let mut reached_root = false;
-    while !reached_root {
-        let n = cursor.node();
-        *total += 1;
-        if n.is_error() || n.is_missing() {
-            *errors += 1;
-        }
-        if cursor.goto_first_child() {
-            continue;
-        }
-        if cursor.goto_next_sibling() {
-            continue;
-        }
-        let mut retracing = true;
-        while retracing {
-            if !cursor.goto_parent() {
-                reached_root = true;
-                break;
-            }
-            if cursor.goto_next_sibling() {
-                retracing = false;
-            }
-        }
+    let error_ratio = if total == 0 {
+        0.0
+    } else {
+        errors as f64 / total as f64
+    };
+
+    TreeMetrics {
+        error_ratio,
+        node_count: named as usize,
     }
 }
 
@@ -148,23 +126,25 @@ mod tests {
     }
 
     #[test]
-    fn error_ratio_valid_source() {
+    fn tree_metrics_valid_source() {
         let tree = parse_tree(LangId::Python, b"def hello(): pass").unwrap();
-        let ratio = error_ratio(&tree, b"def hello(): pass");
-        assert!(ratio < 0.1);
+        let metrics = tree_metrics(&tree, b"def hello(): pass");
+        assert!(metrics.error_ratio < 0.1);
+        assert!(metrics.node_count > 0);
     }
 
     #[test]
-    fn error_ratio_malformed() {
+    fn tree_metrics_malformed() {
         let tree = parse_tree(LangId::Python, b"def broken(").unwrap();
-        let ratio = error_ratio(&tree, b"def broken(");
-        assert!(ratio > 0.0);
+        let metrics = tree_metrics(&tree, b"def broken(");
+        assert!(metrics.error_ratio > 0.0);
     }
 
     #[test]
-    fn error_ratio_empty_source() {
+    fn tree_metrics_empty_source() {
         let tree = parse_tree(LangId::Python, b"").unwrap();
-        let ratio = error_ratio(&tree, b"");
-        assert_eq!(ratio, 0.0);
+        let metrics = tree_metrics(&tree, b"");
+        assert_eq!(metrics.error_ratio, 0.0);
+        assert_eq!(metrics.node_count, 0);
     }
 }

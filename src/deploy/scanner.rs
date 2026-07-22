@@ -3,8 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use tree_sitter::{Node, Query, QueryCursor, StreamingIterator, Tree};
 
+use serde::Serialize;
+
 /// Variant of a MetaCall load call site.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub enum CallSiteVariant {
     LoadFromFile,
@@ -13,7 +15,7 @@ pub enum CallSiteVariant {
     LoadFromConfiguration,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CallSite {
     pub source_file: PathBuf,
     pub caller_lang: LangId,
