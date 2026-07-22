@@ -56,6 +56,7 @@ pub(crate) fn node_to_file_id(node: &NodeData) -> Option<FileId> {
         NodeData::File(f) => Some(f.id),
         NodeData::Symbol(s) => Some(s.file_id),
         NodeData::External(_) => None,
+        NodeData::Data(_) => None,
     }
 }
 
@@ -84,7 +85,7 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
         }
     }
 
-    // Phase 1: union same-language Import+Reference edges.
+    // Union same-language Import+Reference edges.
     let n = file_ids.len();
     let mut uf = UnionFind::new(n);
 
@@ -117,7 +118,7 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
         }
     }
 
-    // Phase 2: extract pods from the labeling.
+    // Extract pods from the labeling.
     let labeling = uf.into_labeling();
     let mut rep_to_pod: HashMap<u32, usize> = HashMap::new();
     let mut pods: Vec<Pod> = Vec::new();
@@ -136,7 +137,7 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
         pods[pod_id].files.push(file_ids[fidx]);
     }
 
-    // Phase 3: collect inter-pod edges. Deduplicate by (from_pod, to_pod).
+    // Collect inter-pod edges. Deduplicate by (from_pod, to_pod).
     // When both Import and Reference edges exist for the same pod pair,
     // fuse their confidences via multiplication (combined structural + deploy weight).
     #[derive(Default)]

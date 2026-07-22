@@ -130,6 +130,7 @@ pub fn generate_mesh_annotation(
                         kind: "external".to_string(),
                     });
                 }
+                NodeData::Data(_) => {}
             }
         }
 
@@ -307,5 +308,6 @@ fn get_node_language<'a>(node: &'a NodeData, graph: &'a crate::graph::CodeGraph)
         }
         NodeData::File(f) => crate::deploy::tags::metacall_tag(f.language),
         NodeData::External(e) => crate::deploy::tags::metacall_tag(e.language),
+        NodeData::Data(_) => "unknown",
     }
 }

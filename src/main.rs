@@ -69,7 +69,7 @@ fn main() -> anyhow::Result<()> {
                     .unwrap_or_else(|| "project".to_string());
                 Some(std::path::PathBuf::from(format!("{}.metast", name)))
             } else {
-                args.output
+                args.output.clone()
             };
 
             let config = meta_ast::output::emitter::EmitConfig {
@@ -80,6 +80,28 @@ fn main() -> anyhow::Result<()> {
             };
 
             meta_ast::output::emitter::emit_graph(&analysis, &config)?;
+
+            #[cfg(feature = "dataflow")]
+            if args.datagraph {
+                use meta_ast::sink::GraphSink;
+
+                let export = meta_ast::output::graph::GraphOutput::from_graph(
+                    &analysis.graph,
+                    Some(&analysis.scc),
+                    analysis.snapshot_id.0 as u64,
+                );
+                tracing::info!(
+                    schema_version = export.schema_version,
+                    node_count = export.metadata.node_count,
+                    "Exporting datagraph"
+                );
+
+                let output_path = args
+                    .output
+                    .unwrap_or_else(|| std::path::PathBuf::from("datagraph.json"));
+                let sink = meta_ast::sink::JsonSink::new(Some(output_path));
+                sink.emit(&export)?;
+            }
 
             Ok(())
         }
