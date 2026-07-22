@@ -576,6 +576,8 @@ mod tests {
             references: vec![],
             diagnostics: vec![],
             ast_node_count: 0,
+            #[cfg(feature = "metacall-deploy")]
+            call_sites: vec![],
         }];
         let mut diags = Vec::new();
         let (graph, _scc) = GraphBuilder::from_extractions(
@@ -633,6 +635,8 @@ mod tests {
             references: vec![],
             diagnostics: vec![],
             ast_node_count: 0,
+            #[cfg(feature = "metacall-deploy")]
+            call_sites: vec![],
         }];
         let mut diags = Vec::new();
         let (_graph, _scc) = GraphBuilder::from_extractions(
@@ -668,6 +672,8 @@ mod tests {
                 references: vec![],
                 diagnostics: vec![],
                 ast_node_count: 0,
+                #[cfg(feature = "metacall-deploy")]
+                call_sites: vec![],
             },
             FileExtraction {
                 path: PathBuf::from("/proj/b.py"),
@@ -677,6 +683,8 @@ mod tests {
                 references: vec![],
                 diagnostics: vec![],
                 ast_node_count: 0,
+                #[cfg(feature = "metacall-deploy")]
+                call_sites: vec![],
             },
         ];
         let mut diags = Vec::new();

@@ -10,6 +10,7 @@ pub struct GraphAnalysis {
     pub graph: CodeGraph,
     pub scc: SccAnalysis,
     pub snapshot_id: SnapshotId,
+    pub extractions: Vec<crate::model::FileExtraction>,
 }
 
 /// Run the full graph analysis pipeline on a path.
@@ -37,6 +38,7 @@ pub fn analyze_graph(
             graph,
             scc,
             snapshot_id,
+            extractions: extraction.files,
         },
         diagnostics,
     ))

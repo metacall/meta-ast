@@ -170,6 +170,7 @@ mod tests {
             graph,
             scc,
             snapshot_id: SnapshotId(1),
+            extractions: vec![],
         };
 
         let config = EmitConfig {
@@ -201,6 +202,7 @@ mod tests {
             graph,
             scc,
             snapshot_id: SnapshotId(1),
+            extractions: vec![],
         };
 
         let config = EmitConfig {

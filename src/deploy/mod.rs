@@ -1,10 +1,8 @@
-use crate::deploy::scanner::{CallSite, CallSiteVariant, scan_file};
+use crate::deploy::scanner::{CallSite, CallSiteVariant};
 use crate::graph::edge::EdgeKind;
 use crate::output::OutputFormat;
 use std::collections::HashMap;
 use std::path::PathBuf;
-
-use rayon::prelude::*;
 
 pub mod check;
 pub mod cut;
@@ -29,27 +27,15 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     tracing::info!("Output path: {}", config.out.display());
     tracing::info!("Check mode: {}", config.check);
 
-    // 1. Discover files
-    let files = crate::input::discover_files(&config.root, None)?;
-
-    // 2. Run full pipeline graph analysis (covers extraction + SCC)
+    // 1. Run full pipeline graph analysis (covers extraction + SCC)
     let snapshot_id = crate::model::SnapshotId(1);
     let (mut analysis, _) = crate::pipeline::analyze_graph(&config.root, snapshot_id)?;
 
-    // 3. Parallel scan for MetaCall call sites
-    let all_call_sites: Vec<CallSite> = files
-        .par_iter()
-        .filter_map(|(path, lang)| {
-            let source = std::fs::read(path).ok()?;
-            let mut parser = tree_sitter::Parser::new();
-            parser
-                .set_language(&crate::language::grammar_for(*lang))
-                .ok()?;
-            let tree = parser.parse(&source, None)?;
-            let sites = scan_file(*lang, &tree, &source, path);
-            if sites.is_empty() { None } else { Some(sites) }
-        })
-        .flatten()
+    // 2. Collect MetaCall call sites from pipeline extractions (zero duplicate I/O / parsing)
+    let all_call_sites: Vec<CallSite> = analysis
+        .extractions
+        .iter()
+        .flat_map(|f| f.call_sites.clone())
         .collect();
 
     // 4. Build path-to-node-index lookup once
@@ -136,9 +122,8 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     let n_pods = partition.pods.len();
     let n_inter = partition.inter_pod_edges.len();
 
-    // 8. Compute metrics from re-extraction
-    let extraction = crate::extractor::extract(&files);
-    let file_metrics = metrics::compute_file_metrics(&extraction.files);
+    // 8. Compute metrics from extractions (zero re-parsing)
+    let file_metrics = metrics::compute_file_metrics(&analysis.extractions);
     let pod_metrics = metrics::compute_pod_metrics(&partition, &file_metrics, &analysis.graph);
 
     // 9. Detect cross-language SCC cuts

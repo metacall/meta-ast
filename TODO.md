@@ -4,9 +4,9 @@
 - [ ] Better path normalization for each language to improve handling of externals and relative imports, and cross-language reference resolution.
 - [ ] Language module deduplication - refactor boilerplate code via declarative macros.
 - [ ] Refactor `deploy/mod.rs`: `run_deploy` (210 lines) handles scanning, edge injection, pod partitioning, metrics, cuts, dependencies, manifest, mesh, and check. Split into a `DeployOrchestrator` struct for single-responsibility and testability.
-- [ ] Eliminate duplicate file parsing in deploy: `run_deploy` calls `pipeline::analyze_graph` (which parses all files) then separately calls `extractor::extract(&files)` (re-parsing all files). Reuse extraction results instead of re-reading/re-parsing 'NEEDS RESEARCH'.
+- [x] Eliminate duplicate file parsing in deploy: `run_deploy` calls `pipeline::analyze_graph` (which parses all files) then separately calls `extractor::extract(&files)` (re-parsing all files). Reuse extraction results instead of re-reading/re-parsing 'NEEDS RESEARCH'.
 - [ ] Replace `Box<dyn ImportResolver>` with enum dispatch: The `ImportResolver` trait object allocates a heap box per language per pipeline run. Since resolvers are stateless wrappers around fn pointers, an enum dispatch would avoid allocation.
-- [ ] Combine tree walks in parser: `count_nodes` and `error_ratio` in `parser/mod.rs` both walk the tree separately. Combine into a single pass.
+- [x] Combine tree walks in parser: `count_nodes` and `error_ratio` in `parser/mod.rs` both walk the tree separately. Combine into a single pass.
 
 ## Low
 - [ ] Make `DEFAULT_MAX_POD_SIZE` configurable: Currently hardcoded to 20 in `cut.rs:44`.
