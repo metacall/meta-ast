@@ -1,5 +1,6 @@
 mod integration {
     mod dashboard_test;
+    mod datagraph_test;
     #[cfg(feature = "metacall-deploy")]
     mod deploy_edge_cases_test;
     #[cfg(feature = "metacall-deploy")]

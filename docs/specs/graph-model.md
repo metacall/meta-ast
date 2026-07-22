@@ -82,4 +82,7 @@ Sink adapters (e.g., Dgraph) that must preserve semantic equivalence.
 
 - Cross-language resolution is initially best-effort string/scope matching.
 - Full semantic type equivalence across languages is deferred.
-- DataNode/FlowEdge are MVP-optional extensions.
+- DataNode/FlowEdge extraction is implemented for Rust (let bindings,
+  parameters, def-use chains) behind the `dataflow` feature flag;
+  other languages return empty vectors. Python/JS/TS/Go/C/C++ are
+  stubbed with TODO markers. Full coverage is tracked in Phase 6.
