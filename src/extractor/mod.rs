@@ -39,10 +39,21 @@ pub fn extract_with_options(
     opts: &ExtractOptions,
 ) -> ExtractionResult {
     let id_gen = IdGenerator::<SymbolId>::new();
+    #[cfg(feature = "dataflow")]
+    let data_id_gen = IdGenerator::<crate::model::DataNodeId>::new();
 
     let mut file_extractions: Vec<_> = files
         .par_iter()
-        .map(|(path, lang)| extract_single_file(path, lang, &id_gen, opts))
+        .map(|(path, lang)| {
+            extract_single_file(
+                path,
+                lang,
+                &id_gen,
+                #[cfg(feature = "dataflow")]
+                &data_id_gen,
+                opts,
+            )
+        })
         .collect();
 
     file_extractions.sort_by(|a, b| a.path.cmp(&b.path));
@@ -56,6 +67,7 @@ fn extract_single_file(
     path: &std::path::Path,
     lang: &LangId,
     id_gen: &IdGenerator<SymbolId>,
+    #[cfg(feature = "dataflow")] data_id_gen: &IdGenerator<crate::model::DataNodeId>,
     opts: &ExtractOptions,
 ) -> FileExtraction {
     let source = match std::fs::read(path) {
@@ -76,6 +88,10 @@ fn extract_single_file(
                 ast_node_count: 0,
                 #[cfg(feature = "metacall-deploy")]
                 call_sites: Vec::new(),
+                #[cfg(feature = "dataflow")]
+                data_nodes: Vec::new(),
+                #[cfg(feature = "dataflow")]
+                flow_edges: Vec::new(),
             };
         }
     };
@@ -98,6 +114,10 @@ fn extract_single_file(
                 ast_node_count: 0,
                 #[cfg(feature = "metacall-deploy")]
                 call_sites: Vec::new(),
+                #[cfg(feature = "dataflow")]
+                data_nodes: Vec::new(),
+                #[cfg(feature = "dataflow")]
+                flow_edges: Vec::new(),
             };
         }
     };
@@ -143,6 +163,10 @@ fn extract_single_file(
     #[cfg(feature = "metacall-deploy")]
     let call_sites = crate::deploy::scanner::scan_file(*lang, &tree, &source, path);
 
+    #[cfg(feature = "dataflow")]
+    let (data_nodes, flow_edges) =
+        crate::language::dataflow::extract_dataflow(*lang, &tree, &source, data_id_gen);
+
     FileExtraction {
         path: path.to_path_buf(),
         lang: *lang,
@@ -153,6 +177,10 @@ fn extract_single_file(
         ast_node_count: metrics.node_count,
         #[cfg(feature = "metacall-deploy")]
         call_sites,
+        #[cfg(feature = "dataflow")]
+        data_nodes,
+        #[cfg(feature = "dataflow")]
+        flow_edges,
     }
 }
 

@@ -8,6 +8,8 @@
 pub(crate) mod c;
 pub(crate) mod common;
 pub(crate) mod cpp;
+#[cfg(feature = "dataflow")]
+pub(crate) mod dataflow;
 pub(crate) mod go;
 pub mod import_resolver;
 pub(crate) mod javascript;
