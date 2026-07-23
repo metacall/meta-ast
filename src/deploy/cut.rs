@@ -92,6 +92,7 @@ pub fn find_cross_language_cuts(
                 Some(NodeData::External(e)) => {
                     langs.insert(e.language);
                 }
+                Some(NodeData::Data(_)) => {}
                 None => {}
             }
         }

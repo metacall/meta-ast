@@ -29,17 +29,23 @@ Exit gates:
 3. ReferenceEdges appear in graph output with confidence scores in cross-file
    resolution tests.
 
-## Phase 3 - Datagraph & optional sink [NOT STARTED]
+## Phase 3 - Datagraph & optional sink [COMPLETE]
 
 Goals:
 
-- Extend model with optional data/flow nodes.
-- Provide portable graph export contract.
+- Extend model with optional data/flow nodes (DataNode, FlowEdge, DataScope, FlowKind).
+- Implement intra-procedural def-use extraction for Rust (let bindings, parameters).
+- Provide portable graph export contract with schema versioning (v1).
+- Pluggable sink adapters (GraphSink trait + JsonSink).
+- CLI integration: `--datagraph` flag on graph subcommand.
+- Unified GraphOutput serialization (replaces separate datagraph module).
 
 Exit gates:
 
-1. Export format validated.
-2. Snapshot/version semantics documented and tested.
+1. Export format validated via integration tests (JSON roundtrip, field checks).
+2. Snapshot/version semantics documented and tested (SCHEMA_VERSION = 1).
+3. End-to-end pipeline extracts data nodes from real Rust fixtures.
+4. Flow edges created for def-use chains (param→usage, let→let shadowing).
 
 ## Phase 4 - CLI polish, output formats, visualization [IN PROGRESS]
 

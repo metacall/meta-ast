@@ -1,6 +1,6 @@
 // Graph builder for incremental construction from extraction results.
 //!
-//! Construction proceeds in two phases:
+//! Construction proceeds in two stages:
 //! 1. Ownership graph: files and their symbols
 //! 2. Dependency graph: imports and cross-file references
 //!
@@ -15,8 +15,12 @@ use petgraph::visit::EdgeRef;
 
 use crate::graph::CodeGraph;
 use crate::graph::edge::{EdgeData, EdgeKind};
+#[cfg(feature = "dataflow")]
+use crate::graph::node::DataGraphNode;
 use crate::graph::node::{ExternalNode, FileNode, NodeData, SymbolNode};
 use crate::language::LangId;
+#[cfg(feature = "dataflow")]
+use crate::model::DataNodeId;
 use crate::model::{FileId, IdGenerator, SnapshotId, Symbol, SymbolId};
 
 /// Builder for incremental graph construction from extraction results.
@@ -45,6 +49,10 @@ pub struct GraphBuilder {
 
     /// Map from external raw path to graph node index
     external_index: HashMap<String, NodeIndex>,
+
+    /// Map from DataNodeId to graph node index
+    #[cfg(feature = "dataflow")]
+    data_to_index: HashMap<DataNodeId, NodeIndex>,
 }
 
 /// Tracks seen edges to prevent duplicates.
@@ -71,6 +79,8 @@ impl GraphBuilder {
             snapshot_id,
             edge_normalizer: EdgeNormalizer::default(),
             external_index: HashMap::new(),
+            #[cfg(feature = "dataflow")]
+            data_to_index: HashMap::new(),
         }
     }
 
@@ -141,6 +151,46 @@ impl GraphBuilder {
         Ok(sym_idx)
     }
 
+    /// Adds a data-bearing node to the graph.
+    ///
+    /// Returns the NodeIndex for the data node. Idempotent: returns
+    /// the existing index if a data node with the same DataNodeId exists.
+    #[cfg(feature = "dataflow")]
+    pub fn add_data_node(&mut self, data_node: &crate::model::DataNode) -> NodeIndex {
+        if let Some(&existing) = self.data_to_index.get(&data_node.id) {
+            return existing;
+        }
+        let node = DataGraphNode {
+            id: data_node.id,
+            symbol_id: data_node.symbol_id,
+            name: data_node.name.clone(),
+            scope: data_node.scope,
+            type_hint: data_node.type_hint.clone(),
+            source_range: data_node.source_range.clone(),
+        };
+        let idx = self.graph.add_node(NodeData::Data(node));
+        self.data_to_index.insert(data_node.id, idx);
+        idx
+    }
+
+    /// Adds a flow edge between two data nodes.
+    #[cfg(feature = "dataflow")]
+    pub fn add_flow_edge(
+        &mut self,
+        source: crate::model::DataNodeId,
+        target: crate::model::DataNodeId,
+        kind: crate::model::FlowKind,
+        confidence: f32,
+    ) {
+        let Some(&src_idx) = self.data_to_index.get(&source) else {
+            return;
+        };
+        let Some(&tgt_idx) = self.data_to_index.get(&target) else {
+            return;
+        };
+        self.add_edge_internal_with_flow(src_idx, tgt_idx, EdgeKind::Flow, confidence, Some(kind));
+    }
+
     /// Adds an import edge from one file to another.
     ///
     /// If the target file exists in the project, creates an import edge.
@@ -208,20 +258,14 @@ impl GraphBuilder {
             // Resolve to FileId if it exists
             if let Some(&to_fid) = self.path_to_file.get(&target_path) {
                 if let Some(&to_idx) = self.file_to_index.get(&to_fid) {
-                    let edge_data = EdgeData {
-                        kind: EdgeKind::Import,
-                        confidence: confidence as f32,
-                    };
+                    let edge_data = EdgeData::with_confidence(EdgeKind::Import, confidence as f32);
                     self.graph.add_edge(from_idx, to_idx, edge_data);
                 }
             } else {
                 // External or not discovered
                 let raw_path = script.clone();
                 if let Some(&to_idx) = self.external_index.get(&raw_path) {
-                    let edge_data = EdgeData {
-                        kind: EdgeKind::Import,
-                        confidence: confidence as f32,
-                    };
+                    let edge_data = EdgeData::with_confidence(EdgeKind::Import, confidence as f32);
                     self.graph.add_edge(from_idx, to_idx, edge_data);
                 } else {
                     let node = ExternalNode {
@@ -232,14 +276,39 @@ impl GraphBuilder {
                     let idx = self.graph.add_node(NodeData::External(node));
                     self.external_index.insert(raw_path, idx);
 
-                    let edge_data = EdgeData {
-                        kind: EdgeKind::Import,
-                        confidence: confidence as f32,
-                    };
+                    let edge_data = EdgeData::with_confidence(EdgeKind::Import, confidence as f32);
                     self.graph.add_edge(from_idx, idx, edge_data);
                 }
             }
         }
+    }
+
+    /// Internal edge addition with flow kind, respecting normalization.
+    #[cfg(feature = "dataflow")]
+    fn add_edge_internal_with_flow(
+        &mut self,
+        source: NodeIndex,
+        target: NodeIndex,
+        kind: EdgeKind,
+        confidence: f32,
+        flow_kind: Option<crate::model::FlowKind>,
+    ) {
+        if !self.edge_normalizer.is_new(source, target, kind) {
+            if let Some(edge_idx) = self.graph.find_edge(source, target) {
+                let edge = &mut self.graph[edge_idx];
+                edge.confidence = edge.confidence.max(confidence);
+                if flow_kind.is_some() {
+                    edge.flow_kind = flow_kind;
+                }
+            }
+            return;
+        }
+        let edge_data = EdgeData {
+            kind,
+            confidence,
+            flow_kind,
+        };
+        self.graph.add_edge(source, target, edge_data);
     }
 
     /// Adds a reference edge between two symbols with a confidence score.
@@ -280,7 +349,7 @@ impl GraphBuilder {
             return;
         }
 
-        let edge_data = EdgeData { kind, confidence };
+        let edge_data = EdgeData::with_confidence(kind, confidence);
 
         self.graph.add_edge(source, target, edge_data);
     }
@@ -355,12 +424,12 @@ impl GraphBuilder {
     ) -> (CodeGraph, crate::graph::SccAnalysis) {
         let mut builder = Self::new(snapshot_id);
 
-        // Phase 1: register all files
+        // Register all files
         for file in extractions {
             builder.add_file(file.path.clone(), file.lang);
         }
 
-        // Phase 2: register all symbols; symbol errors are non-fatal
+        // Register all symbols; symbol errors are non-fatal
         for file in extractions {
             for symbol in &file.symbols {
                 if let Err(e) = builder.add_symbol(symbol) {
@@ -374,7 +443,27 @@ impl GraphBuilder {
             }
         }
 
-        // Phase 3: build path -> FileId map needed by the resolver
+        // Register data nodes and flow edges from dataflow extraction
+        #[cfg(feature = "dataflow")]
+        {
+            for file in extractions {
+                for data_node in &file.data_nodes {
+                    builder.add_data_node(data_node);
+                }
+            }
+            for file in extractions {
+                for flow_edge in &file.flow_edges {
+                    builder.add_flow_edge(
+                        flow_edge.source,
+                        flow_edge.target,
+                        flow_edge.kind,
+                        flow_edge.confidence,
+                    );
+                }
+            }
+        }
+
+        // Build path -> FileId map needed by the resolver
         let path_to_file_id: HashMap<std::path::PathBuf, crate::model::FileId> = extractions
             .iter()
             .filter_map(|f| {
@@ -384,7 +473,7 @@ impl GraphBuilder {
             })
             .collect();
 
-        // Phase 4: resolve language-specific import paths and add import edges
+        // Resolve language-specific import paths and add import edges
         let mut resolvers = HashMap::new();
         for lang in crate::language::LangId::all() {
             resolvers.insert(lang, crate::language::import_resolver::make_resolver(lang));
@@ -406,7 +495,7 @@ impl GraphBuilder {
             }
         }
 
-        // Phase 5: cross-file reference resolution via FlattenedScopeCache
+        // Cross-file reference resolution via FlattenedScopeCache
         let import_adjacency = builder.import_adjacency();
         let ctx = crate::graph::resolver::ResolutionContext::from_extractions(
             extractions,
@@ -424,7 +513,7 @@ impl GraphBuilder {
             builder.add_reference(from, to, confidence);
         }
 
-        // Phase 6: finalize and compute SCC
+        // Finalize and compute SCC
         let graph = builder.build();
         let scc = crate::graph::SccAnalysis::analyze(&graph.graph);
 
@@ -578,6 +667,10 @@ mod tests {
             ast_node_count: 0,
             #[cfg(feature = "metacall-deploy")]
             call_sites: vec![],
+            #[cfg(feature = "dataflow")]
+            data_nodes: vec![],
+            #[cfg(feature = "dataflow")]
+            flow_edges: vec![],
         }];
         let mut diags = Vec::new();
         let (graph, _scc) = GraphBuilder::from_extractions(
@@ -637,6 +730,10 @@ mod tests {
             ast_node_count: 0,
             #[cfg(feature = "metacall-deploy")]
             call_sites: vec![],
+            #[cfg(feature = "dataflow")]
+            data_nodes: vec![],
+            #[cfg(feature = "dataflow")]
+            flow_edges: vec![],
         }];
         let mut diags = Vec::new();
         let (_graph, _scc) = GraphBuilder::from_extractions(
@@ -674,6 +771,10 @@ mod tests {
                 ast_node_count: 0,
                 #[cfg(feature = "metacall-deploy")]
                 call_sites: vec![],
+                #[cfg(feature = "dataflow")]
+                data_nodes: vec![],
+                #[cfg(feature = "dataflow")]
+                flow_edges: vec![],
             },
             FileExtraction {
                 path: PathBuf::from("/proj/b.py"),
@@ -685,6 +786,10 @@ mod tests {
                 ast_node_count: 0,
                 #[cfg(feature = "metacall-deploy")]
                 call_sites: vec![],
+                #[cfg(feature = "dataflow")]
+                data_nodes: vec![],
+                #[cfg(feature = "dataflow")]
+                flow_edges: vec![],
             },
         ];
         let mut diags = Vec::new();

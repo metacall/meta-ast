@@ -64,6 +64,7 @@ tempfile = "3.27"
 [features]
 default = []
 metacall-deploy = []
+dataflow = []
 
 [profile.bench]
 opt-level = 3

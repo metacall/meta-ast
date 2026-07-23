@@ -11,7 +11,7 @@ pub fn to_graph_html(
     scc_analysis: &SccAnalysis,
     snapshot_id: u64,
 ) -> anyhow::Result<String> {
-    let graph_output = GraphOutput::from_graph(graph, scc_analysis, snapshot_id);
+    let graph_output = GraphOutput::from_graph(graph, Some(scc_analysis), snapshot_id);
     let json_data = serde_json::to_string(&graph_output)?;
 
     let html = HTML_TEMPLATE

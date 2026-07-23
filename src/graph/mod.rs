@@ -40,7 +40,9 @@ use std::collections::HashMap;
 
 pub use builder::GraphBuilder;
 pub use edge::{EdgeData, EdgeKind};
-pub use node::{ExternalClassification, ExternalNode, FileNode, NodeData, SymbolNode};
+pub use node::{
+    DataGraphNode, ExternalClassification, ExternalNode, FileNode, NodeData, SymbolNode,
+};
 pub use scc::{DeployabilityHint, Scc, SccAnalysis};
 
 use crate::language::LangId;
@@ -141,9 +143,50 @@ impl CodeGraph {
             }
             edge_idx = self.graph.next_edge(e, petgraph::Direction::Outgoing);
         }
-        self.graph
-            .add_edge(source, target, EdgeData { kind, confidence });
+        self.graph.add_edge(
+            source,
+            target,
+            EdgeData {
+                kind,
+                confidence,
+                flow_kind: None,
+            },
+        );
     }
+
+    /// Adds a Flow edge with a specific flow kind, normalizing duplicates by
+    /// max-merging confidence (same (src, dst, Flow) triple).
+    pub fn add_edge_normalized_with_flow(
+        &mut self,
+        source: NodeIndex,
+        target: NodeIndex,
+        kind: EdgeKind,
+        confidence: f32,
+        flow_kind: Option<crate::model::FlowKind>,
+    ) {
+        let mut edge_idx = self.graph.first_edge(source, petgraph::Direction::Outgoing);
+        while let Some(e) = edge_idx {
+            let (_src, dst) = self.graph.edge_endpoints(e).unwrap();
+            if dst == target && self.graph[e].kind == kind {
+                self.graph[e].confidence = self.graph[e].confidence.max(confidence);
+                if flow_kind.is_some() {
+                    self.graph[e].flow_kind = flow_kind;
+                }
+                return;
+            }
+            edge_idx = self.graph.next_edge(e, petgraph::Direction::Outgoing);
+        }
+        self.graph.add_edge(
+            source,
+            target,
+            EdgeData {
+                kind,
+                confidence,
+                flow_kind,
+            },
+        );
+    }
+
     pub fn files(&self) -> impl Iterator<Item = (FileId, &FileNode)> + '_ {
         self.file_to_index.iter().filter_map(|(file_id, &idx)| {
             self.graph

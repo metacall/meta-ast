@@ -25,6 +25,7 @@ macro_rules! define_id_type {
 define_id_type!(FileId);
 define_id_type!(SymbolId);
 define_id_type!(SnapshotId);
+define_id_type!(DataNodeId);
 
 #[derive(Debug)]
 pub struct IdGenerator<T> {
@@ -68,6 +69,12 @@ impl From<u32> for SymbolId {
 }
 
 impl From<u32> for SnapshotId {
+    fn from(val: u32) -> Self {
+        Self(val)
+    }
+}
+
+impl From<u32> for DataNodeId {
     fn from(val: u32) -> Self {
         Self(val)
     }

@@ -75,11 +75,11 @@ impl SccAnalysis {
     /// Uses an `EdgeFiltered` view instead of cloning the graph - zero-cost,
     /// no allocation for the subgraph.
     pub fn analyze(graph: &DiGraph<NodeData, EdgeData>) -> Self {
-        // Zero-cost view that excludes ownership edges - no graph cloning.
+        // Zero-cost view that excludes non-dependency edges (Ownership, Flow).
         let dep_view = EdgeFiltered::from_fn(
             graph,
             |edge: petgraph::graph::EdgeReference<'_, EdgeData>| {
-                edge.weight().kind != EdgeKind::Ownership
+                edge.weight().kind.participates_in_scc()
             },
         );
 
@@ -248,10 +248,7 @@ mod tests {
     }
 
     fn make_edge(kind: EdgeKind) -> EdgeData {
-        EdgeData {
-            kind,
-            confidence: 1.0,
-        }
+        EdgeData::new(kind)
     }
 
     #[test]

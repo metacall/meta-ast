@@ -106,6 +106,7 @@ pub fn generate_pod_manifest(
                 crate::graph::EdgeKind::Import => "import".to_string(),
                 crate::graph::EdgeKind::Reference => "reference".to_string(),
                 crate::graph::EdgeKind::Ownership => "ownership".to_string(),
+                crate::graph::EdgeKind::Flow => "flow".to_string(),
             };
             let annotation = cut_lookup
                 .get(&(ip.from_pod, ip.to_pod))

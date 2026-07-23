@@ -75,6 +75,11 @@ pub struct GraphArgs {
     /// Generate an interactive HTML dashboard with graph visualization
     #[arg(long)]
     pub html: bool,
+
+    /// Also emit a portable datagraph.json export (requires --features dataflow)
+    #[cfg(feature = "dataflow")]
+    #[arg(long)]
+    pub datagraph: bool,
 }
 
 #[cfg(feature = "metacall-deploy")]

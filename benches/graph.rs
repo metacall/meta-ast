@@ -439,6 +439,106 @@ fn bench_ownership_graph_only(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark DataGraphExport serialization at scale.
+fn bench_datagraph_export(c: &mut Criterion) {
+    let mut group = c.benchmark_group("datagraph_export");
+
+    for size in [50, 100, 500, 1000].iter() {
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
+            let mut builder = GraphBuilder::new(SnapshotId(1));
+            for i in 0..size {
+                let path = format!("src/file_{}.rs", i);
+                let file_id = builder.add_file(PathBuf::from(&path), LangId::Rust);
+                let sym = create_test_symbol(i as u32, &format!("func_{}", i), &path);
+                builder.add_symbol(&sym).unwrap();
+                if i > 0 {
+                    builder.add_import(file_id, PathBuf::from(format!("src/file_{}.rs", i - 1)));
+                }
+            }
+            let graph = builder.build();
+            b.iter(|| {
+                let export =
+                    meta_ast::output::graph::GraphOutput::from_graph(black_box(&graph), None, 1);
+                black_box(export.nodes.len());
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark full extraction + datagraph export pipeline.
+fn bench_full_datagraph_pipeline(c: &mut Criterion) {
+    let mut group = c.benchmark_group("datagraph_pipeline");
+    group.sample_size(10);
+
+    let files =
+        meta_ast::input::discover_files(std::path::Path::new("tests/fixtures/python"), None)
+            .unwrap_or_default();
+
+    if !files.is_empty() {
+        group.bench_function("python_to_datagraph", |b| {
+            b.iter(|| {
+                let extraction = meta_ast::extractor::extract(black_box(&files));
+                let mut builder = GraphBuilder::new(SnapshotId(1));
+                for (path, lang) in &files {
+                    builder.add_file(path.clone(), *lang);
+                }
+                for symbol in extraction.files.iter().flat_map(|f| &f.symbols) {
+                    let _ = builder.add_symbol(symbol);
+                }
+                let graph = builder.build();
+                let export = meta_ast::output::graph::GraphOutput::from_graph(&graph, None, 1);
+                black_box((export.metadata.node_count, export.metadata.edge_count));
+            });
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark adding Data nodes and Flow edges to the graph.
+fn bench_dataflow_nodes_and_edges(c: &mut Criterion) {
+    let mut group = c.benchmark_group("dataflow_nodes_edges");
+
+    for size in [100, 1000, 5000].iter() {
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
+            b.iter(|| {
+                let mut graph = meta_ast::graph::CodeGraph::new(SnapshotId(1));
+                let mut node_indices = Vec::with_capacity(size);
+                for i in 0..size {
+                    let dnode = NodeData::Data(meta_ast::graph::node::DataGraphNode {
+                        id: meta_ast::model::DataNodeId(i as u32),
+                        symbol_id: None,
+                        name: Some(format!("v_{}", i)),
+                        scope: meta_ast::model::DataScope::Local,
+                        type_hint: None,
+                        source_range: SourceRange {
+                            byte_start: 0,
+                            byte_end: 0,
+                            start: LineColumn { line: 0, column: 0 },
+                            end: LineColumn { line: 0, column: 0 },
+                        },
+                    });
+                    let idx = graph.graph.add_node(dnode);
+                    node_indices.push(idx);
+                }
+                for i in 0..(size - 1) {
+                    graph.add_edge_normalized(
+                        node_indices[i],
+                        node_indices[i + 1],
+                        EdgeKind::Flow,
+                        1.0,
+                    );
+                }
+                black_box((graph.node_count(), graph.edge_count()));
+            });
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     graph_benches,
     bench_graph_construction_linear,
@@ -450,5 +550,8 @@ criterion_group!(
     bench_node_lookup,
     bench_full_pipeline_small,
     bench_ownership_graph_only,
+    bench_datagraph_export,
+    bench_full_datagraph_pipeline,
+    bench_dataflow_nodes_and_edges,
 );
 criterion_main!(graph_benches);

@@ -14,13 +14,14 @@ src/
 ├── pipeline.rs               Full graph analysis orchestration
 │
 ├── model/
-│   ├── mod.rs                Symbol, SymbolKind, SourceRange, UnresolvedImport, UnresolvedReference, FileExtraction
-│   ├── ids.rs                FileId, SymbolId, SnapshotId (newtyped u32 via define_id_type! macro)
+│   ├── mod.rs                Symbol, SymbolKind, SourceRange, UnresolvedImport, UnresolvedReference, FileExtraction, DataNode, DataScope, FlowEdge, FlowKind (feature: dataflow)
+│   ├── ids.rs                FileId, SymbolId, SnapshotId, DataNodeId (newtyped u32 via define_id_type! macro)
 │   └── output.rs             InspectOutput, FuncEntry, ClassEntry, ObjectEntry
 │
 ├── language/
 │   ├── mod.rs                LangId enum, LanguageSpec struct, DefaultVisibility, DocCommentConfig
 │   ├── common.rs             extract_with_spec, extract_imports_and_references_with_spec, associate_docstrings
+│   ├── dataflow.rs           extract_dataflow() dispatcher (feature: dataflow; Rust impl in rust.rs)
 │   ├── python.rs             Python queries + extraction
 │   ├── javascript.rs         JavaScript queries + extraction
 │   ├── typescript.rs         TypeScript queries + extraction
@@ -41,10 +42,10 @@ src/
 │   └── mod.rs                Pipeline orchestration: parallel parse + extract per-file (symbols + imports + references)
 │
 ├── graph/
-│   ├── mod.rs                DiGraph construction, node/edge types, re-exports
-│   ├── node.rs               NodeData enum (File / Symbol / External)
-│   ├── edge.rs               EdgeKind enum (Ownership / Import / Reference) with confidence
-│   ├── builder.rs            GraphBuilder, from_extractions, import_adjacency, external_index
+│   ├── mod.rs                CodeGraph (DiGraph), add_edge_normalized_with_flow, re-exports
+│   ├── node.rs               NodeData enum (File / Symbol / External / Data)
+│   ├── edge.rs               EdgeKind enum (Ownership / Import / Reference / Flow) with confidence + flow_kind
+│   ├── builder.rs            GraphBuilder, from_extractions, add_data_node, add_flow_edge, import_adjacency
 │   ├── scc.rs                Tarjan SCC + DeployabilityHint
 │   └── resolver.rs           FlattenedScopeCache, ResolutionContext, resolve_all_references
 │
@@ -52,13 +53,15 @@ src/
 │   ├── mod.rs                OutputFormat enum (Json / Yaml) with serialize dispatch
 │   ├── emitter.rs            EmitConfig, emit_inspect(), emit_graph() - CLI output dispatch
 │   ├── inspect.rs            Inspect-compatible JSON/YAML emission
-│   ├── graph.rs              GraphOutput + SCC serialization (metadata, nodes, edges, sccs)
+│   ├── graph.rs              Unified GraphOutput (schema_version, metadata, nodes, edges, sccs, deployability)
 │   └── dashboard.rs          Interactive HTML dashboard (Cytoscape.js via CDN, --html)
 │
-└── interface/
-    ├── mod.rs                CLI module root
-    └── args.rs               Clap derive structs (Inspect, Graph, Deploy + --format, --html)
+└── sink/                     [feature: dataflow] GraphSink trait + JsonSink
+    └── mod.rs                GraphSink trait, JsonSink (file/stdout)
 │
+└── interface/                CLI layer
+    ├── mod.rs                CLI module root
+    └── args.rs               Clap derive structs (Inspect, Graph, Deploy + --format, --html, --datagraph)
 └── deploy/                   [feature: metacall-deploy] See docs/DEPLOY.md
     ├── mod.rs                Entry: run_deploy(), DeployConfig, add_metacall_edge()
     ├── scanner.rs            tree-sitter call-site detection, CallSite, CallSiteVariant, confidence
@@ -84,6 +87,7 @@ CLI (interface/)
     → Input (input/)         → depends on language (detection)
   → Output (output/)         → depends on model + graph
   → Deploy (deploy/)         → depends on pipeline + graph + input [feature: metacall-deploy]
+  → Sink (sink/)             → depends on output/graph [feature: dataflow]
   → Error (error.rs)         ← cross-cutting
 ```
 

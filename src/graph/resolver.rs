@@ -506,6 +506,10 @@ mod tests {
             ast_node_count: 0,
             #[cfg(feature = "metacall-deploy")]
             call_sites: vec![],
+            #[cfg(feature = "dataflow")]
+            data_nodes: vec![],
+            #[cfg(feature = "dataflow")]
+            flow_edges: vec![],
         };
 
         let mut path_to_file_id = HashMap::new();
@@ -588,6 +592,10 @@ mod tests {
             ast_node_count: 0,
             #[cfg(feature = "metacall-deploy")]
             call_sites: vec![],
+            #[cfg(feature = "dataflow")]
+            data_nodes: vec![],
+            #[cfg(feature = "dataflow")]
+            flow_edges: vec![],
         };
 
         let mut path_to_file_id = HashMap::new();
