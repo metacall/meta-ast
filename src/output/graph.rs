@@ -277,7 +277,7 @@ impl GraphOutput {
                 };
 
                 let flow_kind = if edge_data.kind == EdgeKind::Flow {
-                    edge_data.flow_kind.map(|fk| format!("{:?}", fk))
+                    edge_data.flow_kind.map(|fk| fk.as_str().to_string())
                 } else {
                     None
                 };
@@ -511,7 +511,7 @@ mod tests {
         assert_eq!(output.edges.len(), 1);
         assert_eq!(output.edges[0].kind, "flow");
         assert_eq!(output.edges[0].confidence, Some(0.9));
-        assert_eq!(output.edges[0].flow_kind.as_deref(), Some("Argument"));
+        assert_eq!(output.edges[0].flow_kind.as_deref(), Some("argument"));
     }
 
     #[test]

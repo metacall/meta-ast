@@ -155,6 +155,17 @@ pub enum FlowKind {
     FieldAccess,
 }
 
+impl FlowKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FlowKind::DefUse => "def_use",
+            FlowKind::Argument => "argument",
+            FlowKind::Return => "return",
+            FlowKind::FieldAccess => "field_access",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,6 +332,14 @@ mod tests {
             serde_json::to_string(&DataScope::Parameter).unwrap(),
             "\"Parameter\""
         );
+    }
+
+    #[test]
+    fn flow_kind_as_str_all_variants() {
+        assert_eq!(FlowKind::DefUse.as_str(), "def_use");
+        assert_eq!(FlowKind::Argument.as_str(), "argument");
+        assert_eq!(FlowKind::Return.as_str(), "return");
+        assert_eq!(FlowKind::FieldAccess.as_str(), "field_access");
     }
 
     #[test]

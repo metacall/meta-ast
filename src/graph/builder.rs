@@ -155,6 +155,10 @@ impl GraphBuilder {
     ///
     /// Returns the NodeIndex for the data node. Idempotent: returns
     /// the existing index if a data node with the same DataNodeId exists.
+    ///
+    /// When the data node has a `symbol_id` that resolves to an existing
+    /// SymbolNode in the graph, an Ownership edge is created from the
+    /// symbol to the data node.
     #[cfg(feature = "dataflow")]
     pub fn add_data_node(&mut self, data_node: &crate::model::DataNode) -> NodeIndex {
         if let Some(&existing) = self.data_to_index.get(&data_node.id) {
@@ -170,6 +174,13 @@ impl GraphBuilder {
         };
         let idx = self.graph.add_node(NodeData::Data(node));
         self.data_to_index.insert(data_node.id, idx);
+
+        if let Some(symbol_id) = data_node.symbol_id
+            && let Some(&sym_idx) = self.symbol_to_index.get(&symbol_id)
+        {
+            self.add_edge_internal(sym_idx, idx, EdgeKind::Ownership, 1.0);
+        }
+
         idx
     }
 
@@ -297,7 +308,7 @@ impl GraphBuilder {
             if let Some(edge_idx) = self.graph.find_edge(source, target) {
                 let edge = &mut self.graph[edge_idx];
                 edge.confidence = edge.confidence.max(confidence);
-                if flow_kind.is_some() {
+                if edge.flow_kind.is_none() {
                     edge.flow_kind = flow_kind;
                 }
             }
@@ -807,6 +818,55 @@ mod tests {
             import_edges.len(),
             1,
             "expected import edge from a.py to b.py"
+        );
+    }
+
+    #[cfg(feature = "dataflow")]
+    #[test]
+    fn add_data_node_creates_ownership_edge_to_symbol() {
+        use crate::model::{DataNode, DataNodeId, DataScope};
+        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let file_path = PathBuf::from("test.rs");
+        let _file_id = builder.add_file(file_path.clone(), LangId::Rust);
+        let sym = Symbol {
+            id: SymbolId(1),
+            name: "my_fn".into(),
+            kind: SymbolKind::Function,
+            language: LangId::Rust,
+            file_path,
+            source_range: test_source_range(),
+            visibility: Some(Visibility::Public),
+            signature: None,
+            docstring: None,
+            is_async: false,
+        };
+        let sym_idx = builder.add_symbol(&sym).unwrap();
+
+        let data = DataNode {
+            id: DataNodeId(1),
+            symbol_id: Some(SymbolId(1)),
+            name: Some("x".into()),
+            scope: DataScope::Local,
+            type_hint: Some("i32".into()),
+            source_range: test_source_range(),
+        };
+        builder.add_data_node(&data);
+
+        let graph = builder.build();
+        let ownership_edges: Vec<_> = graph.edges_of_kind(EdgeKind::Ownership).collect();
+        assert_eq!(
+            ownership_edges.len(),
+            2,
+            "expected file→symbol and symbol→data ownership edges"
+        );
+
+        let data_ownership_edges: Vec<_> = ownership_edges
+            .into_iter()
+            .filter(|(src, _)| *src == sym_idx)
+            .collect();
+        assert!(
+            !data_ownership_edges.is_empty(),
+            "expected symbol→data ownership edge"
         );
     }
 }

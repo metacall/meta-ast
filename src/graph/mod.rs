@@ -155,7 +155,8 @@ impl CodeGraph {
     }
 
     /// Adds a Flow edge with a specific flow kind, normalizing duplicates by
-    /// max-merging confidence (same (src, dst, Flow) triple).
+    /// max-merging confidence (same (src, dst, Flow) triple). When a duplicate
+    /// edge exists, the first non-None `flow_kind` is preserved.
     pub fn add_edge_normalized_with_flow(
         &mut self,
         source: NodeIndex,
@@ -169,7 +170,7 @@ impl CodeGraph {
             let (_src, dst) = self.graph.edge_endpoints(e).unwrap();
             if dst == target && self.graph[e].kind == kind {
                 self.graph[e].confidence = self.graph[e].confidence.max(confidence);
-                if flow_kind.is_some() {
+                if self.graph[e].flow_kind.is_none() {
                     self.graph[e].flow_kind = flow_kind;
                 }
                 return;
@@ -375,5 +376,35 @@ mod tests {
             "Expected 1 Reference edge, but found {ref_count}"
         );
         assert_eq!(graph.edge_count(), 2);
+    }
+
+    #[test]
+    fn add_edge_normalized_with_flow_preserves_first_flow_kind() {
+        use crate::model::{DataNodeId, DataScope, FlowKind};
+        let mut graph = CodeGraph::new(SnapshotId(1));
+        let n1 = graph.graph.add_node(NodeData::Data(DataGraphNode {
+            id: DataNodeId(1),
+            symbol_id: None,
+            name: Some("x".into()),
+            scope: DataScope::Local,
+            type_hint: None,
+            source_range: test_range(),
+        }));
+        let n2 = graph.graph.add_node(NodeData::Data(DataGraphNode {
+            id: DataNodeId(2),
+            symbol_id: None,
+            name: Some("y".into()),
+            scope: DataScope::Local,
+            type_hint: None,
+            source_range: test_range(),
+        }));
+
+        graph.add_edge_normalized_with_flow(n1, n2, EdgeKind::Flow, 0.9, Some(FlowKind::DefUse));
+        graph.add_edge_normalized_with_flow(n1, n2, EdgeKind::Flow, 0.8, Some(FlowKind::Argument));
+
+        assert_eq!(graph.edge_count(), 1);
+        let edge = graph.graph.edges_connecting(n1, n2).next().unwrap();
+        assert_eq!(edge.weight().flow_kind, Some(FlowKind::DefUse));
+        assert_eq!(edge.weight().confidence, 0.9);
     }
 }
