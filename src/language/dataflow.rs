@@ -12,7 +12,7 @@
 //! | Language   | Status       |
 //! |------------|--------------|
 //! | Rust       | Implemented  |
-//! | Python     | TODO         |
+//! | Python     | Implemented  |
 //! | JS/TS/TSX  | TODO         |
 //! | Go         | TODO         |
 //! | C/C++      | TODO         |
