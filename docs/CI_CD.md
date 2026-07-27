@@ -66,7 +66,7 @@ Any change that touches output contract, graph semantics, or language extraction
 
 ## 10. Toolchain configuration
 
-- `rust-toolchain.toml` pins channel `1.92.0` with `rustfmt` and `clippy` components.
+- `rust-toolchain.toml` pins channel `1.94.0` with `rustfmt` and `clippy` components.
 - `deny.toml` enforces license allowlist (MIT, Apache-2.0, BSD, ISC, etc.) and bans wildcard dependencies.
 - `clippy.toml` sets MSRV and complexity thresholds.
 - `rustfmt.toml` sets edition 2024 formatting rules.

@@ -435,7 +435,7 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 
 | Feature | Usage |
 |---------|-------|
-| Edition 2024 | MSRV 1.92.0 |
+| Edition 2024 | MSRV 1.94.0 |
 | `#[non_exhaustive]` | All public enums (`LangId`, `SymbolKind`, `Visibility`, `Severity`) |
 | Newtype pattern | `FileId`, `SymbolId`, `SnapshotId` via `define_id_type!` macro |
 | `impl From<X> for Error` | Automatic error conversion for `?` propagation |

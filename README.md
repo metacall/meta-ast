@@ -222,7 +222,7 @@ with that corpus. Typical wall-clock figures (your hardware will vary):
 - SCC and node lookup stay sub-millisecond into the thousands-of-nodes range;
   edge deduplication is linear in the duplicate count.
 
-For reproducible CI numbers, pin the toolchain (MSRV 1.92.0) and run on a
+For reproducible CI numbers, pin the toolchain (MSRV 1.94.0) and run on a
 quiet machine; criterion reports mean/stddev and supports `--save-baseline` for
 regression tracking.
 
