@@ -50,7 +50,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Cli::Graph(args) => {
-            let snapshot_id = SnapshotId(1);
+            let snapshot_id = SnapshotId::new(1).unwrap();
             let (analysis, diags) = meta_ast::pipeline::analyze_graph(&args.path, snapshot_id)?;
 
             for diag in &diags {
@@ -88,7 +88,7 @@ fn main() -> anyhow::Result<()> {
                 let export = meta_ast::output::graph::GraphOutput::from_graph(
                     &analysis.graph,
                     Some(&analysis.scc),
-                    analysis.snapshot_id.0 as u64,
+                    analysis.snapshot_id.to_raw() as u64,
                 );
                 tracing::info!(
                     schema_version = export.schema_version,

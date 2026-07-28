@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 fn sample_symbol(id: u32, name: &str, kind: SymbolKind) -> Symbol {
     Symbol {
-        id: SymbolId(id),
+        id: SymbolId::new(id).unwrap(),
         name: name.to_string(),
         kind,
         language: LangId::Python,
@@ -61,7 +61,7 @@ fn yaml_serialize_graph_output() {
     use meta_ast::graph::scc::SccAnalysis;
     use meta_ast::model::SnapshotId;
 
-    let mut builder = GraphBuilder::new(SnapshotId(1));
+    let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
     let file_path = PathBuf::from("test.py");
     builder.add_file(file_path.clone(), LangId::Python);
     let sym = sample_symbol(1, "main", SymbolKind::Function);

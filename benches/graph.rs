@@ -20,7 +20,7 @@ use std::hint::black_box;
 /// Create a test symbol with the given ID and name.
 fn create_test_symbol(id: u32, name: &str, file_path: &str) -> Symbol {
     Symbol {
-        id: SymbolId(id),
+        id: SymbolId::new(id).unwrap(),
         name: name.to_string(),
         kind: SymbolKind::Function,
         language: LangId::Rust,
@@ -45,10 +45,10 @@ fn create_test_symbol(id: u32, name: &str, file_path: &str) -> Symbol {
 fn create_test_file_node(id: u32, path: &str) -> FileNode {
     use meta_ast::model::ids::FileId;
     FileNode {
-        id: FileId(id),
+        id: FileId::new(id).unwrap(),
         path: PathBuf::from(path),
         language: LangId::Rust,
-        snapshot_id: SnapshotId(1),
+        snapshot_id: SnapshotId::new(1).unwrap(),
     }
 }
 
@@ -59,7 +59,7 @@ fn bench_graph_construction_linear(c: &mut Criterion) {
     for size in [10, 50, 100, 500, 1000].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
-                let mut builder = GraphBuilder::new(SnapshotId(1));
+                let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
 
                 // Add files
                 for i in 0..size {
@@ -70,7 +70,7 @@ fn bench_graph_construction_linear(c: &mut Criterion) {
                 // Add symbols (ownership edges) - match file paths
                 for i in 0..size {
                     let path = format!("src/file_{}.rs", i);
-                    let symbol = create_test_symbol(i as u32, &format!("func_{}", i), &path);
+                    let symbol = create_test_symbol((i + 1) as u32, &format!("func_{}", i), &path);
                     builder.add_symbol(&symbol).unwrap();
                 }
 
@@ -95,13 +95,16 @@ fn bench_scc_acyclic_chain(c: &mut Criterion) {
             // Create nodes
             for i in 0..size {
                 let node = if i % 2 == 0 {
-                    NodeData::File(create_test_file_node(i as u32, &format!("file_{}.rs", i)))
+                    NodeData::File(create_test_file_node(
+                        (i + 1) as u32,
+                        &format!("file_{}.rs", i),
+                    ))
                 } else {
                     NodeData::Symbol(SymbolNode {
-                        id: SymbolId(i as u32),
+                        id: SymbolId::new(i as u32 + 1).unwrap(),
                         name: format!("symbol_{}", i),
                         kind: SymbolKind::Function,
-                        file_id: meta_ast::model::ids::FileId(0),
+                        file_id: meta_ast::model::ids::FileId::new(1).unwrap(),
                         visibility: Some(Visibility::Public),
                         source_range: SourceRange {
                             byte_start: 0,
@@ -145,10 +148,10 @@ fn bench_scc_single_cycle(c: &mut Criterion) {
             // Create symbol nodes
             for i in 0..size {
                 let node = NodeData::Symbol(SymbolNode {
-                    id: SymbolId(i as u32),
+                    id: SymbolId::new(i as u32 + 1).unwrap(),
                     name: format!("symbol_{}", i),
                     kind: SymbolKind::Function,
-                    file_id: meta_ast::model::ids::FileId(0),
+                    file_id: meta_ast::model::ids::FileId::new(1).unwrap(),
                     visibility: Some(Visibility::Public),
                     source_range: SourceRange {
                         byte_start: 0,
@@ -201,10 +204,10 @@ fn bench_scc_multiple_cycles(c: &mut Criterion) {
                     for i in 0..cycle_size {
                         let global_id = (c * cycle_size + i) as u32;
                         let node = NodeData::Symbol(SymbolNode {
-                            id: SymbolId(global_id),
+                            id: SymbolId::new(global_id + 1).unwrap(),
                             name: format!("cycle{}_node{}", c, i),
                             kind: SymbolKind::Function,
-                            file_id: meta_ast::model::ids::FileId(c as u32),
+                            file_id: meta_ast::model::ids::FileId::new(c as u32 + 1).unwrap(),
                             visibility: Some(Visibility::Public),
                             source_range: SourceRange {
                                 byte_start: 0,
@@ -253,10 +256,10 @@ fn bench_scc_dense_graph(c: &mut Criterion) {
             // Create nodes
             for i in 0..size {
                 let node = NodeData::Symbol(SymbolNode {
-                    id: SymbolId(i as u32),
+                    id: SymbolId::new(i as u32 + 1).unwrap(),
                     name: format!("node_{}", i),
                     kind: SymbolKind::Function,
-                    file_id: meta_ast::model::ids::FileId(0),
+                    file_id: meta_ast::model::ids::FileId::new(1).unwrap(),
                     visibility: Some(Visibility::Public),
                     source_range: SourceRange {
                         byte_start: 0,
@@ -300,7 +303,7 @@ fn bench_edge_deduplication(c: &mut Criterion) {
             duplicate_count,
             |b, &count| {
                 b.iter(|| {
-                    let mut builder = GraphBuilder::new(SnapshotId(1));
+                    let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
 
                     // Add two files
                     let file_a = builder.add_file(PathBuf::from("a.rs"), LangId::Rust);
@@ -327,16 +330,16 @@ fn bench_node_lookup(c: &mut Criterion) {
 
     for size in [100, 1000, 10000].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let mut builder = GraphBuilder::new(SnapshotId(1));
+            let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
             let mut symbol_ids = Vec::with_capacity(size);
 
             // Setup: create files and symbols
             let _file_id = builder.add_file(PathBuf::from("main.rs"), LangId::Rust);
 
             for i in 0..size {
-                let symbol = create_test_symbol(i as u32, &format!("func_{}", i), "main.rs");
+                let symbol = create_test_symbol((i + 1) as u32, &format!("func_{}", i), "main.rs");
                 builder.add_symbol(&symbol).unwrap();
-                symbol_ids.push(SymbolId(i as u32));
+                symbol_ids.push(SymbolId::new(i as u32 + 1).unwrap());
             }
 
             let graph = builder.build();
@@ -345,7 +348,7 @@ fn bench_node_lookup(c: &mut Criterion) {
                 // Random access pattern
                 let mut found = 0;
                 for i in (0..size).step_by(7) {
-                    if let Some(_node) = graph.symbol_node(SymbolId(i as u32)) {
+                    if let Some(_node) = graph.symbol_node(SymbolId::new(i as u32 + 1).unwrap()) {
                         found += 1;
                     }
                 }
@@ -371,7 +374,7 @@ fn bench_full_pipeline_small(c: &mut Criterion) {
         group.bench_function("python_extraction_to_scc", |b| {
             b.iter(|| {
                 // Build graph
-                let mut builder = GraphBuilder::new(SnapshotId(1));
+                let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
 
                 // Add files
                 for (path, lang) in &files {
@@ -411,7 +414,7 @@ fn bench_ownership_graph_only(c: &mut Criterion) {
     for size in [10, 100, 1000, 5000].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
-                let mut builder = GraphBuilder::new(SnapshotId(1));
+                let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
 
                 // Create files
                 for i in 0..10 {
@@ -423,7 +426,7 @@ fn bench_ownership_graph_only(c: &mut Criterion) {
                 for i in 0..size {
                     let file_idx = i % 10;
                     let symbol = create_test_symbol(
-                        i as u32,
+                        (i + 1) as u32,
                         &format!("func_{}", i),
                         &format!("src/module_{}.rs", file_idx),
                     );
@@ -445,11 +448,11 @@ fn bench_datagraph_export(c: &mut Criterion) {
 
     for size in [50, 100, 500, 1000].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let mut builder = GraphBuilder::new(SnapshotId(1));
+            let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
             for i in 0..size {
                 let path = format!("src/file_{}.rs", i);
                 let file_id = builder.add_file(PathBuf::from(&path), LangId::Rust);
-                let sym = create_test_symbol(i as u32, &format!("func_{}", i), &path);
+                let sym = create_test_symbol((i + 1) as u32, &format!("func_{}", i), &path);
                 builder.add_symbol(&sym).unwrap();
                 if i > 0 {
                     builder.add_import(file_id, PathBuf::from(format!("src/file_{}.rs", i - 1)));
@@ -480,7 +483,7 @@ fn bench_full_datagraph_pipeline(c: &mut Criterion) {
         group.bench_function("python_to_datagraph", |b| {
             b.iter(|| {
                 let extraction = meta_ast::extractor::extract(black_box(&files));
-                let mut builder = GraphBuilder::new(SnapshotId(1));
+                let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
                 for (path, lang) in &files {
                     builder.add_file(path.clone(), *lang);
                 }
@@ -504,11 +507,11 @@ fn bench_dataflow_nodes_and_edges(c: &mut Criterion) {
     for size in [100, 1000, 5000].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             b.iter(|| {
-                let mut graph = meta_ast::graph::CodeGraph::new(SnapshotId(1));
+                let mut graph = meta_ast::graph::CodeGraph::new(SnapshotId::new(1).unwrap());
                 let mut node_indices = Vec::with_capacity(size);
                 for i in 0..size {
                     let dnode = NodeData::Data(meta_ast::graph::node::DataGraphNode {
-                        id: meta_ast::model::DataNodeId(i as u32),
+                        id: meta_ast::model::DataNodeId::new(i as u32 + 1).unwrap(),
                         symbol_id: None,
                         name: Some(format!("v_{}", i)),
                         scope: meta_ast::model::DataScope::Local,

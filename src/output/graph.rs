@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn graph_output_with_file_node() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         builder.add_file(PathBuf::from("src/main.py"), LangId::Python);
         let graph = builder.build();
         let scc = sample_scc_analysis();
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn json_output_has_required_structure() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         builder.add_file(PathBuf::from("src/main.py"), LangId::Python);
         let graph = builder.build();
         let scc = sample_scc_analysis();
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn empty_graph_serializes() {
-        let builder = GraphBuilder::new(SnapshotId(1));
+        let builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let graph = builder.build();
         let scc = sample_scc_analysis();
 
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn scc_fields_serialize() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         builder.add_file(PathBuf::from("a.py"), LangId::Python);
         builder.add_file(PathBuf::from("b.py"), LangId::Python);
         let graph = builder.build();
@@ -456,9 +456,9 @@ mod tests {
     #[test]
     fn data_node_serializes_with_correct_fields() {
         use crate::graph::node::DataGraphNode;
-        let mut graph = CodeGraph::new(SnapshotId(1));
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
         let dnode = DataGraphNode {
-            id: DataNodeId(10),
+            id: DataNodeId::new(10).unwrap(),
             symbol_id: None,
             name: Some("local_var".into()),
             scope: DataScope::Local,
@@ -481,9 +481,9 @@ mod tests {
     #[test]
     fn flow_edge_serializes_with_flow_kind() {
         use crate::graph::node::DataGraphNode;
-        let mut graph = CodeGraph::new(SnapshotId(1));
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
         let src = graph.graph.add_node(NodeData::Data(DataGraphNode {
-            id: DataNodeId(1),
+            id: DataNodeId::new(1).unwrap(),
             symbol_id: None,
             name: Some("x".into()),
             scope: DataScope::Local,
@@ -491,7 +491,7 @@ mod tests {
             source_range: sample_source_range(),
         }));
         let dst = graph.graph.add_node(NodeData::Data(DataGraphNode {
-            id: DataNodeId(2),
+            id: DataNodeId::new(2).unwrap(),
             symbol_id: None,
             name: Some("y".into()),
             scope: DataScope::Parameter,
@@ -517,9 +517,9 @@ mod tests {
     #[test]
     fn flow_edge_without_flow_kind_omits_field() {
         use crate::graph::node::DataGraphNode;
-        let mut graph = CodeGraph::new(SnapshotId(1));
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
         let src = graph.graph.add_node(NodeData::Data(DataGraphNode {
-            id: DataNodeId(1),
+            id: DataNodeId::new(1).unwrap(),
             symbol_id: None,
             name: Some("a".into()),
             scope: DataScope::Local,
@@ -527,7 +527,7 @@ mod tests {
             source_range: sample_source_range(),
         }));
         let dst = graph.graph.add_node(NodeData::Data(DataGraphNode {
-            id: DataNodeId(2),
+            id: DataNodeId::new(2).unwrap(),
             symbol_id: None,
             name: Some("b".into()),
             scope: DataScope::Local,
@@ -546,7 +546,7 @@ mod tests {
 
     #[test]
     fn light_mode_omits_scc_and_deployability() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         builder.add_file(PathBuf::from("main.rs"), LangId::Rust);
         let graph = builder.build();
 
@@ -563,10 +563,10 @@ mod tests {
     #[test]
     fn light_mode_with_symbol_node() {
         use crate::model::{Symbol, SymbolId, SymbolKind, Visibility};
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         builder.add_file(PathBuf::from("main.rs"), LangId::Rust);
         let sym = Symbol {
-            id: SymbolId(1),
+            id: SymbolId::new(1).unwrap(),
             name: "main_fn".into(),
             kind: SymbolKind::Function,
             language: LangId::Rust,
@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn has_all_required_keys() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         builder.add_file(PathBuf::from("main.rs"), LangId::Rust);
         let graph = builder.build();
 
@@ -605,7 +605,7 @@ mod tests {
 
     #[test]
     fn edge_kinds_are_valid() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let file_a = builder.add_file(PathBuf::from("a.py"), LangId::Python);
         let _file_b = builder.add_file(PathBuf::from("b.py"), LangId::Python);
         builder.add_import(file_a, PathBuf::from("b.py"));

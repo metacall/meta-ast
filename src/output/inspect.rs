@@ -72,7 +72,7 @@ mod tests {
 
     fn make_symbol(id: u32, name: &str, kind: SymbolKind) -> Symbol {
         Symbol {
-            id: SymbolId(id),
+            id: SymbolId::new(id).unwrap(),
             name: name.to_string(),
             kind,
             language: LangId::Python,

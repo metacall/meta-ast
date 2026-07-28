@@ -40,7 +40,7 @@ mod tests {
     #[test]
     fn json_sink_writes_to_file() {
         let temp = std::env::temp_dir().join("meta_ast_sink_test.json");
-        let builder = GraphBuilder::new(SnapshotId(1));
+        let builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let graph = builder.build();
         let export = GraphOutput::from_graph(&graph, None, 1);
 
@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn json_sink_prints_to_stdout() {
-        let builder = GraphBuilder::new(SnapshotId(1));
+        let builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let graph = builder.build();
         let export = GraphOutput::from_graph(&graph, None, 1);
 

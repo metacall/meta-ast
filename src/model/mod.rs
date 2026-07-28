@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn symbol_construction_all_fields() {
         let sym = Symbol {
-            id: SymbolId(42),
+            id: SymbolId::new(42).unwrap(),
             name: "my_func".into(),
             kind: SymbolKind::Function,
             language: LangId::Rust,
@@ -197,7 +197,7 @@ mod tests {
             docstring: Some("does a thing".into()),
             is_async: true,
         };
-        assert_eq!(sym.id, SymbolId(42));
+        assert_eq!(sym.id, SymbolId::new(42).unwrap());
         assert_eq!(sym.name, "my_func");
         assert!(matches!(sym.kind, SymbolKind::Function));
         assert_eq!(sym.language, LangId::Rust);
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn symbol_with_optional_fields_none() {
         let sym = Symbol {
-            id: SymbolId(1),
+            id: SymbolId::new(1).unwrap(),
             name: "x".into(),
             kind: SymbolKind::Constant,
             language: LangId::Python,
@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn symbol_serde_roundtrip() {
         let sym = Symbol {
-            id: SymbolId(7),
+            id: SymbolId::new(7).unwrap(),
             name: "roundtrip_fn".into(),
             kind: SymbolKind::Method,
             language: LangId::Go,
@@ -365,8 +365,8 @@ mod tests {
     #[test]
     fn data_node_construction_and_serde() {
         let data = DataNode {
-            id: DataNodeId(10),
-            symbol_id: Some(SymbolId(5)),
+            id: DataNodeId::new(10).unwrap(),
+            symbol_id: Some(SymbolId::new(5).unwrap()),
             name: Some("x".into()),
             scope: DataScope::Local,
             type_hint: Some("int".into()),
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn data_node_optional_fields_none() {
         let data = DataNode {
-            id: DataNodeId(0),
+            id: DataNodeId::new(1).unwrap(),
             symbol_id: None,
             name: None,
             scope: DataScope::Temporary,
@@ -397,8 +397,8 @@ mod tests {
     #[test]
     fn flow_edge_serde() {
         let edge = FlowEdge {
-            source: DataNodeId(1),
-            target: DataNodeId(2),
+            source: DataNodeId::new(1).unwrap(),
+            target: DataNodeId::new(2).unwrap(),
             kind: FlowKind::Argument,
             confidence: 0.85,
         };
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn data_node_id_serde_roundtrip() {
-        let original = DataNodeId(99);
+        let original = DataNodeId::new(99).unwrap();
         let json = serde_json::to_string(&original).unwrap();
         let roundtrip: DataNodeId = serde_json::from_str(&json).unwrap();
         assert_eq!(original, roundtrip);

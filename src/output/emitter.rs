@@ -41,7 +41,7 @@ pub fn emit_graph(analysis: &GraphAnalysis, config: &EmitConfig) -> anyhow::Resu
         let html = crate::output::dashboard::to_graph_html(
             &analysis.graph,
             &analysis.scc,
-            analysis.snapshot_id.0 as u64,
+            analysis.snapshot_id.to_raw() as u64,
         )?;
         let path = config
             .output
@@ -59,7 +59,7 @@ pub fn emit_graph(analysis: &GraphAnalysis, config: &EmitConfig) -> anyhow::Resu
         let content = crate::output::graph::serialize_graph(
             &analysis.graph,
             &analysis.scc,
-            analysis.snapshot_id.0 as u64,
+            analysis.snapshot_id.to_raw() as u64,
             &config.format,
         )?;
         match &config.output {
@@ -91,7 +91,7 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let file_path = temp_dir.join("output.json");
         let mut symbols = vec![Symbol {
-            id: SymbolId(1),
+            id: SymbolId::new(1).unwrap(),
             name: "test".into(),
             kind: SymbolKind::Function,
             language: LangId::Python,
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn emit_inspect_prints_to_stdout_when_no_path() {
         let mut symbols = vec![Symbol {
-            id: SymbolId(1),
+            id: SymbolId::new(1).unwrap(),
             name: "test".into(),
             kind: SymbolKind::Function,
             language: LangId::Python,
@@ -163,13 +163,13 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let file_path = temp_dir.join("graph.html");
 
-        let builder = GraphBuilder::new(SnapshotId(1));
+        let builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let graph = builder.build();
         let scc = SccAnalysis::analyze(&graph.graph);
         let analysis = GraphAnalysis {
             graph,
             scc,
-            snapshot_id: SnapshotId(1),
+            snapshot_id: SnapshotId::new(1).unwrap(),
             extractions: vec![],
         };
 
@@ -195,13 +195,13 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let file_path = temp_dir.join("graph.json");
 
-        let builder = GraphBuilder::new(SnapshotId(1));
+        let builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let graph = builder.build();
         let scc = SccAnalysis::analyze(&graph.graph);
         let analysis = GraphAnalysis {
             graph,
             scc,
-            snapshot_id: SnapshotId(1),
+            snapshot_id: SnapshotId::new(1).unwrap(),
             extractions: vec![],
         };
 
