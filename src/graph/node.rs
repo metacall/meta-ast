@@ -232,8 +232,8 @@ mod tests {
 
     #[test]
     fn file_node_creation() {
-        let file_id = FileId::from(0);
-        let snapshot_id = SnapshotId::from(1);
+        let file_id = FileId::new(1).unwrap();
+        let snapshot_id = SnapshotId::new(1).unwrap();
         let node = FileNode::new(file_id, test_path(), LangId::Rust, snapshot_id);
 
         assert_eq!(node.id, file_id);
@@ -245,10 +245,10 @@ mod tests {
     #[test]
     fn file_node_file_name() {
         let node = FileNode::new(
-            FileId::from(0),
+            FileId::new(1).unwrap(),
             PathBuf::from("src/main.rs"),
             LangId::Rust,
-            SnapshotId::from(0),
+            SnapshotId::new(1).unwrap(),
         );
         assert_eq!(node.file_name(), Some("main.rs"));
     }
@@ -256,10 +256,10 @@ mod tests {
     #[test]
     fn file_node_extension() {
         let node = FileNode::new(
-            FileId::from(0),
+            FileId::new(1).unwrap(),
             PathBuf::from("test.py"),
             LangId::Python,
-            SnapshotId::from(0),
+            SnapshotId::new(1).unwrap(),
         );
         assert_eq!(node.extension(), Some("py"));
     }
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn symbol_node_creation() {
         let symbol = crate::model::Symbol {
-            id: SymbolId::from(42),
+            id: SymbolId::new(42).unwrap(),
             name: "test_function".to_string(),
             kind: SymbolKind::Function,
             language: LangId::Rust,
@@ -279,10 +279,10 @@ mod tests {
             is_async: false,
         };
 
-        let file_id = FileId::from(7);
+        let file_id = FileId::new(7).unwrap();
         let node = SymbolNode::from_symbol(&symbol, file_id);
 
-        assert_eq!(node.id, SymbolId::from(42));
+        assert_eq!(node.id, SymbolId::new(42).unwrap());
         assert_eq!(node.name, "test_function");
         assert_eq!(node.kind, SymbolKind::Function);
         assert_eq!(node.file_id, file_id);
@@ -292,10 +292,10 @@ mod tests {
     #[test]
     fn node_data_file_variant() {
         let file_node = FileNode::new(
-            FileId::from(0),
+            FileId::new(1).unwrap(),
             test_path(),
             LangId::Rust,
-            SnapshotId::from(0),
+            SnapshotId::new(1).unwrap(),
         );
         let node_data = NodeData::File(file_node);
 
@@ -309,10 +309,10 @@ mod tests {
     #[test]
     fn node_data_symbol_variant() {
         let symbol_node = SymbolNode {
-            id: SymbolId::from(1),
+            id: SymbolId::new(1).unwrap(),
             name: "my_func".to_string(),
             kind: SymbolKind::Function,
-            file_id: FileId::from(0),
+            file_id: FileId::new(1).unwrap(),
             visibility: None,
             source_range: test_source_range(),
         };
@@ -329,7 +329,7 @@ mod tests {
     fn data_graph_node_from_model() {
         use crate::model::{DataNode, DataNodeId, DataScope};
         let data = DataNode {
-            id: DataNodeId(5),
+            id: DataNodeId::new(5).unwrap(),
             symbol_id: None,
             name: Some("var_x".into()),
             scope: DataScope::Local,
@@ -337,7 +337,7 @@ mod tests {
             source_range: test_source_range(),
         };
         let gnode = DataGraphNode::from_data_node(&data);
-        assert_eq!(gnode.id, DataNodeId(5));
+        assert_eq!(gnode.id, DataNodeId::new(5).unwrap());
         assert_eq!(gnode.name.as_deref(), Some("var_x"));
         assert_eq!(gnode.scope, DataScope::Local);
         assert_eq!(gnode.type_hint.as_deref(), Some("int"));
@@ -347,8 +347,8 @@ mod tests {
     #[test]
     fn node_data_data_variant() {
         let dnode = DataGraphNode {
-            id: crate::model::DataNodeId(1),
-            symbol_id: Some(SymbolId::from(3)),
+            id: crate::model::DataNodeId::new(1).unwrap(),
+            symbol_id: Some(SymbolId::new(3).unwrap()),
             name: Some("param".into()),
             scope: crate::model::DataScope::Parameter,
             type_hint: Some("str".into()),

@@ -17,8 +17,12 @@ fn datagraph_export_from_pipeline() {
 
     let result = meta_ast::extractor::extract(&files);
     let mut diags = Vec::new();
-    let (graph, _scc) =
-        GraphBuilder::from_extractions(&result.files, root, SnapshotId(1), &mut diags);
+    let (graph, _scc) = GraphBuilder::from_extractions(
+        &result.files,
+        root,
+        SnapshotId::new(1).unwrap(),
+        &mut diags,
+    );
 
     let export = GraphOutput::from_graph(&graph, None, 1);
     assert_eq!(export.schema_version, SCHEMA_VERSION);
@@ -40,8 +44,12 @@ fn datagraph_export_file_node_fields() {
     let files = meta_ast::input::discover_files(root, None).unwrap();
     let result = meta_ast::extractor::extract(&files);
     let mut diags = Vec::new();
-    let (graph, _scc) =
-        GraphBuilder::from_extractions(&result.files, root, SnapshotId(1), &mut diags);
+    let (graph, _scc) = GraphBuilder::from_extractions(
+        &result.files,
+        root,
+        SnapshotId::new(1).unwrap(),
+        &mut diags,
+    );
 
     let export = GraphOutput::from_graph(&graph, None, 1);
     let file_nodes: Vec<_> = export.nodes.iter().filter(|n| n.kind == "file").collect();
@@ -63,8 +71,12 @@ fn datagraph_export_symbol_node_fields() {
     let files = meta_ast::input::discover_files(root, None).unwrap();
     let result = meta_ast::extractor::extract(&files);
     let mut diags = Vec::new();
-    let (graph, _scc) =
-        GraphBuilder::from_extractions(&result.files, root, SnapshotId(1), &mut diags);
+    let (graph, _scc) = GraphBuilder::from_extractions(
+        &result.files,
+        root,
+        SnapshotId::new(1).unwrap(),
+        &mut diags,
+    );
 
     let export = GraphOutput::from_graph(&graph, None, 1);
     let symbol_nodes: Vec<_> = export.nodes.iter().filter(|n| n.kind == "symbol").collect();
@@ -92,8 +104,12 @@ fn datagraph_export_edges_have_required_fields() {
     let files = meta_ast::input::discover_files(root, None).unwrap();
     let result = meta_ast::extractor::extract(&files);
     let mut diags = Vec::new();
-    let (graph, _scc) =
-        GraphBuilder::from_extractions(&result.files, root, SnapshotId(1), &mut diags);
+    let (graph, _scc) = GraphBuilder::from_extractions(
+        &result.files,
+        root,
+        SnapshotId::new(1).unwrap(),
+        &mut diags,
+    );
 
     let export = GraphOutput::from_graph(&graph, None, 1);
     for edge in &export.edges {
@@ -115,8 +131,12 @@ fn datagraph_export_json_roundtrip() {
     let files = meta_ast::input::discover_files(root, None).unwrap();
     let result = meta_ast::extractor::extract(&files);
     let mut diags = Vec::new();
-    let (graph, _scc) =
-        GraphBuilder::from_extractions(&result.files, root, SnapshotId(1), &mut diags);
+    let (graph, _scc) = GraphBuilder::from_extractions(
+        &result.files,
+        root,
+        SnapshotId::new(1).unwrap(),
+        &mut diags,
+    );
 
     let export = GraphOutput::from_graph(&graph, None, 1);
     let json = serde_json::to_string_pretty(&export).unwrap();
@@ -138,8 +158,8 @@ fn datagraph_export_json_roundtrip() {
 
 #[test]
 fn snapshot_meta_has_schema_version() {
-    let meta = meta_ast::pipeline::snapshot_meta(SnapshotId(42));
-    assert_eq!(meta.id, SnapshotId(42));
+    let meta = meta_ast::pipeline::snapshot_meta(SnapshotId::new(42).unwrap());
+    assert_eq!(meta.id, SnapshotId::new(42).unwrap());
     assert_eq!(meta.datagraph_schema_version, SCHEMA_VERSION);
 }
 
@@ -169,8 +189,12 @@ fn sink_json_writes_datagraph_to_file() {
     let files = meta_ast::input::discover_files(root, None).unwrap();
     let result = meta_ast::extractor::extract(&files);
     let mut diags = Vec::new();
-    let (graph, _scc) =
-        GraphBuilder::from_extractions(&result.files, root, SnapshotId(1), &mut diags);
+    let (graph, _scc) = GraphBuilder::from_extractions(
+        &result.files,
+        root,
+        SnapshotId::new(1).unwrap(),
+        &mut diags,
+    );
     let export = GraphOutput::from_graph(&graph, None, 1);
 
     let temp = std::env::temp_dir().join("meta_ast_dg_integration.json");

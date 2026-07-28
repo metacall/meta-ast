@@ -134,8 +134,8 @@ pub fn find_cross_language_cuts(
                 from_pod,
                 to_pod,
                 annotation: CutAnnotation {
-                    from_file: src.0.to_string(),
-                    to_file: dst.0.to_string(),
+                    from_file: src.to_raw().to_string(),
+                    to_file: dst.to_raw().to_string(),
                     cut_reason: CutReason::CrossLanguageScc,
                     original_confidence: conf,
                 },
@@ -188,8 +188,8 @@ pub fn find_oversized_pod_cut(pod: &Pod, graph: &CodeGraph, max_size: usize) -> 
         from_pod: pod.id,
         to_pod: pod.id,
         annotation: CutAnnotation {
-            from_file: src.0.to_string(),
-            to_file: dst.0.to_string(),
+            from_file: src.to_raw().to_string(),
+            to_file: dst.to_raw().to_string(),
             cut_reason: CutReason::OversizedPod {
                 pod_size: pod.files.len(),
                 max_size,
@@ -216,15 +216,15 @@ mod tests {
     /// imports the next, plus a deliberately weak edge from the first to the
     /// last, to exercise `find_oversized_pod_cut`.
     fn build_chain_pod(n: usize) -> (Pod, CodeGraph) {
-        let mut graph = CodeGraph::new(SnapshotId(1));
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
         let mut fids = Vec::with_capacity(n);
         for i in 0..n {
-            let id = FileId(i as u32);
+            let id = FileId::new(i as u32 + 1).unwrap();
             let idx = graph.graph.add_node(NodeData::File(FileNode::new(
                 id,
                 PathBuf::from(format!("f{i}.py")),
                 LangId::Python,
-                SnapshotId(1),
+                SnapshotId::new(1).unwrap(),
             )));
             graph.file_to_index.insert(id, idx);
             fids.push(id);
@@ -282,20 +282,20 @@ mod tests {
 
     #[test]
     fn cross_language_cycle_produces_scc_cut() {
-        let mut graph = CodeGraph::new(SnapshotId(1));
-        let py_id = FileId(0);
-        let go_id = FileId(1);
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let py_id = FileId::new(1).unwrap();
+        let go_id = FileId::new(2).unwrap();
         let py_idx = graph.graph.add_node(NodeData::File(FileNode::new(
             py_id,
             PathBuf::from("orch.py"),
             LangId::Python,
-            SnapshotId(1),
+            SnapshotId::new(1).unwrap(),
         )));
         let go_idx = graph.graph.add_node(NodeData::File(FileNode::new(
             go_id,
             PathBuf::from("auth.go"),
             LangId::Go,
-            SnapshotId(1),
+            SnapshotId::new(1).unwrap(),
         )));
         graph.file_to_index.insert(py_id, py_idx);
         graph.file_to_index.insert(go_id, go_idx);

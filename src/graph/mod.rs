@@ -22,7 +22,7 @@
 //! use meta_ast::model::SnapshotId;
 //!
 //! // Create builder and add files/symbols
-//! let mut builder = GraphBuilder::new(SnapshotId(1));
+//! let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
 //! // ... add nodes and edges ...
 //! let graph = builder.build();
 //!
@@ -239,7 +239,7 @@ mod tests {
 
     fn test_symbol(id: u32, name: &str) -> Symbol {
         Symbol {
-            id: SymbolId(id),
+            id: SymbolId::new(id).unwrap(),
             name: name.to_string(),
             kind: SymbolKind::Function,
             language: LangId::Rust,
@@ -254,29 +254,29 @@ mod tests {
 
     #[test]
     fn code_graph_new_empty() {
-        let graph = CodeGraph::new(SnapshotId(1));
+        let graph = CodeGraph::new(SnapshotId::new(1).unwrap());
         assert_eq!(graph.node_count(), 0);
         assert_eq!(graph.edge_count(), 0);
-        assert_eq!(graph.snapshot_id.0, 1);
+        assert_eq!(graph.snapshot_id.to_raw(), 1);
     }
 
     #[test]
     fn code_graph_file_lookup_returns_none_for_missing() {
-        let graph = CodeGraph::new(SnapshotId(1));
-        assert!(graph.file_node(FileId(0)).is_none());
-        assert!(graph.file_node_index(FileId(0)).is_none());
+        let graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        assert!(graph.file_node(FileId::new(1).unwrap()).is_none());
+        assert!(graph.file_node_index(FileId::new(1).unwrap()).is_none());
     }
 
     #[test]
     fn code_graph_symbol_lookup_returns_none_for_missing() {
-        let graph = CodeGraph::new(SnapshotId(1));
-        assert!(graph.symbol_node(SymbolId(0)).is_none());
-        assert!(graph.symbol_node_index(SymbolId(0)).is_none());
+        let graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        assert!(graph.symbol_node(SymbolId::new(1).unwrap()).is_none());
+        assert!(graph.symbol_node_index(SymbolId::new(1).unwrap()).is_none());
     }
 
     #[test]
     fn builder_produces_valid_code_graph() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let file_id = builder.add_file(PathBuf::from("test.rs"), LangId::Rust);
         let symbol = test_symbol(1, "main");
         let _sym_idx = builder.add_symbol(&symbol).unwrap();
@@ -293,14 +293,14 @@ mod tests {
         assert!(file_lookup.is_some());
         assert_eq!(file_lookup.unwrap().language, LangId::Rust);
 
-        let sym_lookup = graph.symbol_node(SymbolId(1));
+        let sym_lookup = graph.symbol_node(SymbolId::new(1).unwrap());
         assert!(sym_lookup.is_some());
         assert_eq!(sym_lookup.unwrap().name, "main");
     }
 
     #[test]
     fn code_graph_iteration_over_files() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         builder.add_file(PathBuf::from("a.rs"), LangId::Rust);
         builder.add_file(PathBuf::from("b.py"), LangId::Python);
 
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn code_graph_iteration_over_symbols() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let _file_id = builder.add_file(PathBuf::from("test.rs"), LangId::Rust);
         let sym1 = test_symbol(1, "func_a");
         let sym2 = test_symbol(2, "func_b");
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn code_graph_edges_of_kind_filtering() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let file1 = builder.add_file(PathBuf::from("a.rs"), LangId::Rust);
         let _file2 = builder.add_file(PathBuf::from("b.rs"), LangId::Rust);
 
@@ -345,18 +345,18 @@ mod tests {
 
     #[test]
     fn add_edge_normalized_handles_multiple_edge_kinds_between_same_nodes() {
-        let mut graph = CodeGraph::new(SnapshotId(1));
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
         let n1 = graph.graph.add_node(NodeData::File(FileNode {
-            id: FileId(1),
+            id: FileId::new(1).unwrap(),
             path: PathBuf::from("a.rs"),
             language: LangId::Rust,
-            snapshot_id: SnapshotId(1),
+            snapshot_id: SnapshotId::new(1).unwrap(),
         }));
         let n2 = graph.graph.add_node(NodeData::File(FileNode {
-            id: FileId(2),
+            id: FileId::new(2).unwrap(),
             path: PathBuf::from("b.rs"),
             language: LangId::Rust,
-            snapshot_id: SnapshotId(1),
+            snapshot_id: SnapshotId::new(1).unwrap(),
         }));
 
         // 1. Add Reference edge with confidence 0.7
@@ -381,9 +381,9 @@ mod tests {
     #[test]
     fn add_edge_normalized_with_flow_preserves_first_flow_kind() {
         use crate::model::{DataNodeId, DataScope, FlowKind};
-        let mut graph = CodeGraph::new(SnapshotId(1));
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
         let n1 = graph.graph.add_node(NodeData::Data(DataGraphNode {
-            id: DataNodeId(1),
+            id: DataNodeId::new(1).unwrap(),
             symbol_id: None,
             name: Some("x".into()),
             scope: DataScope::Local,
@@ -391,7 +391,7 @@ mod tests {
             source_range: test_range(),
         }));
         let n2 = graph.graph.add_node(NodeData::Data(DataGraphNode {
-            id: DataNodeId(2),
+            id: DataNodeId::new(2).unwrap(),
             symbol_id: None,
             name: Some("y".into()),
             scope: DataScope::Local,

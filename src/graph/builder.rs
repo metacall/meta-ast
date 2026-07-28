@@ -551,7 +551,7 @@ mod tests {
 
     fn test_symbol(id: u32, name: &str, _file_id: u32) -> Symbol {
         Symbol {
-            id: SymbolId(id),
+            id: SymbolId::new(id).unwrap(),
             name: name.to_string(),
             kind: SymbolKind::Function,
             language: LangId::Python,
@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn builder_creates_file_nodes() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let path = PathBuf::from("src/main.py");
 
         let id1 = builder.add_file(path.clone(), LangId::Python);
@@ -578,11 +578,11 @@ mod tests {
 
     #[test]
     fn builder_creates_symbol_with_ownership() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let path = PathBuf::from("test.py");
 
         let file_id = builder.add_file(path.clone(), LangId::Python);
-        let symbol = test_symbol(1, "hello", file_id.0);
+        let symbol = test_symbol(1, "hello", file_id.to_raw());
 
         let _sym_idx = builder.add_symbol(&symbol).unwrap();
 
@@ -592,7 +592,7 @@ mod tests {
 
     #[test]
     fn builder_deduplicates_edges() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let path1 = PathBuf::from("a.py");
         let path2 = PathBuf::from("b.py");
 
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn builder_creates_external_node_for_unknown_import() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let path = PathBuf::from("main.py");
 
         let file_id = builder.add_file(path, LangId::Python);
@@ -631,17 +631,21 @@ mod tests {
 
     #[test]
     fn builder_tracks_node_mappings() {
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let path = PathBuf::from("test.py");
 
         let file_id = builder.add_file(path, LangId::Python);
-        let symbol = test_symbol(42, "func", file_id.0);
+        let symbol = test_symbol(42, "func", file_id.to_raw());
 
         builder.add_symbol(&symbol).unwrap();
 
         // Verify mappings exist
         assert!(builder.file_to_index.contains_key(&file_id));
-        assert!(builder.symbol_to_index.contains_key(&SymbolId(42)));
+        assert!(
+            builder
+                .symbol_to_index
+                .contains_key(&SymbolId::new(42).unwrap())
+        );
     }
 
     #[test]
@@ -649,7 +653,7 @@ mod tests {
         use crate::model::{FileExtraction, LineColumn, SourceRange, Symbol, SymbolId, SymbolKind};
         use std::path::PathBuf;
         let sym = Symbol {
-            id: SymbolId(1),
+            id: SymbolId::new(1).unwrap(),
             name: "foo".into(),
             kind: SymbolKind::Function,
             language: LangId::Python,
@@ -687,7 +691,7 @@ mod tests {
         let (graph, _scc) = GraphBuilder::from_extractions(
             &extractions,
             std::path::Path::new("/proj"),
-            SnapshotId(1),
+            SnapshotId::new(1).unwrap(),
             &mut diags,
         );
         assert_eq!(graph.file_count(), 1);
@@ -703,7 +707,7 @@ mod tests {
         let (graph, scc) = GraphBuilder::from_extractions(
             &extractions,
             std::path::Path::new("/proj"),
-            SnapshotId(1),
+            SnapshotId::new(1).unwrap(),
             &mut diags,
         );
         assert_eq!(graph.node_count(), 0);
@@ -715,7 +719,7 @@ mod tests {
         use crate::model::{FileExtraction, LineColumn, SourceRange, Symbol, SymbolId, SymbolKind};
         use std::path::PathBuf;
         let sym = Symbol {
-            id: SymbolId(99),
+            id: SymbolId::new(99).unwrap(),
             name: "orphan".into(),
             kind: SymbolKind::Function,
             language: LangId::Python,
@@ -750,7 +754,7 @@ mod tests {
         let (_graph, _scc) = GraphBuilder::from_extractions(
             &extractions,
             std::path::Path::new("/proj"),
-            SnapshotId(1),
+            SnapshotId::new(1).unwrap(),
             &mut diags,
         );
         assert!(!diags.is_empty(), "expected diagnostic for orphan symbol");
@@ -807,7 +811,7 @@ mod tests {
         let (graph, _scc) = GraphBuilder::from_extractions(
             &extractions,
             std::path::Path::new("/proj"),
-            SnapshotId(1),
+            SnapshotId::new(1).unwrap(),
             &mut diags,
         );
         assert_eq!(graph.file_count(), 2);
@@ -825,11 +829,11 @@ mod tests {
     #[test]
     fn add_data_node_creates_ownership_edge_to_symbol() {
         use crate::model::{DataNode, DataNodeId, DataScope};
-        let mut builder = GraphBuilder::new(SnapshotId(1));
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let file_path = PathBuf::from("test.rs");
         let _file_id = builder.add_file(file_path.clone(), LangId::Rust);
         let sym = Symbol {
-            id: SymbolId(1),
+            id: SymbolId::new(1).unwrap(),
             name: "my_fn".into(),
             kind: SymbolKind::Function,
             language: LangId::Rust,
@@ -843,8 +847,8 @@ mod tests {
         let sym_idx = builder.add_symbol(&sym).unwrap();
 
         let data = DataNode {
-            id: DataNodeId(1),
-            symbol_id: Some(SymbolId(1)),
+            id: DataNodeId::new(1).unwrap(),
+            symbol_id: Some(SymbolId::new(1).unwrap()),
             name: Some("x".into()),
             scope: DataScope::Local,
             type_hint: Some("i32".into()),

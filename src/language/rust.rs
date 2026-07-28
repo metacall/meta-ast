@@ -437,7 +437,7 @@ mod dataflow_tests {
     fn data_node_ids_unique() {
         let source = b"fn main() {\n    let a = 1;\n    let b = 2;\n    let c = 3;\n}\n";
         let (nodes, _edges) = extract(source);
-        let mut ids: Vec<u32> = nodes.iter().map(|n| n.id.0).collect();
+        let mut ids: Vec<u32> = nodes.iter().map(|n| n.id.to_raw()).collect();
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), nodes.len(), "all data node IDs must be unique");

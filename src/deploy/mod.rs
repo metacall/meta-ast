@@ -28,7 +28,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     tracing::info!("Check mode: {}", config.check);
 
     // 1. Run full pipeline graph analysis (covers extraction + SCC)
-    let snapshot_id = crate::model::SnapshotId(1);
+    let snapshot_id = crate::model::SnapshotId::new(1).unwrap();
     let (mut analysis, _) = crate::pipeline::analyze_graph(&config.root, snapshot_id)?;
 
     // 2. Collect MetaCall call sites from pipeline extractions (zero duplicate I/O / parsing)

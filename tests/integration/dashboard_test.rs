@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 fn sample_symbol(id: u32, name: &str, path: &str) -> Symbol {
     Symbol {
-        id: SymbolId(id),
+        id: SymbolId::new(id).unwrap(),
         name: name.to_string(),
         kind: SymbolKind::Function,
         language: LangId::Rust,
@@ -30,7 +30,7 @@ fn sample_symbol(id: u32, name: &str, path: &str) -> Symbol {
 }
 
 fn build_sample_graph() -> (meta_ast::graph::CodeGraph, SccAnalysis) {
-    let mut builder = GraphBuilder::new(SnapshotId(1));
+    let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
     let _file_id = builder.add_file(PathBuf::from("src/main.rs"), LangId::Rust);
     let sym1 = sample_symbol(1, "main", "src/main.rs");
     let sym2 = sample_symbol(2, "helper", "src/main.rs");
@@ -104,7 +104,7 @@ fn to_graph_html_cdn_link() {
 
 #[test]
 fn to_graph_html_empty_graph() {
-    let builder = GraphBuilder::new(SnapshotId(1));
+    let builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
     let graph = builder.build();
     let scc = SccAnalysis::analyze(&graph.graph);
     let html = meta_ast::output::dashboard::to_graph_html(&graph, &scc, 1).unwrap();

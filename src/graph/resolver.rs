@@ -160,7 +160,11 @@ impl FlattenedScopeCache {
                         diagnostics.push(Diagnostic {
                             path,
                             severity: Severity::Warning,
-                            message: format!("circular import: {} -> {}", current.0, root_path),
+                            message: format!(
+                                "circular import: {} -> {}",
+                                current.to_raw(),
+                                root_path
+                            ),
                             source_range: None,
                         });
                     }
@@ -173,7 +177,7 @@ impl FlattenedScopeCache {
             entries.sort_by(|a, b| {
                 b.1.partial_cmp(&a.1)
                     .unwrap_or(std::cmp::Ordering::Equal)
-                    .then(a.0.0.cmp(&b.0.0))
+                    .then(a.0.to_raw().cmp(&b.0.to_raw()))
             });
         }
 
@@ -276,7 +280,7 @@ pub fn resolve_all_references(
         .into_iter()
         .map(|((src, dst), conf)| (src, dst, conf))
         .collect();
-    deduped.sort_by_key(|(a, b, _)| (a.0, b.0));
+    deduped.sort_by_key(|(a, b, _)| (a.to_raw(), b.to_raw()));
     deduped
 }
 
@@ -315,41 +319,46 @@ mod tests {
         };
         assert!(cache.is_empty());
         assert_eq!(cache.len(), 0);
-        assert!(cache.resolve(FileId(0), "foo").is_none());
+        assert!(cache.resolve(FileId::new(1).unwrap(), "foo").is_none());
     }
 
     #[test]
     fn scope_cache_resolve_own_file() {
         let mut symbol_index: SymbolIndex = HashMap::new();
         symbol_index.insert(
-            FileId(0),
-            vec![(SymbolId(10), "main".into(), LangId::Python, None)],
+            FileId::new(1).unwrap(),
+            vec![(
+                SymbolId::new(10).unwrap(),
+                "main".into(),
+                LangId::Python,
+                None,
+            )],
         );
 
         let ctx = ResolutionContext {
             symbol_index,
             import_adjacency: HashMap::new(),
-            file_languages: HashMap::from([(FileId(0), LangId::Python)]),
+            file_languages: HashMap::from([(FileId::new(1).unwrap(), LangId::Python)]),
             file_paths: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
-        let result = cache.resolve(FileId(0), "main");
+        let result = cache.resolve(FileId::new(1).unwrap(), "main");
         assert!(result.is_some());
         let matches = result.unwrap();
         assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].0, SymbolId(10));
+        assert_eq!(matches[0].0, SymbolId::new(10).unwrap());
         assert_eq!(matches[0].1, 1.0);
     }
 
     #[test]
     fn scope_cache_resolve_imported_symbol() {
         let mut symbol_index = HashMap::new();
-        symbol_index.insert(FileId(0), vec![]);
+        symbol_index.insert(FileId::new(1).unwrap(), vec![]);
         symbol_index.insert(
-            FileId(1),
+            FileId::new(2).unwrap(),
             vec![(
-                SymbolId(20),
+                SymbolId::new(20).unwrap(),
                 "helper".into(),
                 LangId::Python,
                 Some(Visibility::Public),
@@ -358,20 +367,23 @@ mod tests {
 
         let ctx = ResolutionContext {
             symbol_index,
-            import_adjacency: HashMap::from([(FileId(0), vec![FileId(1)])]),
+            import_adjacency: HashMap::from([(
+                FileId::new(1).unwrap(),
+                vec![FileId::new(2).unwrap()],
+            )]),
             file_languages: HashMap::from([
-                (FileId(0), LangId::Python),
-                (FileId(1), LangId::Python),
+                (FileId::new(1).unwrap(), LangId::Python),
+                (FileId::new(2).unwrap(), LangId::Python),
             ]),
             file_paths: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
-        let result = cache.resolve(FileId(0), "helper");
+        let result = cache.resolve(FileId::new(1).unwrap(), "helper");
         assert!(result.is_some());
         let matches = result.unwrap();
         assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].0, SymbolId(20));
+        assert_eq!(matches[0].0, SymbolId::new(20).unwrap());
         assert_eq!(matches[0].1, 1.0);
     }
 
@@ -379,37 +391,42 @@ mod tests {
     fn scope_cache_missing_symbol() {
         let mut symbol_index = HashMap::new();
         symbol_index.insert(
-            FileId(0),
-            vec![(SymbolId(10), "foo".into(), LangId::Python, None)],
+            FileId::new(1).unwrap(),
+            vec![(
+                SymbolId::new(10).unwrap(),
+                "foo".into(),
+                LangId::Python,
+                None,
+            )],
         );
 
         let ctx = ResolutionContext {
             symbol_index,
             import_adjacency: HashMap::new(),
-            file_languages: HashMap::from([(FileId(0), LangId::Python)]),
+            file_languages: HashMap::from([(FileId::new(1).unwrap(), LangId::Python)]),
             file_paths: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
-        assert!(cache.resolve(FileId(0), "bar").is_none());
+        assert!(cache.resolve(FileId::new(1).unwrap(), "bar").is_none());
     }
 
     #[test]
     fn scope_cache_cycle_safe() {
         let mut symbol_index = HashMap::new();
         symbol_index.insert(
-            FileId(0),
+            FileId::new(1).unwrap(),
             vec![(
-                SymbolId(10),
+                SymbolId::new(10).unwrap(),
                 "a".into(),
                 LangId::Python,
                 Some(Visibility::Public),
             )],
         );
         symbol_index.insert(
-            FileId(1),
+            FileId::new(2).unwrap(),
             vec![(
-                SymbolId(20),
+                SymbolId::new(20).unwrap(),
                 "b".into(),
                 LangId::Python,
                 Some(Visibility::Public),
@@ -420,30 +437,30 @@ mod tests {
         let ctx = ResolutionContext {
             symbol_index,
             import_adjacency: HashMap::from([
-                (FileId(0), vec![FileId(1)]),
-                (FileId(1), vec![FileId(0)]),
+                (FileId::new(1).unwrap(), vec![FileId::new(2).unwrap()]),
+                (FileId::new(2).unwrap(), vec![FileId::new(1).unwrap()]),
             ]),
             file_languages: HashMap::from([
-                (FileId(0), LangId::Python),
-                (FileId(1), LangId::Python),
+                (FileId::new(1).unwrap(), LangId::Python),
+                (FileId::new(2).unwrap(), LangId::Python),
             ]),
             file_paths: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
         // Should not infinite loop
-        assert!(cache.resolve(FileId(0), "b").is_some());
-        assert!(cache.resolve(FileId(1), "a").is_some());
+        assert!(cache.resolve(FileId::new(1).unwrap(), "b").is_some());
+        assert!(cache.resolve(FileId::new(2).unwrap(), "a").is_some());
     }
 
     #[test]
     fn scope_cache_cross_language_confidence() {
         let mut symbol_index = HashMap::new();
-        symbol_index.insert(FileId(0), vec![]);
+        symbol_index.insert(FileId::new(1).unwrap(), vec![]);
         symbol_index.insert(
-            FileId(1),
+            FileId::new(2).unwrap(),
             vec![(
-                SymbolId(20),
+                SymbolId::new(20).unwrap(),
                 "util".into(),
                 LangId::Rust,
                 Some(Visibility::Public),
@@ -452,13 +469,19 @@ mod tests {
 
         let ctx = ResolutionContext {
             symbol_index,
-            import_adjacency: HashMap::from([(FileId(0), vec![FileId(1)])]),
-            file_languages: HashMap::from([(FileId(0), LangId::Python), (FileId(1), LangId::Rust)]),
+            import_adjacency: HashMap::from([(
+                FileId::new(1).unwrap(),
+                vec![FileId::new(2).unwrap()],
+            )]),
+            file_languages: HashMap::from([
+                (FileId::new(1).unwrap(), LangId::Python),
+                (FileId::new(2).unwrap(), LangId::Rust),
+            ]),
             file_paths: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
-        let result = cache.resolve(FileId(0), "util");
+        let result = cache.resolve(FileId::new(1).unwrap(), "util");
         assert!(result.is_some());
         assert_eq!(result.unwrap()[0].1, 0.6);
     }
@@ -468,7 +491,7 @@ mod tests {
         use crate::model::{LineColumn, SourceRange, Symbol, SymbolKind, UnresolvedReference};
 
         let sym_a = Symbol {
-            id: SymbolId(1),
+            id: SymbolId::new(1).unwrap(),
             name: "caller".into(),
             kind: SymbolKind::Function,
             language: LangId::Python,
@@ -513,19 +536,19 @@ mod tests {
         };
 
         let mut path_to_file_id = HashMap::new();
-        path_to_file_id.insert(PathBuf::from("/proj/a.py"), FileId(0));
+        path_to_file_id.insert(PathBuf::from("/proj/a.py"), FileId::new(1).unwrap());
 
         let mut scopes: HashMap<FileId, ScopeMap> = HashMap::new();
         let mut scope = HashMap::new();
-        scope.insert("helper".into(), vec![(SymbolId(99), 1.0)]);
-        scopes.insert(FileId(0), scope);
+        scope.insert("helper".into(), vec![(SymbolId::new(99).unwrap(), 1.0)]);
+        scopes.insert(FileId::new(1).unwrap(), scope);
 
         let cache = FlattenedScopeCache { scopes };
 
         let edges = resolve_all_references(&[file], &path_to_file_id, &cache, &mut Vec::new());
         assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].0, SymbolId(1));
-        assert_eq!(edges[0].1, SymbolId(99));
+        assert_eq!(edges[0].0, SymbolId::new(1).unwrap());
+        assert_eq!(edges[0].1, SymbolId::new(99).unwrap());
         assert_eq!(edges[0].2, 1.0);
     }
 
@@ -535,7 +558,7 @@ mod tests {
 
         // Inner method (span 40: 10..50)
         let inner_method = Symbol {
-            id: SymbolId(1),
+            id: SymbolId::new(1).unwrap(),
             name: "inner_method".into(),
             kind: SymbolKind::Method,
             language: LangId::Python,
@@ -554,7 +577,7 @@ mod tests {
 
         // Outer class (span 100: 0..100) placed AFTER inner_method in vector
         let outer_class = Symbol {
-            id: SymbolId(2),
+            id: SymbolId::new(2).unwrap(),
             name: "OuterClass".into(),
             kind: SymbolKind::Class,
             language: LangId::Python,
@@ -599,12 +622,12 @@ mod tests {
         };
 
         let mut path_to_file_id = HashMap::new();
-        path_to_file_id.insert(PathBuf::from("/proj/a.py"), FileId(0));
+        path_to_file_id.insert(PathBuf::from("/proj/a.py"), FileId::new(1).unwrap());
 
         let mut scopes: HashMap<FileId, ScopeMap> = HashMap::new();
         let mut scope = HashMap::new();
-        scope.insert("helper".into(), vec![(SymbolId(99), 1.0)]);
-        scopes.insert(FileId(0), scope);
+        scope.insert("helper".into(), vec![(SymbolId::new(99).unwrap(), 1.0)]);
+        scopes.insert(FileId::new(1).unwrap(), scope);
 
         let cache = FlattenedScopeCache { scopes };
 
@@ -613,10 +636,10 @@ mod tests {
         // Must resolve from SymbolId(1) (inner_method), NOT SymbolId(2) (outer_class)
         assert_eq!(
             edges[0].0,
-            SymbolId(1),
+            SymbolId::new(1).unwrap(),
             "Reference should attach to innermost symbol SymbolId(1), but attached to SymbolId({})",
-            edges[0].0.0
+            edges[0].0.to_raw()
         );
-        assert_eq!(edges[0].1, SymbolId(99));
+        assert_eq!(edges[0].1, SymbolId::new(99).unwrap());
     }
 }

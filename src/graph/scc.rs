@@ -229,19 +229,19 @@ mod tests {
 
     fn make_file_node(id: u32, path: &str) -> NodeData {
         NodeData::File(FileNode {
-            id: FileId(id),
+            id: FileId::new(id.max(1)).unwrap(),
             path: std::path::PathBuf::from(path),
             language: LangId::Rust,
-            snapshot_id: crate::model::ids::SnapshotId(1),
+            snapshot_id: crate::model::ids::SnapshotId::new(1).unwrap(),
         })
     }
 
     fn make_symbol_node(id: u32, name: &str, file_id: u32) -> NodeData {
         NodeData::Symbol(SymbolNode {
-            id: SymbolId(id),
+            id: SymbolId::new(id).unwrap(),
             name: name.to_string(),
             kind: crate::model::SymbolKind::Function,
-            file_id: FileId(file_id),
+            file_id: FileId::new(file_id.max(1)).unwrap(),
             visibility: Some(Visibility::Public),
             source_range: make_source_range(),
         })
