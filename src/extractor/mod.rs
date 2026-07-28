@@ -41,7 +41,21 @@ pub fn extract_with_options(
     let id_gen = IdGenerator::<SymbolId>::new();
     #[cfg(feature = "dataflow")]
     let data_id_gen = IdGenerator::<crate::model::DataNodeId>::new();
+    extract_with_id_gen(
+        files,
+        opts,
+        id_gen,
+        #[cfg(feature = "dataflow")]
+        data_id_gen,
+    )
+}
 
+pub(crate) fn extract_with_id_gen(
+    files: &[(std::path::PathBuf, LangId)],
+    opts: &ExtractOptions,
+    id_gen: IdGenerator<SymbolId>,
+    #[cfg(feature = "dataflow")] data_id_gen: IdGenerator<crate::model::DataNodeId>,
+) -> ExtractionResult {
     let mut file_extractions: Vec<_> = files
         .par_iter()
         .map(|(path, lang)| {
