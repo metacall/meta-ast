@@ -17,13 +17,19 @@ name = "pipeline"
 harness = false
 name = "graph"
 
+[[bench]]
+harness = false
+name = "incremental"
+
 [dependencies]
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 strum = { version = "0.28", features = ["derive"] }
-webbrowser = "1.2"
 yaml_serde = "0.10"
+
+# Browser
+webbrowser = "1.2"
 
 # Error handling
 anyhow = "1.0"
@@ -52,9 +58,14 @@ clap = { version = "4.6", features = ["color", "derive", "env"] }
 # Parallelism
 rayon = "1.12"
 
-dunce = "1"
 # Filesystem
+dunce = "1"
 ignore = "0.4"
+
+# Watch mode (feature-gated)
+blake3 = { version = "1.8", optional = true }
+notify = { version = "8.2", optional = true }
+notify-debouncer-mini = { version = "0.7", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
@@ -65,6 +76,7 @@ tempfile = "3.27"
 default = []
 metacall-deploy = []
 dataflow = []
+watch = ["dep:notify", "dep:notify-debouncer-mini", "dep:blake3"]
 
 [profile.bench]
 opt-level = 3
