@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::error::Diagnostic;
 use crate::graph::{CodeGraph, GraphBuilder, SccAnalysis};
@@ -17,7 +18,7 @@ pub struct GraphAnalysis {
     pub graph: CodeGraph,
     pub scc: SccAnalysis,
     pub snapshot_id: SnapshotId,
-    pub extractions: Vec<crate::model::FileExtraction>,
+    pub extractions: Vec<Arc<crate::model::FileExtraction>>,
 }
 
 /// Run the full graph analysis pipeline on a path.
@@ -37,15 +38,17 @@ pub fn analyze_graph(
         .flat_map(|f| f.diagnostics.iter().cloned())
         .collect();
 
+    let arc_extractions: Vec<_> = extraction.files.into_iter().map(Arc::new).collect();
+
     let (graph, scc) =
-        GraphBuilder::from_extractions(&extraction.files, root, snapshot_id, &mut diagnostics);
+        GraphBuilder::from_extractions(&arc_extractions, root, snapshot_id, &mut diagnostics);
 
     Ok((
         GraphAnalysis {
             graph,
             scc,
             snapshot_id,
-            extractions: extraction.files,
+            extractions: arc_extractions,
         },
         diagnostics,
     ))

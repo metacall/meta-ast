@@ -31,9 +31,13 @@ pub struct PodMetrics {
 }
 
 /// Compute per-file metrics from extraction results, keyed by file path.
-pub fn compute_file_metrics(extractions: &[FileExtraction]) -> HashMap<PathBuf, FileMetrics> {
+pub fn compute_file_metrics<F>(extractions: &[F]) -> HashMap<PathBuf, FileMetrics>
+where
+    F: std::borrow::Borrow<FileExtraction>,
+{
     let mut metrics = HashMap::new();
     for file in extractions {
+        let file = file.borrow();
         metrics.insert(
             file.path.clone(),
             FileMetrics {
