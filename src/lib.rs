@@ -9,6 +9,9 @@ pub mod output;
 pub mod parser;
 pub mod pipeline;
 
+#[cfg(feature = "watch")]
+pub mod watch;
+
 #[cfg(feature = "metacall-deploy")]
 pub mod deploy;
 
@@ -35,3 +38,7 @@ pub use graph::{
 
 // Pipeline re-exports
 pub use pipeline::{GraphAnalysis, SnapshotMeta, snapshot_meta};
+
+// Watch-mode re-exports
+#[cfg(feature = "watch")]
+pub use watch::{ChangeSet, WatchConfig, WatchState, incremental_reanalyze, run_watch};
