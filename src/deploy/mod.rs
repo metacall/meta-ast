@@ -1,10 +1,12 @@
 use crate::deploy::scanner::{CallSite, CallSiteVariant};
+use crate::error::{Diagnostic, Severity};
 use crate::graph::edge::EdgeKind;
 use crate::output::OutputFormat;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 pub mod check;
+pub mod client_call;
 pub mod cut;
 pub mod dependency;
 pub mod manifest;
@@ -29,9 +31,13 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
 
     // 1. Run full pipeline graph analysis (covers extraction + SCC)
     let snapshot_id = crate::model::SnapshotId::new(1).unwrap();
-    let (mut analysis, _) = crate::pipeline::analyze_graph(&config.root, snapshot_id)?;
+    let (mut analysis, mut diagnostics) =
+        crate::pipeline::analyze_graph(&config.root, snapshot_id)?;
 
-    // 2. Collect MetaCall call sites from pipeline extractions (zero duplicate I/O / parsing)
+    // 2. Collect MetaCall call sites from pipeline extractions (zero duplicate
+    // I/O / parsing for the source scan; configuration JSONs referenced by
+    // LoadFromConfiguration are re-read once for edge injection and once for
+    // client-call Phase A resolution).
     let all_call_sites: Vec<CallSite> = analysis
         .extractions
         .iter()
@@ -115,6 +121,32 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
             );
         }
     }
+    // 6b. Inject client-call edges (metacall('fn', ...) -> target symbol)
+    // and collect unresolved-invocation diagnostics.
+    let client_resolution = client_call::resolve_client_calls(
+        &analysis.graph,
+        &analysis.extractions,
+        &all_call_sites,
+        &config.root,
+    );
+    for (from_idx, to_idx, confidence) in client_resolution.edges {
+        analysis
+            .graph
+            .add_edge_normalized(from_idx, to_idx, EdgeKind::Reference, confidence);
+    }
+    diagnostics.extend(client_resolution.diagnostics);
+
+    // 6c. Report orphaned MetaCall configuration files and surface every
+    // diagnostic collected during analysis and edge injection.
+    diagnostics.extend(orphaned_config_diagnostics(&config.root, &all_call_sites));
+    for diag in &diagnostics {
+        tracing::warn!(
+            path = %diag.path.display(),
+            severity = ?diag.severity,
+            "{}", diag.message
+        );
+    }
+
     analysis.scc = crate::graph::scc::SccAnalysis::analyze(&analysis.graph.graph);
 
     // 7. Pod partitioning
@@ -193,13 +225,55 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Find `metacall.json` / `metacall-*.json` files that no
+/// `LoadFromConfiguration` call site references. Such files are inert:
+/// MetaCall only consumes a configuration when a call loads it.
+fn orphaned_config_diagnostics(root: &Path, call_sites: &[CallSite]) -> Vec<Diagnostic> {
+    let referenced: HashSet<PathBuf> = call_sites
+        .iter()
+        .filter(|s| s.variant == CallSiteVariant::LoadFromConfiguration)
+        .filter_map(|s| s.scripts.first())
+        .map(|script| root.join(script))
+        .collect();
+
+    let mut orphans = Vec::new();
+    for entry in ignore::WalkBuilder::new(root)
+        .build()
+        .filter_map(|e| e.ok())
+    {
+        let path = dunce::simplified(&entry.into_path()).to_path_buf();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let is_config =
+            name == "metacall.json" || (name.starts_with("metacall-") && name.ends_with(".json"));
+        if is_config && !referenced.contains(&path) {
+            orphans.push(Diagnostic {
+                path,
+                severity: Severity::Warning,
+                message:
+                    "orphaned MetaCall configuration file: not referenced by any metacall_load_from_configuration call"
+                        .to_string(),
+                source_range: None,
+            });
+        }
+    }
+    orphans.sort_by(|a, b| a.path.cmp(&b.path));
+    orphans
+}
+
 /// Add a single MetaCall edge: from a source file node to either an
 /// existing file node or a new ExternalNode.
 ///
-/// Script resolution tries three strategies in order:
+/// Script resolution tries four strategies in order through
+/// [`client_call::resolve_script_to_file`]:
 /// 1. `root.join(script)` -- works when script is relative to project root
 /// 2. `source_dir.join(script)` -- resolves relative to the source file's directory
-/// 3. Strip path prefix components from script until a matching file is found
+/// 3. Filename match against any discovered file
+/// 4. Strip path prefix components from script until a matching file is found
 ///
 /// Edges and external nodes are added through `CodeGraph` helpers so injected
 /// edges obey the same dedup/confidence invariant as builder-constructed ones
@@ -215,44 +289,15 @@ fn add_metacall_edge(
 ) {
     let graph = &mut analysis.graph;
 
-    // Strategy 1: root-relative
-    let candidate = root.join(script);
-    if let Some(&to_idx) = path_to_idx.get(&candidate) {
+    let source_file = match &graph.graph[from_idx] {
+        crate::graph::node::NodeData::File(f) => f.path.clone(),
+        _ => return,
+    };
+    if let Some(to_idx) =
+        client_call::resolve_script_to_file(root, script, &source_file, path_to_idx)
+    {
         graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Import, confidence);
         return;
-    }
-
-    // Strategy 2: source-file-relative (strip script from its parent dir)
-    if let crate::graph::node::NodeData::File(f) = &graph.graph[from_idx] {
-        let source_dir = f.path.parent().unwrap_or(std::path::Path::new("."));
-        let candidate = source_dir.join(script);
-        if let Some(&to_idx) = path_to_idx.get(&candidate) {
-            graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Import, confidence);
-            return;
-        }
-    }
-
-    // Strategy 3: strip leading path components until filename matches
-    let script_path = std::path::Path::new(script);
-    let target_filename = script_path.file_name().unwrap_or(std::ffi::OsStr::new(""));
-    for (path, &idx) in path_to_idx {
-        if path.file_name() == Some(target_filename) || path.ends_with(script_path) {
-            graph.add_edge_normalized(from_idx, idx, EdgeKind::Import, confidence);
-            return;
-        }
-    }
-
-    // Strategy 4: try component-stripping (pop prefixes from script)
-    {
-        let mut components: Vec<_> = script_path.components().collect();
-        while components.len() > 1 {
-            components.remove(0);
-            let stripped: std::path::PathBuf = components.iter().collect();
-            if let Some(&to_idx) = path_to_idx.get(&stripped) {
-                graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Import, confidence);
-                return;
-            }
-        }
     }
 
     // No match: create or reuse ExternalNode (keeps external_index consistent).
