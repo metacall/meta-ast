@@ -61,9 +61,9 @@ Exit gates:
 1. ~~`--format json|yaml` works for analysis output.~~ DONE
 2. ~~`--html` generates a dashboard with SCC/Deployment Unit coloring,
    auto-opens in browser.~~ DONE
-3. Watch-mode stability tests pass. NOT YET STARTED
+3. ~~Watch-mode stability tests pass.~~ DONE
+4. ~~Incremental performance target evidence captured.~~ DONE
 5. C ABI smoke tests pass. NOT YET STARTED
-6. Incremental performance target evidence captured. NOT YET STARTED
 
 ## Phase 5 - MetaCall Deploy Manifests [COMPLETE]
 

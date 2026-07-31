@@ -27,13 +27,13 @@
 
 ### CLI and watch
 
-- `clap`
-- Rationale: battle-tested CLI ergonomics with color, derive, and env support.
+- `clap`, `notify`, `notify-debouncer-mini`, `blake3`
+- Rationale: battle-tested CLI ergonomics with color, derive, and env support. `notify` and `notify-debouncer-mini` provide OS file events for watch mode. `blake3` provides fast, deterministic cryptographic content hashing for file change fingerprinting.
 
 ### Parallelism
 
 - `rayon`
-- Rationale: data-parallel file processing with work-stealing. Tree-sitter `Parser` and `Tree` are `Send + Sync`, enabling safe parallel parse + extract per-file.
+- Rationale: data-parallel file processing with work-stealing. A thread-local pool of `Parser` instances (`thread_local!`) enables safe parallel parse + extract per-file without non-`Sync` parser contention.
 
 ### Enum utilities
 
@@ -42,8 +42,8 @@
 
 ### Filesystem
 
-- `ignore`
-- Rationale: gitignore-aware file walking, respects .gitignore and .ignore files.
+- `ignore`, `dunce`
+- Rationale: gitignore-aware file walking (respecting .gitignore and .ignore files) and cross-platform path canonicalization.
 
 ### Browser
 
@@ -58,11 +58,14 @@
 ## 3. Development dependencies
 
 - `insta` - snapshot testing for JSON output contracts.
-- `criterion` - benchmark gating (Phase 4).
+- `criterion` - benchmark gating (`pipeline`, `graph`, and `incremental`).
+- `tempfile` - isolated filesystem fixtures for integration testing.
 
 ## 4. Feature flags
 
-- `metacall-deploy` - when enabled, includes the deploy scanner/manifest/mesh generators so MetaCall deployment manifests can be produced.
+- `watch` - debounced file-system watch mode with incremental re-analysis and BLAKE3 fingerprinting.
+- `dataflow` - data/flow node tracking and def-use graph extraction.
+- `metacall-deploy` - includes deploy scanner/manifest/mesh generators for MetaCall deployment manifest generation.
 
 ## 5. Recommended additions
 

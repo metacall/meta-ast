@@ -80,6 +80,16 @@ pub struct GraphArgs {
     #[cfg(feature = "dataflow")]
     #[arg(long)]
     pub datagraph: bool,
+
+    /// Enter watch mode: monitor the project and re-analyze on file changes
+    #[cfg(feature = "watch")]
+    #[arg(long)]
+    pub watch: bool,
+
+    /// Debounce duration in milliseconds for watch mode (default: 200)
+    #[cfg(feature = "watch")]
+    #[arg(long, default_value = "200")]
+    pub watch_debounce: u64,
 }
 
 #[cfg(feature = "metacall-deploy")]

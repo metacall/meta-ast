@@ -61,7 +61,11 @@ src/
 │
 └── interface/                CLI layer
     ├── mod.rs                CLI module root
-    └── args.rs               Clap derive structs (Inspect, Graph, Deploy + --format, --html, --datagraph)
+    └── args.rs               Clap derive structs (Inspect, Graph, Deploy + -l, --format, --html, --datagraph, --watch, --watch-debounce, -o, --check)
+│
+├── watch/                     [feature: watch]
+│   └── mod.rs                 IncrementalCache, WatchState, incremental_reanalyze, run_watch
+│
 └── deploy/                   [feature: metacall-deploy] See docs/DEPLOY.md
     ├── mod.rs                Entry: run_deploy(), DeployConfig, add_metacall_edge()
     ├── scanner.rs            tree-sitter call-site detection, CallSite, CallSiteVariant, confidence
@@ -466,13 +470,13 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `tree-sitter` | 0.26.3 | Core parsing |
+| `tree-sitter` | 0.26.11 | Core parsing |
 | `tree-sitter-python` | 0.25.0 | Python grammar |
 | `tree-sitter-javascript` | 0.25.0 | JavaScript grammar |
 | `tree-sitter-typescript` | 0.23.2 | TypeScript + TSX grammars |
-| `tree-sitter-c` | 0.24.1 | C grammar |
+| `tree-sitter-c` | 0.24.2 | C grammar |
 | `tree-sitter-cpp` | 0.23.4 | C++ grammar |
-| `tree-sitter-rust` | 0.24.0 | Rust grammar |
+| `tree-sitter-rust` | 0.24.2 | Rust grammar |
 | `tree-sitter-go` | 0.25.0 | Go grammar |
 | `petgraph` | 0.8.3 | Directed graph + Tarjan SCC |
 | `serde` + `serde_json` | 1.0 | JSON serialization |
@@ -480,24 +484,31 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 | `strum` | 0.28 | Enum derive macros (Display, AsRefStr) |
 | `webbrowser` | 1.2 | Auto-open HTML dashboard in browser |
 | `clap` | 4.6 | CLI (derive API, env, color) |
-| `rayon` | 1.10 | Parallel file processing |
+| `rayon` | 1.12 | Parallel file processing |
 | `thiserror` | 2.0 | Library error types |
 | `anyhow` | 1.0 | Application error boundary |
+| `dunce` | 1.0 | Cross-platform path canonicalization |
 | `ignore` | 0.4 | Gitignore-aware file walking |
+| `blake3` | 1.5 | Cryptographic content hashing (optional under `watch`) |
+| `notify` | 8.2 | File system notification watcher (optional under `watch`) |
+| `notify-debouncer-mini` | 0.7 | Debounced event loop (optional under `watch`) |
 | `tracing` + `tracing-subscriber` | 0.1 / 0.3 | Structured diagnostics |
 
 ### 8.2 Development Dependencies
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `insta` | 1.47 | Snapshot testing for JSON output contracts |
-| `criterion` | 0.8 | Benchmark gating |
+| `insta` | 1.48 | Snapshot testing for JSON output contracts |
+| `criterion` | 0.8 | Benchmark gating (`pipeline`, `graph`, `incremental`) |
+| `tempfile` | 3.27 | Temporary filesystem test fixtures |
 
 ### 8.3 Feature Flags
 
 | Feature | Purpose |
 |---------|---------|
 | `metacall-deploy` | Generate MetaCall deployment manifests and mesh annotations |
+| `dataflow` | Data/flow node tracking and def-use graph extraction |
+| `watch` | Debounced file-system watch mode with incremental re-analysis |
 
 ---
 

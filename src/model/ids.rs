@@ -67,6 +67,13 @@ impl<T> IdGenerator<T> {
         }
     }
 
+    pub fn with_start(start: u32) -> Self {
+        Self {
+            counter: AtomicU32::new(start.max(1)),
+            _marker: std::marker::PhantomData,
+        }
+    }
+
     pub fn next(&self) -> T
     where
         T: From<NonZeroU32>,
@@ -170,6 +177,17 @@ mod tests {
     fn id_generator_default() {
         let idgen = IdGenerator::<FileId>::default();
         assert_eq!(idgen.next(), FileId::new(1).unwrap());
+    }
+
+    #[test]
+    fn id_generator_with_start_zero_safeguard() {
+        let idgen = IdGenerator::<SymbolId>::with_start(0);
+        let first = idgen.next();
+        assert_eq!(
+            first.to_raw(),
+            1,
+            "with_start(0) must sanitize to start ID 1"
+        );
     }
 
     #[test]

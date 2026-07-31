@@ -1,8 +1,8 @@
 //! Reference resolution via FlattenedScopeCache.
 //!
-//! Pre-computes the visible scope per file by DFS-ing the import graph
+//! Pre-computes the visible scope per file by BFS-ing the import graph
 //! once, then resolves references with O(1) lookups instead of
-//! per-reference BFS.
+//! per-reference graph traversals.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -27,15 +27,21 @@ pub struct ResolutionContext {
 
 impl ResolutionContext {
     /// Build a ResolutionContext from extraction results and graph data.
-    pub fn from_extractions(
-        extractions: &[FileExtraction],
+    pub fn from_extractions<F>(
+        extractions: &[F],
         path_to_file_id: &HashMap<PathBuf, FileId>,
         import_adjacency: HashMap<FileId, Vec<FileId>>,
-    ) -> Self {
+    ) -> Self
+    where
+        F: std::borrow::Borrow<FileExtraction>,
+    {
         let symbol_index = build_symbol_index(extractions, path_to_file_id);
         let file_languages: HashMap<_, _> = extractions
             .iter()
-            .filter_map(|f| Some((path_to_file_id.get(&f.path)?.to_owned(), f.lang)))
+            .filter_map(|f| {
+                let f = f.borrow();
+                Some((path_to_file_id.get(&f.path)?.to_owned(), f.lang))
+            })
             .collect();
         let file_paths: HashMap<_, _> = path_to_file_id
             .iter()
@@ -62,7 +68,7 @@ pub struct FlattenedScopeCache {
 impl FlattenedScopeCache {
     /// Build the scope cache from the file->symbols index and import adjacency.
     ///
-    /// For each file, DFS over import edges, collecting public symbols from
+    /// For each file, BFS over import edges, collecting public symbols from
     /// reachable files. Confidence decays with distance:
     /// - 1.0: own file or direct import, same language
     /// - 0.8: transitive import, same language
@@ -210,16 +216,20 @@ impl FlattenedScopeCache {
 /// representing ReferenceEdges to add. Confidence is threaded from the
 /// FlattenedScopeCache (1.0 local/direct, 0.8 transitive, 0.6 cross-language).
 /// Warnings for unresolved references are appended to `diagnostics`.
-pub fn resolve_all_references(
-    extractions: &[FileExtraction],
+pub fn resolve_all_references<F>(
+    extractions: &[F],
     path_to_file_id: &HashMap<PathBuf, FileId>,
     scope_cache: &FlattenedScopeCache,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<(SymbolId, SymbolId, f32)> {
+) -> Vec<(SymbolId, SymbolId, f32)>
+where
+    F: std::borrow::Borrow<FileExtraction> + Sync,
+{
     #[allow(clippy::type_complexity)]
     let results: Vec<(Vec<(SymbolId, SymbolId, f32)>, Vec<Diagnostic>)> = extractions
         .par_iter()
         .map(|file_ext| {
+            let file_ext = file_ext.borrow();
             let mut local_edges = Vec::new();
             let mut local_diags = Vec::new();
 
@@ -287,13 +297,17 @@ pub fn resolve_all_references(
 /// Build a symbol index from extracted files and a path-to-FileId mapping.
 ///
 /// Returns: SymbolIndex
-pub fn build_symbol_index(
-    extractions: &[FileExtraction],
+pub fn build_symbol_index<F>(
+    extractions: &[F],
     path_to_file_id: &HashMap<PathBuf, FileId>,
-) -> SymbolIndex {
+) -> SymbolIndex
+where
+    F: std::borrow::Borrow<FileExtraction>,
+{
     let mut index: SymbolIndex = HashMap::new();
 
     for file_ext in extractions {
+        let file_ext = file_ext.borrow();
         if let Some(&file_id) = path_to_file_id.get(&file_ext.path) {
             let entries: Vec<_> = file_ext
                 .symbols

@@ -2,6 +2,9 @@ use clap::Parser;
 use meta_ast::interface::args::Cli;
 use meta_ast::model::SnapshotId;
 
+#[cfg(feature = "watch")]
+use meta_ast::watch::{WatchConfig, run_watch};
+
 fn main() -> anyhow::Result<()> {
     meta_ast::language::validate_queries();
 
@@ -50,6 +53,56 @@ fn main() -> anyhow::Result<()> {
         }
 
         Cli::Graph(args) => {
+            #[cfg(feature = "watch")]
+            if args.watch {
+                let watch_config = WatchConfig {
+                    debounce: std::time::Duration::from_millis(args.watch_debounce),
+                    format: args.format,
+                    output: args.output.clone(),
+                    html: args.html,
+                    open_browser: false,
+                };
+
+                let output = args.output.clone();
+                let html = args.html;
+                let format = args.format;
+
+                return run_watch(args.path, watch_config, move |analysis, change_set| {
+                    let emit_config = meta_ast::output::emitter::EmitConfig {
+                        output: output.clone(),
+                        format,
+                        html,
+                        open_browser: false,
+                    };
+                    meta_ast::output::emitter::emit_graph(analysis, &emit_config)?;
+
+                    let file_count = analysis.graph.file_count();
+                    let sym_count = analysis.graph.symbol_count();
+                    let scc_count = analysis.scc.components.len();
+                    let cyclic = analysis
+                        .scc
+                        .components
+                        .iter()
+                        .filter(|c| c.is_cyclic)
+                        .count();
+                    tracing::info!(
+                        snapshot = analysis.snapshot_id.to_raw(),
+                        files = file_count,
+                        symbols = sym_count,
+                        edges = analysis.graph.edge_count(),
+                        sccs = scc_count,
+                        cyclic = cyclic,
+                        added = change_set.files_added,
+                        removed = change_set.files_removed,
+                        modified = change_set.files_modified,
+                        unchanged = change_set.files_unchanged,
+                        "Re-analyzed",
+                    );
+
+                    Ok(())
+                });
+            }
+
             let snapshot_id = SnapshotId::new(1).unwrap();
             let (analysis, diags) = meta_ast::pipeline::analyze_graph(&args.path, snapshot_id)?;
 

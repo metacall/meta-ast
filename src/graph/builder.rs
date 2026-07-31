@@ -1,11 +1,12 @@
-// Graph builder for incremental construction from extraction results.
+//! Graph builder for incremental construction from extraction results.
 //!
-//! Construction proceeds in two stages:
+//! Construction proceeds in stages:
 //! 1. Ownership graph: files and their symbols
-//! 2. Dependency graph: imports and cross-file references
+//! 2. Dataflow nodes and edges (requires `--features dataflow`)
+//! 3. Dependency graph: imports and cross-file references
 //!
-//! The builder maintains bidirectional mappings between domain IDs
-//! (FileId, SymbolId) and petgraph NodeIndex for efficient lookups.
+//! The builder maintains index mappings from domain IDs (FileId, SymbolId)
+//! to petgraph `NodeIndex` for efficient lookups.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -112,8 +113,8 @@ impl GraphBuilder {
 
     /// Adds a symbol node and its ownership edge to the containing file.
     ///
-    /// The file must already exist in the builder; this is enforced by the
-    /// FileId parameter. The symbol's file_id must match a previously added file.
+    /// The containing file must already exist in the builder. The symbol's
+    /// file path is resolved against registered files.
     ///
     /// Returns the NodeIndex for the symbol node.
     pub fn add_symbol(&mut self, symbol: &Symbol) -> Result<NodeIndex, crate::Error> {
@@ -427,21 +428,26 @@ impl GraphBuilder {
     /// - SCC analysis
     ///
     /// Errors during symbol addition are non-fatal and appended to `diagnostics`.
-    pub fn from_extractions(
-        extractions: &[crate::model::FileExtraction],
+    pub fn from_extractions<F>(
+        extractions: &[F],
         root: &std::path::Path,
         snapshot_id: crate::model::SnapshotId,
         diagnostics: &mut Vec<crate::error::Diagnostic>,
-    ) -> (CodeGraph, crate::graph::SccAnalysis) {
+    ) -> (CodeGraph, crate::graph::SccAnalysis)
+    where
+        F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
+    {
         let mut builder = Self::new(snapshot_id);
 
         // Register all files
         for file in extractions {
+            let file = file.borrow();
             builder.add_file(file.path.clone(), file.lang);
         }
 
         // Register all symbols; symbol errors are non-fatal
         for file in extractions {
+            let file = file.borrow();
             for symbol in &file.symbols {
                 if let Err(e) = builder.add_symbol(symbol) {
                     diagnostics.push(crate::error::Diagnostic {
@@ -458,11 +464,13 @@ impl GraphBuilder {
         #[cfg(feature = "dataflow")]
         {
             for file in extractions {
+                let file = file.borrow();
                 for data_node in &file.data_nodes {
                     builder.add_data_node(data_node);
                 }
             }
             for file in extractions {
+                let file = file.borrow();
                 for flow_edge in &file.flow_edges {
                     builder.add_flow_edge(
                         flow_edge.source,
@@ -478,6 +486,7 @@ impl GraphBuilder {
         let path_to_file_id: HashMap<std::path::PathBuf, crate::model::FileId> = extractions
             .iter()
             .filter_map(|f| {
+                let f = f.borrow();
                 builder
                     .file_id_for_path(&f.path)
                     .map(|fid| (f.path.clone(), fid))
@@ -491,6 +500,7 @@ impl GraphBuilder {
         }
 
         for file in extractions {
+            let file = file.borrow();
             let Some(&source_fid) = path_to_file_id.get(&file.path) else {
                 continue;
             };
