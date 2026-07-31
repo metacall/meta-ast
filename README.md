@@ -138,7 +138,7 @@ view of their structure without executing any user code. Its objectives:
 Extracts all function, class, and object declarations from a codebase.
 
 ```bash
-meta-ast inspect <path> [-f json|yaml] [-o output.json]
+meta-ast inspect <path> [-l language] [-f json|yaml] [-o output.json]
 ```
 
 ### `graph`
@@ -146,9 +146,17 @@ meta-ast inspect <path> [-f json|yaml] [-o output.json]
 Builds the cross-file dependency graph, resolves imports, and runs Tarjan SCC to identify cyclic clusters and independent deployment units.
 
 ```bash
-meta-ast graph <path> [-f json|yaml] [-o graph.json]
+meta-ast graph <path> [-l language] [-f json|yaml] [-o graph.json]
 meta-ast graph <path> --html                    # interactive Cytoscape.js dashboard (CDN, browser-cached)
+meta-ast graph <path> --datagraph               # export detailed datagraph.json (requires --features dataflow)
+meta-ast graph <path> --watch                   # watch mode: continuous re-analysis on file changes (requires --features watch)
+meta-ast graph <path> --watch --watch-debounce 100 --html -o graph.html
 ```
+
+`--watch` enters a debounced watch loop: on each file change, only changed files
+are re-extracted using BLAKE3 cryptographic content fingerprinting (unchanged files reuse cached `Arc` extractions), then the graph + SCC
+are rebuilt. Snapshot IDs increment with each re-analysis tick. Requires
+`cargo install meta-ast --features watch` (or `cargo build --features watch`).
 
 ### `deploy` *(requires `--features metacall-deploy`)*
 
@@ -157,8 +165,8 @@ Scans for cross-language `metacall_load_from_*` call sites, resolves external de
 ```bash
 cargo build --release --features metacall-deploy
 
-meta-ast deploy <path> --out ./out      # generate manifests
-meta-ast deploy <path> --check          # CI validation: verify every cut edge has an RPC stub
+meta-ast deploy <path> [-f json|yaml] [-o ./out] # generate manifests
+meta-ast deploy <path> --check                  # CI validation: verify every cut edge has an RPC stub
 ```
 
 Generates two artifacts:
@@ -188,7 +196,8 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for scanner details, confidence scoring, po
 
 ## Roadmap
 
-- **Phase 4 (In Progress)**: Watch mode, incremental analysis, C ABI.
+- **Phase 4 (In Progress)**: Watch mode complete (feature-gated behind `--features watch`).
+  Remaining: C ABI scaffolding.
 - **Phase 5 (Complete)**: `metacall-deploy` - call-site scanning, pod partitioning, dependency resolution, pod manifests, Function Mesh annotation, fairness checking.
 - **Phase 6 (Planned)**: Language expansion (C#, Java).
 
@@ -199,13 +208,15 @@ Full details in [docs/ROADMAP.md](docs/ROADMAP.md).
 ## Benchmarking
 
 Performance is measured with [criterion](https://github.com/japaric/criterion.rs)
-via two benchmark suites (`harness = false`):
+via three benchmark suites (`harness = false`):
 
 - `benches/pipeline.rs` - end-to-end extraction across the per-language fixtures
   (python, javascript, typescript, tsx, rust, go, c, cpp, mixed).
 - `benches/graph.rs` - graph construction, Tarjan SCC on varied topologies
   (acyclic chains, single/multiple cycles, dense graphs), edge deduplication,
   and node lookup at scale (up to 10k nodes / 10k duplicates).
+- `benches/incremental.rs` - cold vs warm incremental re-analysis after file modifications
+  (requires `--features watch`).
 
 Run them locally:
 
@@ -213,6 +224,7 @@ Run them locally:
 cargo bench                                    # all suites
 cargo bench --bench pipeline                   # extraction only
 cargo bench --bench graph -- --plotting-backend=plotters
+cargo bench --bench incremental --features watch # incremental watch benchmark
 ```
 
 Benchmarks run on the fixture corpus under `tests/fixtures/`, so results scale

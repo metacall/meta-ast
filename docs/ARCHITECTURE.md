@@ -64,22 +64,32 @@ Detailed graph contract is defined in `specs/graph-model.md`.
 - Unresolvable Cross-Language Call Sites (dynamic tag/path arguments) are annotated as low-confidence entries in the Mesh Annotation, not silently dropped.
 - Fatal process-level errors are reserved for invalid configuration or unrecoverable IO/system failures.
 
-## 6. Incremental analysis model _(PLANNED)_
+## 6. Incremental analysis model
 
-- Baseline mode: re-parse changed file and recompute impacted graph region.
-- Optimized mode: apply `InputEdit` + changed range reduction.
-- Optimization is benchmark-triggered and must not compromise correctness.
+- Baseline mode: re-parse changed file and recompute the full graph.
+- Optimized mode: apply `InputEdit` + changed range reduction (planned, benchmark-triggered).
 
-**Current status:** Incremental parsing is not yet implemented. The pipeline currently runs full re-analysis on every invocation. This section describes the planned architecture for watch/update scenarios (Roadmap Phase 4 pending items).
+**Current status:** Baseline incremental analysis is implemented behind the `watch`
+feature flag (`--features watch`). The `watch` module (`src/watch/mod.rs`) provides:
+
+- `incremental_reanalyze()` — pure, deterministic, testable re-analysis step.
+- `run_watch()` — debounced OS-level watcher loop (via `notify` + `notify-debouncer-mini`).
+- BLAKE3 cryptographic content-hash fingerprinting (`Fingerprint([u8; 32])`) for change detection.
+- Cached `Arc<FileExtraction>` per file: zero-allocation pointer sharing for unchanged files; graph rebuilt from scratch each tick (graph + SCC rebuild is sub-ms).
+- CLI integration via `meta-ast graph <path> --watch [--watch-debounce <ms>]`.
+
+The `InputEdit` / changed-range narrowing optimization is deferred per RFC 0003.
 
 Parallel parse + extract uses rayon per-file; graph assembly is sequential. See `STRUCTURE.md` section 5 for pipeline phase details.
 
 ## 7. Output formats
 
-The CLI supports JSON and YAML for programmatic consumption, plus an interactive HTML dashboard for visual analysis.
+The CLI supports JSON and YAML for programmatic consumption, plus an interactive HTML dashboard for visual analysis and datagraph JSON exports.
 
-- **JSON / YAML:** Controlled by the `--format` flag. JSON is the default. YAML requires no extra setup - just pass `--format yaml`.
+- **JSON / YAML:** Controlled by the `-f, --format` flag. JSON is the default. YAML requires no extra setup - just pass `--format yaml`.
 - **HTML dashboard:** Separate concern, activated with `--html`. Generates a single `.html` file with an interactive Cytoscape.js graph loaded from a CDN (cached by the browser after first fetch). The browser auto-opens unless you redirect.
+- **Datagraph JSON:** Activated with `--datagraph` (requires `--features dataflow`). Exports detailed data/flow node definitions and def-use relations.
+- **Language Override:** Force a specific language with `-l, --language <lang>`.
 
 The dashboard turns SCC analysis into something you can actually see. Nodes in cyclic clusters (co-deployment required) are colored red. Independent Deployment Units are green. This is the difference between "your code has cycles" and "here is the exact knot you need to untangle before you can split this into independent mesh units."
 

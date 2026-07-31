@@ -28,7 +28,7 @@ meta-ast deploy <path> --check
 
 | Flag | Default | Description |
 |---|---|---|
-| `--out <dir>` | `.` | Directory to write generated artifacts |
+| `-o, --out <dir>` | `.` | Directory to write generated artifacts |
 | `-f, --format <json\|yaml>` | `json` | Serialization format |
 | `--check` | off | Fairness check mode - exits non-zero on missing RPC stubs |
 
