@@ -184,6 +184,7 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for scanner details, confidence scoring, po
 
 | Document | Description |
 |---|---|
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to build, test, and submit changes |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | High-level pipeline and component boundaries |
 | [docs/STRUCTURE.md](docs/STRUCTURE.md) | Module layout, data structures, design patterns |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Deploy module: scanner, manifests, mesh annotation |
