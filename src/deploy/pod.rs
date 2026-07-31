@@ -70,8 +70,16 @@ pub(crate) fn node_to_file_id(node: &NodeData) -> Option<FileId> {
 ///    group by representative to form pods.
 /// 4. A second pass collects cross-pod (and cross-language) edges.
 pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
-    // Build file->language mapping and contiguous index assignment
-    let file_ids: Vec<FileId> = graph.file_to_index.keys().copied().collect();
+    // Build file->language mapping and contiguous index assignment.
+    // Sort by path: HashMap iteration order is process-random, and pod
+    // construction (and thus deployment IDs) must be stable across runs.
+    let mut file_ids: Vec<FileId> = graph.file_to_index.keys().copied().collect();
+    file_ids.sort_by_key(|&fid| {
+        graph
+            .file_node(fid)
+            .map(|f| f.path.clone())
+            .unwrap_or_default()
+    });
     let file_idx: HashMap<FileId, usize> = file_ids
         .iter()
         .enumerate()
@@ -229,9 +237,87 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
         });
     }
 
+    // Canonical edge order so manifest edges are stable across runs.
+    inter_pod_edges.sort_by(|a, b| {
+        (
+            a.from_pod,
+            a.to_pod,
+            a.from_file.to_raw(),
+            a.to_file.to_raw(),
+        )
+            .cmp(&(
+                b.from_pod,
+                b.to_pod,
+                b.from_file.to_raw(),
+                b.to_file.to_raw(),
+            ))
+    });
+
     PodPartition {
         pods,
         inter_pod_edges,
         file_languages,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::edge::EdgeData;
+    use crate::graph::node::FileNode;
+    use crate::model::ids::SnapshotId;
+    use std::path::PathBuf;
+
+    #[test]
+    fn partition_orders_pods_by_path() {
+        // Files are inserted in non-path order; pod ids must still follow
+        // path-sorted order so deployment manifests are stable across runs
+        // (HashMap iteration is process-random).
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let c_py = FileId::new(1).unwrap();
+        let a_js = FileId::new(2).unwrap();
+        let b_py = FileId::new(3).unwrap();
+        for (fid, path, lang) in [
+            (c_py, "c.py", LangId::Python),
+            (a_js, "a.js", LangId::JavaScript),
+            (b_py, "b.py", LangId::Python),
+        ] {
+            let idx = graph.graph.add_node(NodeData::File(FileNode::new(
+                fid,
+                PathBuf::from(path),
+                lang,
+                SnapshotId::new(1).unwrap(),
+            )));
+            graph.file_to_index.insert(fid, idx);
+        }
+
+        // Cross-language import edge: c.py -> a.js becomes an inter-pod edge.
+        graph.graph.add_edge(
+            graph.file_to_index[&c_py],
+            graph.file_to_index[&a_js],
+            EdgeData::new(EdgeKind::Import),
+        );
+
+        let partition = partition_into_pods(&graph);
+
+        let pod_paths: Vec<PathBuf> = partition
+            .pods
+            .iter()
+            .map(|pod| graph.file_node(pod.files[0]).unwrap().path.clone())
+            .collect();
+        assert_eq!(
+            pod_paths,
+            vec![
+                PathBuf::from("a.js"),
+                PathBuf::from("b.py"),
+                PathBuf::from("c.py")
+            ]
+        );
+
+        assert_eq!(partition.inter_pod_edges.len(), 1);
+        let edge = &partition.inter_pod_edges[0];
+        assert_eq!(edge.from_pod, 2, "c.py must be pod 2");
+        assert_eq!(edge.to_pod, 0, "a.js must be pod 0");
+        assert!(edge.is_cross_language);
     }
 }

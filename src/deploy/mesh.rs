@@ -283,6 +283,8 @@ pub fn generate_mesh_annotation(
     }
 
     let total_units = deployment_units.len();
+    let mut language_list: Vec<String> = languages.into_iter().collect();
+    language_list.sort();
     MeshAnnotation {
         version: "1.0".to_string(),
         deployment_units,
@@ -291,7 +293,7 @@ pub fn generate_mesh_annotation(
             total_units,
             cross_language_units: cross_language_units_count,
             independent_candidates: independent_candidates_count,
-            languages: languages.into_iter().collect(),
+            languages: language_list,
         },
     }
 }

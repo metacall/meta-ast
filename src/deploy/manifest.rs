@@ -161,6 +161,7 @@ pub fn generate_pod_manifest(
         }
     }
 
+    edges.sort_by(|a, b| (a.from_pod, a.to_pod, &a.kind).cmp(&(b.from_pod, b.to_pod, &b.kind)));
     let total_ast_nodes = pod_metrics.iter().map(|m| m.total_ast_nodes).sum();
     let cross_language_edges = edges.iter().filter(|e| e.is_cross_language).count();
     let total_pods = deployments.len();
