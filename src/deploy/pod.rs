@@ -156,6 +156,12 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
 
     let mut dedup: HashMap<(usize, usize), (FusedConfidence, bool, FileId, FileId)> =
         HashMap::new();
+    // Client-call edges (file -> symbol Reference edges injected by the deploy
+    // scanner, e.g. metacall('fn', ...)) stay distinct from fused edges: the
+    // invocation is a separate relationship from the load, and fusing it
+    // could drag the load edge's confidence down when a weak global match
+    // exists.
+    let mut client_call_edges: Vec<InterPodEdge> = Vec::new();
 
     for edge_idx in graph.graph.edge_indices() {
         let weight = graph.graph[edge_idx];
@@ -183,6 +189,21 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
         let src_lang = file_languages.get(&src_fid);
         let dst_lang = file_languages.get(&dst_fid);
         let is_cross_lang = src_lang != dst_lang;
+
+        // Scope-resolution references are always symbol -> symbol; a
+        // file -> symbol Reference edge can only be an injected client call.
+        if weight.kind == EdgeKind::Reference && matches!(graph.graph[u], NodeData::File(_)) {
+            client_call_edges.push(InterPodEdge {
+                from_pod: src_pod,
+                to_pod: dst_pod,
+                from_file: src_fid,
+                to_file: dst_fid,
+                kind: EdgeKind::Reference,
+                confidence: weight.confidence,
+                is_cross_language: is_cross_lang,
+            });
+            continue;
+        }
 
         let key = (src_pod, dst_pod);
         let entry = dedup
@@ -236,6 +257,7 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
             is_cross_language: is_cross_lang,
         });
     }
+    inter_pod_edges.extend(client_call_edges);
 
     // Canonical edge order so manifest edges are stable across runs.
     inter_pod_edges.sort_by(|a, b| {

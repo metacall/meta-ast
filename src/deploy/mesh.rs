@@ -1,4 +1,4 @@
-use crate::deploy::scanner::CallSite;
+use crate::deploy::scanner::{CallSite, CallSiteVariant};
 use crate::graph::edge::EdgeKind;
 use crate::graph::node::NodeData;
 use crate::pipeline::GraphAnalysis;
@@ -237,37 +237,59 @@ pub fn generate_mesh_annotation(
                 }
 
                 // Find the call site whose source_file is in u_comp and
-                // whose scripts target v_comp (or match the file name).
-                let call_site_file = call_sites.iter().find_map(|site| {
-                    let site_path = site.source_file.to_string_lossy().replace('\\', "/");
-                    if file_to_component.get(&site_path) != Some(&u_comp) {
-                        return None;
-                    }
-                    let site_target_lang = site.target_lang.as_ref().map(|t| {
-                        crate::deploy::tags::metacall_tag(
-                            crate::deploy::tags::from_metacall_tag(t).unwrap_or(site.caller_lang),
-                        )
-                    });
-                    if site_target_lang == Some(v_lang) {
-                        Some(site_path)
-                    } else if let NodeData::File(dst_file) = &analysis.graph.graph[v] {
-                        let dst_name = dst_file
-                            .path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("");
-                        if site
-                            .scripts
-                            .iter()
-                            .any(|s| s.contains(dst_name) || dst_name.contains(s.as_str()))
+                // whose scripts target v_comp (or match the file name). When
+                // the edge targets a symbol, prefer a ClientCall site that
+                // names that exact function; otherwise fall back to the load
+                // attribution below.
+                let client_call_site = match &analysis.graph.graph[v] {
+                    NodeData::Symbol(sym) => call_sites.iter().find_map(|site| {
+                        let site_path = site.source_file.to_string_lossy().replace('\\', "/");
+                        if file_to_component.get(&site_path) != Some(&u_comp) {
+                            return None;
+                        }
+                        if site.variant == CallSiteVariant::ClientCall
+                            && site.function_name.as_deref() == Some(&sym.name)
                         {
                             Some(site_path)
                         } else {
                             None
                         }
-                    } else {
-                        None
-                    }
+                    }),
+                    _ => None,
+                };
+                let call_site_file = client_call_site.or_else(|| {
+                    call_sites.iter().find_map(|site| {
+                        let site_path = site.source_file.to_string_lossy().replace('\\', "/");
+                        if file_to_component.get(&site_path) != Some(&u_comp) {
+                            return None;
+                        }
+                        let site_target_lang = site.target_lang.as_ref().map(|t| {
+                            crate::deploy::tags::metacall_tag(
+                                crate::deploy::tags::from_metacall_tag(t)
+                                    .unwrap_or(site.caller_lang),
+                            )
+                        });
+                        if site_target_lang == Some(v_lang) {
+                            Some(site_path)
+                        } else if let NodeData::File(dst_file) = &analysis.graph.graph[v] {
+                            let dst_name = dst_file
+                                .path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("");
+                            if site
+                                .scripts
+                                .iter()
+                                .any(|s| s.contains(dst_name) || dst_name.contains(s.as_str()))
+                            {
+                                Some(site_path)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
                 });
 
                 cross_language_edges.push(CrossLanguageEdge {
