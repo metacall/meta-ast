@@ -72,8 +72,8 @@ Detailed graph contract is defined in `specs/graph-model.md`.
 **Current status:** Baseline incremental analysis is implemented behind the `watch`
 feature flag (`--features watch`). The `watch` module (`src/watch/mod.rs`) provides:
 
-- `incremental_reanalyze()` — pure, deterministic, testable re-analysis step.
-- `run_watch()` — debounced OS-level watcher loop (via `notify` + `notify-debouncer-mini`).
+- `incremental_reanalyze()` - pure, deterministic, testable re-analysis step.
+- `run_watch()` - debounced OS-level watcher loop (via `notify` + `notify-debouncer-mini`).
 - BLAKE3 cryptographic content-hash fingerprinting (`Fingerprint([u8; 32])`) for change detection.
 - Cached `Arc<FileExtraction>` per file: zero-allocation pointer sharing for unchanged files; graph rebuilt from scratch each tick (graph + SCC rebuild is sub-ms).
 - CLI integration via `meta-ast graph <path> --watch [--watch-debounce <ms>]`.

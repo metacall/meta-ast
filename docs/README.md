@@ -44,6 +44,8 @@ back to requirements and forward to tests.
 - `rfcs/0007-dgraph-integration-scope.md` - Dgraph integration scope
 - `rfcs/0008-graph-module.md` - Graph module design
 - `rfcs/0009-cross-file-dependency-mapping.md` - Cross-file dependency mapping
+- `rfcs/0010-deploy-manifests.md` - MetaCall deploy manifests (superseded by the pod model)
+- `rfcs/0011-metacall-client-api-support.md` - MetaCall client call support: `metacall()` and the full invocation surface
 
 ## Scope policy
 
