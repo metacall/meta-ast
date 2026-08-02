@@ -1,4 +1,4 @@
-//! Language system: compile-time enum dispatch over 8 language packs.
+//! Language system: compile-time enum dispatch over 9 language packs.
 //!
 //! `LangId` enum selects a `LanguageSpec` via exhaustive `match`.
 //! Each `LanguageSpec` bundles a grammar constructor, tree-sitter query
@@ -14,6 +14,7 @@ pub(crate) mod go;
 pub mod import_resolver;
 pub(crate) mod javascript;
 pub(crate) mod python;
+pub(crate) mod ruby;
 pub(crate) mod rust;
 pub(crate) mod tsx;
 pub(crate) mod typescript;
@@ -64,10 +65,11 @@ pub enum LangId {
     Cpp,
     Rust,
     Go,
+    Ruby,
 }
 
 impl LangId {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 9;
 
     pub fn all() -> [LangId; Self::COUNT] {
         [
@@ -79,6 +81,7 @@ impl LangId {
             LangId::Cpp,
             LangId::Rust,
             LangId::Go,
+            LangId::Ruby,
         ]
     }
 
@@ -131,6 +134,7 @@ pub fn spec_for(id: LangId) -> &'static LanguageSpec {
         LangId::Cpp => &cpp::CPP_SPEC,
         LangId::Rust => &rust::RUST_SPEC,
         LangId::Go => &go::GO_SPEC,
+        LangId::Ruby => &ruby::RUBY_SPEC,
     }
 }
 
@@ -184,12 +188,16 @@ mod tests {
     #[test]
     fn lang_id_display() {
         assert_eq!(format!("{}", LangId::Python), "python");
+        assert_eq!(format!("{}", LangId::Ruby), "ruby");
     }
 
     #[test]
     fn lang_id_serde_snake_case() {
         let json = serde_json::to_string(&LangId::Python).unwrap();
         assert_eq!(json, "\"python\"");
+
+        let json = serde_json::to_string(&LangId::Ruby).unwrap();
+        assert_eq!(json, "\"ruby\"");
     }
 
     #[test]
@@ -220,7 +228,7 @@ mod tests {
 
     #[test]
     fn lang_id_count_matches_variant_count() {
-        assert_eq!(LangId::COUNT, 8);
+        assert_eq!(LangId::COUNT, 9);
         assert_eq!(LangId::all().len(), LangId::COUNT);
     }
 
@@ -282,5 +290,6 @@ mod tests {
         assert_eq!(LangId::Cpp.metacall_tag(), "cpp");
         assert_eq!(LangId::Rust.metacall_tag(), "rs");
         assert_eq!(LangId::Go.metacall_tag(), "go");
+        assert_eq!(LangId::Ruby.metacall_tag(), "rb");
     }
 }
