@@ -30,6 +30,7 @@ src/
 │   ├── cpp.rs                C++ queries + extraction
 │   ├── rust.rs               Rust queries + extraction
 │   ├── go.rs                 Go queries + extraction
+│   ├── ruby.rs               Ruby queries + extraction
 │   └── import_resolver.rs    ImportResolver trait, stateful resolvers (Python, Go, JS, TS)
 │
 ├── input/
@@ -265,6 +266,7 @@ pub enum LangId {
     Cpp,
     Rust,
     Go,
+    Ruby,
 }
 ```
 
@@ -328,6 +330,7 @@ No trait objects, no runtime plugins. Compile-time completeness checking via exh
 | `.cc`, `.cpp`, `.cxx` | `Cpp` |
 | `.rs` | `Rust` |
 | `.go` | `Go` |
+| `.rb`, `.gemspec` | `Ruby` |
 
 ---
 
@@ -478,6 +481,7 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 | `tree-sitter-cpp` | 0.23.4 | C++ grammar |
 | `tree-sitter-rust` | 0.24.2 | Rust grammar |
 | `tree-sitter-go` | 0.25.0 | Go grammar |
+| `tree-sitter-ruby` | 0.23.1 | Ruby grammar |
 | `petgraph` | 0.8.3 | Directed graph + Tarjan SCC |
 | `serde` + `serde_json` | 1.0 | JSON serialization |
 | `yaml_serde` | 0.10 | YAML serialization |
