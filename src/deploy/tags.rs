@@ -10,6 +10,7 @@ pub fn metacall_tag(lang: LangId) -> &'static str {
         LangId::Cpp => "cpp",
         LangId::Rust => "rs",
         LangId::Go => "go",
+        LangId::Ruby => "rb",
     }
 }
 
@@ -23,6 +24,7 @@ pub fn from_metacall_tag(tag: &str) -> Option<LangId> {
         "cpp" => Some(LangId::Cpp),
         "rs" => Some(LangId::Rust),
         "go" => Some(LangId::Go),
+        "rb" => Some(LangId::Ruby),
         _ => None,
     }
 }
@@ -41,5 +43,6 @@ mod tests {
         assert_eq!(metacall_tag(LangId::Cpp), "cpp");
         assert_eq!(metacall_tag(LangId::Rust), "rs");
         assert_eq!(metacall_tag(LangId::Go), "go");
+        assert_eq!(metacall_tag(LangId::Ruby), "rb");
     }
 }
