@@ -83,4 +83,4 @@ Each language implements isolated tree-sitter queries for imports and references
 ## References
 
 - RFC 0008 - Graph Module and SCC Analysis
-- `docs/specs/graph-model.md`
+- [`specs/graph-model.md`](specs/graph-model.md)

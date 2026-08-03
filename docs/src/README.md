@@ -13,9 +13,13 @@ back to requirements and forward to tests.
   output formats, and the `metacall-deploy` feature layer.
 - `STRUCTURE.md` - code structure, data structures, design patterns, module layout,
   and implementation order.
+- `DEPLOY.md` - MetaCall deploy manifests: scanner, pod partitioning, mesh annotation.
 - `DEV_CRATE_DECISIONS.md` - crate selection rationale and trade-offs.
 - `CI_CD.md` - CI/CD architecture and quality gates.
 - `ROADMAP.md` - phase-aligned implementation milestones and measurable exit gates.
+- `BENCHMARKS.md` - criterion benchmark results for pipeline, graph, and incremental.
+- `DEMO.md` - recorded CLI walkthroughs (GIFs) aligned to the delivered artifacts.
+- `FINAL_REPORT.md` - GSoC 2026 completion report.
 
 ## Specs
 

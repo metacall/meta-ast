@@ -47,14 +47,14 @@ Exit gates:
 3. End-to-end pipeline extracts data nodes from real Rust fixtures.
 4. Flow edges created for def-use chains (param→usage, let→let shadowing).
 
-## Phase 4 - CLI polish, output formats, visualization [IN PROGRESS]
+## Phase 4 - CLI polish, output formats, visualization [COMPLETE]
 
 Goals:
 
 - Structured output (JSON + YAML) with `--format` flag.
 - Interactive HTML dashboard with Cytoscape.js via `--html` flag.
 - Watch mode and incremental-update strategy.
-- C ABI scaffolding and header generation.
+- C ABI scaffolding and header generation (scoped out, see below).
 
 Exit gates:
 
@@ -63,7 +63,9 @@ Exit gates:
    auto-opens in browser.~~ DONE
 3. ~~Watch-mode stability tests pass.~~ DONE
 4. ~~Incremental performance target evidence captured.~~ DONE
-5. C ABI smoke tests pass. NOT YET STARTED
+5. C ABI smoke tests. DROPPED - issue #21 closed NOT_PLANNED; the C ABI
+   interface was proposed in RFC 0011 but not implemented. The exit gate is
+   removed from scope and tracked as post-GSoC future work.
 
 ## Phase 5 - MetaCall Deploy Manifests [COMPLETE]
 
@@ -97,7 +99,7 @@ Exit gates:
 5. External dependency resolution identifies `jsonwebtoken` from `package.json`/lockfile
    in the `auth-function-mesh` fixture with exact version pinning. DONE
 
-## Phase 6 - Language expansion [NOT STARTED]
+## Phase 6 - Language expansion [COMPLETE]
 
 Goals:
 
@@ -106,13 +108,20 @@ Goals:
   references), import resolver, visibility rules, and fixture tests.
 - Cross-language Call Site detection extended to new language ports as they ship.
 
+Outcome:
+
+- Ruby shipped end to end: grammar, query pack, resolver, visibility rules,
+  fixtures, snapshots, and `metacall-deploy` call-site and lockfile coverage.
+- C# (issue #23) and Java (issue #24) were evaluated and closed NOT_PLANNED.
+  Ruby was the third language added, bringing the catalog to nine.
+
 Exit gates:
 
-1. C# and Java parse on fixtures.
-2. All new language packs pass extraction and cross-file dependency tests.
-3. `metacall-deploy` feature detects call sites in new port bindings.
+1. New language parses on fixtures. DONE (Ruby)
+2. New language pack passes extraction and cross-file dependency tests. DONE
+3. `metacall-deploy` feature detects call sites in the new port bindings. DONE
 
-## Phase 7 - Validation and delivery [NOT STARTED]
+## Phase 7 - Validation and delivery [COMPLETE]
 
 Goals:
 
@@ -122,11 +131,15 @@ Goals:
 
 Exit gates:
 
-1. Green CI matrix on Linux/macOS/Windows.
-2. Benchmarks and docs published.
-3. Candidate demo narrative aligns with delivered artifacts.
-4. Release artifacts (binaries, crates) published and verified.
-5. Release announcement drafted and scheduled.
+1. Green CI matrix on Linux/macOS/Windows. DONE
+2. Benchmarks and docs published. DONE - see [BENCHMARKS.md](BENCHMARKS.md) and
+   the mdbook site (GitHub Pages).
+3. Candidate demo narrative aligns with delivered artifacts. DONE - see
+   [DEMO.md](DEMO.md).
+4. Release artifacts (binaries, crates) published and verified. DONE - v0.5.0
+   on GitHub Releases (7 targets x core + deploy binaries) and crates.io.
+5. Release announcement drafted and scheduled. DONE - v0.5.0 release notes and
+   the [Final Report](FINAL_REPORT.md).
 
 ## Scope boundaries
 

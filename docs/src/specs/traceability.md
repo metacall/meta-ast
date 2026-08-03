@@ -9,7 +9,6 @@
 | Dependency graph + SCC | `specs/graph-model.md`, `rfcs/0004-graph-representation-and-scc.md`, `rfcs/0008-graph-module.md`, `rfcs/0009-cross-file-dependency-mapping.md` | graph fixture SCC assertions |
 | Deployment Unit annotation | `specs/graph-model.md`, `rfcs/0004-graph-representation-and-scc.md` | SCC classification fixture tests |
 | Dataflow (stretch) | `specs/graph-model.md`, `rfcs/0007-dgraph-integration-scope.md` | optional feature tests |
-| Stable C ABI | `ROADMAP.md` (Phase 4) | C ABI smoke tests |
 | Dgraph sink | `rfcs/0007-dgraph-integration-scope.md` + `specs/graph-model.md` | export contract validation |
 | Deploy Manifests (`metacall-deploy`) | `specs/requirements.md` FR-9 | fixture manifest comparison tests |
 | Mesh Annotation (`metacall-deploy`) | `specs/requirements.md` FR-10 | SCC unit classification tests |

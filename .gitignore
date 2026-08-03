@@ -28,3 +28,6 @@ target
 # Default graph dashboard output
 *.metast
 
+
+# mdbook generated output
+docs/book

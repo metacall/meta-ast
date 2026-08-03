@@ -9,8 +9,8 @@
 ## 2. Workflow layout
 
 - `ci.yml` - single workflow with three jobs: test (nextest + doc tests), build (release artifacts), lint (fmt + clippy + cargo-deny).
-- `benchmark.yml` - criterion benchmarks and trend tracking.
-- `docs.yml` - docs generation and publication via mdbook.
+- `benchmark.yml` - criterion benchmarks and trend tracking (uploads raw reports as artifacts).
+- `docs.yml` - rustdoc build (deny warnings) and mdbook site publication to GitHub Pages.
 - `release.yml` - tag-driven release and package publication with changelog generation.
 
 ## 3. Quality gates

@@ -1,0 +1,16 @@
+[book]
+title = "meta-ast"
+authors = ["Khaled Alam"]
+description = "Polyglot static analysis engine: symbol extraction, cross-language dependency graphs, SCC analysis, and MetaCall deployment manifests."
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/metacall/meta-ast"
+edit-url-template = "https://github.com/metacall/meta-ast/edit/main/docs/{path}"
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
+
+[output.html.search]
+enable = true
+limit-results = 30
