@@ -3,9 +3,10 @@ name: docs
 on:
   push:
     branches: [main]
-    paths: ["docs/**", "src/**"]
+    paths: ["docs/**", "src/**", ".github/workflows/docs.yml"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
