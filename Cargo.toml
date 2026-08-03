@@ -2,7 +2,7 @@
 name = "meta-ast"
 version = "0.4.0"
 edition = "2024"
-description = "Polyglot static-analysis engine: extract symbols and cross-language dependency graphs from 8 supported source languages, with optional MetaCall deployment manifest generation."
+description = "Polyglot static-analysis engine: extract symbols and cross-language dependency graphs from 9 supported source languages, with optional MetaCall deployment manifest generation."
 readme = "README.md"
 repository = "https://github.com/metacall/meta-ast"
 license = "Apache-2.0"

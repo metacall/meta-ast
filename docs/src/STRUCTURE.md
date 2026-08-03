@@ -67,7 +67,7 @@ src/
 ├── watch/                     [feature: watch]
 │   └── mod.rs                 IncrementalCache, WatchState, incremental_reanalyze, run_watch
 │
-└── deploy/                   [feature: metacall-deploy] See docs/DEPLOY.md
+└── deploy/                   [feature: metacall-deploy] See [DEPLOY.md](DEPLOY.md)
     ├── mod.rs                Entry: run_deploy(), DeployConfig, add_metacall_edge()
     ├── scanner.rs            tree-sitter call-site detection, CallSite, CallSiteVariant, confidence
     ├── pod.rs                Union-Find partition_into_pods(), PodPartition, InterPodEdge

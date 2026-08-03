@@ -8,7 +8,7 @@ Accepted
 
 Phase 1 of meta-ast established the foundation: file discovery, parsing, symbol extraction, and inspect-compatible JSON output. Phase 2 extends this with dependency graph construction and Strongly Connected Component (SCC) analysis to provide deployability insights for polyglot codebases.
 
-The graph model was specified in `docs/specs/graph-model.md` and the implementation approach using petgraph was validated through research. This RFC defines the concrete module structure, APIs, and implementation strategy.
+The graph model was specified in [`specs/graph-model.md`](specs/graph-model.md) and the implementation approach using petgraph was validated through research. This RFC defines the concrete module structure, APIs, and implementation strategy.
 
 ## Goals
 
@@ -248,7 +248,7 @@ Rejected: Single graph with edge kind filtering is simpler and memory-efficient.
 
 ## References
 
-- `docs/specs/graph-model.md` - Graph semantics and invariants
-- `docs/specs/requirements.md` - FR-4, FR-5 for graph and SCC requirements
+- [`specs/graph-model.md`](specs/graph-model.md) - Graph semantics and invariants
+- [`specs/requirements.md`](specs/requirements.md) - FR-4, FR-5 for graph and SCC requirements
 - ADR 0004 - Graph representation decision record
 - petgraph documentation: https://docs.rs/petgraph

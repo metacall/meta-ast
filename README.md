@@ -1,13 +1,18 @@
 <div align="center">
-  <img src="docs/assets/metast.png" alt="meta-ast Logo" width="400">
+  <img src="docs/src/assets/metast.png" alt="meta-ast Logo" width="400">
   <p align="center"><strong>Standalone static analysis and dependency graph generator for polyglot source trees</strong></p>
 </div>
 
 ---
 
+[![GSoC 2026 - MetaCall](https://img.shields.io/badge/GSoC_2026-MetaCall-blue)](https://summerofcode.withgoogle.com/)
+[![crates.io](https://img.shields.io/crates/v/meta-ast)](https://crates.io/crates/meta-ast)
+[![docs](https://img.shields.io/badge/docs-metacall.github.io%2Fmeta--ast-4d76ae)](https://metacall.github.io/meta-ast/)
+[![CI](https://github.com/metacall/meta-ast/actions/workflows/ci.yml/badge.svg)](https://github.com/metacall/meta-ast/actions/workflows/ci.yml)
+
 `meta-ast` is a fast, standalone static analysis engine that parses multi-language projects, builds symbol-level dependency graphs, detects cyclic imports, and generates MetaCall deployment manifests. Written in Rust, powered by tree-sitter, with no runtime execution of user code.
 
-Built as part of **Google Summer of Code 2026** for the **MetaCall** organization by **[Khaled Alam](https://github.com/k5602)**.
+Built as part of **Google Summer of Code 2026** for the **MetaCall** organization by **[Khaled Alam](https://github.com/k5602)**. Project status: complete. See the [Final Report](docs/src/FINAL_REPORT.md).
 
 Supports **9 languages**: Python, JavaScript, TypeScript, TSX, C, C++, Rust, Go, Ruby.
 
@@ -141,6 +146,8 @@ Extracts all function, class, and object declarations from a codebase.
 meta-ast inspect <path> [-l language] [-f json|yaml] [-o output.json]
 ```
 
+![inspect demo](docs/src/assets/gifs/meta-ast-intro.gif)
+
 ### `graph`
 
 Builds the cross-file dependency graph, resolves imports, and runs Tarjan SCC to identify cyclic clusters and independent deployment units.
@@ -153,10 +160,14 @@ meta-ast graph <path> --watch                   # watch mode: continuous re-anal
 meta-ast graph <path> --watch --watch-debounce 100 --html -o graph.html
 ```
 
+![graph demo](docs/src/assets/gifs/meta-ast-graph.gif)
+
 `--watch` enters a debounced watch loop: on each file change, only changed files
 are re-extracted using BLAKE3 cryptographic content fingerprinting (unchanged files reuse cached `Arc` extractions), then the graph + SCC
 are rebuilt. Snapshot IDs increment with each re-analysis tick. Requires
 `cargo install meta-ast --features watch` (or `cargo build --features watch`).
+
+![watch demo](docs/src/assets/gifs/meta-ast-watch.gif)
 
 ### `deploy` *(requires `--features metacall-deploy`)*
 
@@ -176,7 +187,9 @@ Generates two artifacts:
 | `metacall.pods.json` | Pod manifest: language-based deployment units, inter-pod edges with confidence scores, per-pod dependency lists with pinned versions, and AST node metrics |
 | `metacall.mesh.json` | SCC-derived Function Mesh topology annotation with cross-language call-site attribution |
 
-See [docs/DEPLOY.md](docs/DEPLOY.md) for scanner details, confidence scoring, pod partitioning, manifest schema, and the fairness check used in CI.
+![deploy demo](docs/src/assets/gifs/meta-ast-deploy.gif)
+
+See [docs/src/DEPLOY.md](docs/src/DEPLOY.md) for scanner details, confidence scoring, pod partitioning, manifest schema, and the fairness check used in CI.
 
 ---
 
@@ -184,25 +197,35 @@ See [docs/DEPLOY.md](docs/DEPLOY.md) for scanner details, confidence scoring, po
 
 | Document | Description |
 |---|---|
+| [docs/src/DEMO.md](docs/src/DEMO.md) | Recorded walkthroughs of every subcommand (GIFs) |
+| [docs/src/BENCHMARKS.md](docs/src/BENCHMARKS.md) | Criterion benchmark results |
+| [docs/src/FINAL_REPORT.md](docs/src/FINAL_REPORT.md) | GSoC 2026 completion report |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to build, test, and submit changes |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | High-level pipeline and component boundaries |
-| [docs/STRUCTURE.md](docs/STRUCTURE.md) | Module layout, data structures, design patterns |
-| [docs/DEPLOY.md](docs/DEPLOY.md) | Deploy module: scanner, manifests, mesh annotation |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Phase-by-phase delivery plan |
-| [docs/adr/](docs/adr/) | Architecture Decision Records |
-| [docs/rfcs/](docs/rfcs/) | Design RFCs |
-| [docs/specs/](docs/specs/) | Requirements and traceability |
+| [docs/src/ARCHITECTURE.md](docs/src/ARCHITECTURE.md) | High-level pipeline and component boundaries |
+| [docs/src/STRUCTURE.md](docs/src/STRUCTURE.md) | Module layout, data structures, design patterns |
+| [docs/src/DEPLOY.md](docs/src/DEPLOY.md) | Deploy module: scanner, manifests, mesh annotation |
+| [docs/src/ROADMAP.md](docs/src/ROADMAP.md) | Phase-by-phase delivery plan |
+| [docs/src/adr/](docs/src/adr/) | Architecture Decision Records |
+| [docs/src/rfcs/](docs/src/rfcs/) | Design RFCs |
+| [docs/src/specs/](docs/src/specs/) | Requirements and traceability |
+
+All docs are also published as an [mdbook site](https://metacall.github.io/meta-ast/).
 
 ---
 
 ## Roadmap
 
-- **Phase 4 (In Progress)**: Watch mode complete (feature-gated behind `--features watch`).
-  Remaining: C ABI scaffolding.
-- **Phase 5 (Complete)**: `metacall-deploy` - call-site scanning, pod partitioning, dependency resolution, pod manifests, Function Mesh annotation, fairness checking.
-- **Phase 6 (Planned)**: Language expansion (C#, Java).
+All phases complete. Full details in [docs/src/ROADMAP.md](docs/src/ROADMAP.md).
 
-Full details in [docs/ROADMAP.md](docs/ROADMAP.md).
+- **Phase 1-2 (Complete)**: Core symbol extraction, dependency graph, SCC.
+- **Phase 3 (Complete)**: Datagraph and optional sink.
+- **Phase 4 (Complete)**: CLI polish, output formats, HTML dashboard, watch mode.
+- **Phase 5 (Complete)**: `metacall-deploy` - call-site scanning, pod partitioning, dependency resolution, pod manifests, Function Mesh annotation, fairness checking.
+- **Phase 6 (Complete)**: Language expansion - Ruby added (nine languages total).
+- **Phase 7 (Complete)**: Validation and delivery - CI/CD hardening, docs, benchmarks, releases, announcement.
+
+Future work (post-GSoC): deeper dataflow, C ABI, more languages. See the
+[Final Report](docs/src/FINAL_REPORT.md).
 
 ---
 

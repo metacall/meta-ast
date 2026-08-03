@@ -6,6 +6,8 @@ use meta_ast::model::SnapshotId;
 use meta_ast::watch::{WatchConfig, run_watch};
 
 fn main() -> anyhow::Result<()> {
+    meta_ast::interface::banner::print_banner();
+
     meta_ast::language::validate_queries();
 
     tracing_subscriber::fmt()

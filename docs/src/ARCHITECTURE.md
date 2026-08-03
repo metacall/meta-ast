@@ -18,7 +18,7 @@
 7. Cross-file reference resolution via `FlattenedScopeCache` (DFS the import graph once per file, then O(1) scope lookups).
 8. SCC analysis (Tarjan) and Deployment Unit annotation.
 9. Output emission (JSON, YAML, or interactive HTML dashboard).
-10. _(Requires `metacall-deploy` feature)_ Cross-language call-site scanning, pod partitioning, dependency resolution from lockfiles, pod-and-mesh manifest generation, and CI fairness checking. See `docs/DEPLOY.md`.
+10. _(Requires `metacall-deploy` feature)_ Cross-language call-site scanning, pod partitioning, dependency resolution from lockfiles, pod-and-mesh manifest generation, and CI fairness checking. See [DEPLOY.md](DEPLOY.md).
 
 ## 3. Component boundaries
 
@@ -31,7 +31,7 @@
 - **Resolver layer:** cross-file reference resolution via `FlattenedScopeCache` (`graph/resolver.rs`).
 - **Output layer:** serialization and optional adapters.
 - **Interface layer:** CLI + library API (future: C ABI).
-- **Deploy layer** _(feature-gated: `metacall-deploy`)_: Cross-language call-site scanner (`scanner.rs`), pod partitioning via Union-Find over same-language edges (`pod.rs`), cross-language SCC cut detection and oversized-pod rebalancing (`cut.rs`), per-language external dependency resolution from lockfiles and manifests (`dependency.rs`), pod manifest generation (`manifest.rs`), Function Mesh annotation (`mesh.rs`), and CI fairness checking for RPC-converted cut edges (`check.rs`). See `docs/DEPLOY.md`.
+- **Deploy layer** _(feature-gated: `metacall-deploy`)_: Cross-language call-site scanner (`scanner.rs`), pod partitioning via Union-Find over same-language edges (`pod.rs`), cross-language SCC cut detection and oversized-pod rebalancing (`cut.rs`), per-language external dependency resolution from lockfiles and manifests (`dependency.rs`), pod manifest generation (`manifest.rs`), Function Mesh annotation (`mesh.rs`), and CI fairness checking for RPC-converted cut edges (`check.rs`). See [DEPLOY.md](DEPLOY.md).
 
 Detailed module layout, data structures, and dependency direction are defined in `STRUCTURE.md`.
 
