@@ -71,7 +71,7 @@ _Requires `--features metacall-deploy`. Full documentation in [DEPLOY.md](DEPLOY
 
 Goals:
 
-- Implement cross-language call-site detection across all 8 supported language ports
+- Implement cross-language call-site detection across all 9 supported language ports
   (`metacall_load_from_file`, `metacall_load_from_memory`, `metacall_load_from_package`,
   `metacall_load_from_configuration`), including CommonJS `require()` for JS/TS and
   bare-name call detection for Rust after `use` import.

@@ -2,7 +2,7 @@
 
 Thanks for wanting to contribute. This file explains how the project works and what happens to your change once you open a pull request. It is written for humans.
 
-`meta-ast` is a static analysis engine written in Rust. It parses 8 languages with tree-sitter, extracts symbols, builds cross-language dependency graphs, and detects import cycles. It never executes the code it analyzes. The README covers the tool itself; `docs/` covers the architecture.
+`meta-ast` is a static analysis engine written in Rust. It parses 9 languages with tree-sitter, extracts symbols, builds cross-language dependency graphs, and detects import cycles. It never executes the code it analyzes. The README covers the tool itself; `docs/` covers the architecture.
 
 ## Table of contents
 

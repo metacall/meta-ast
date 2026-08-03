@@ -231,6 +231,19 @@ static GO_QUERY: LazyLock<Query> = LazyLock::new(|| {
     )
 });
 
+static RUBY_QUERY: LazyLock<Query> = LazyLock::new(|| {
+    crate::language::common::compile_query(
+        &tree_sitter_ruby::LANGUAGE.into(),
+        r#"
+(call
+  method: (identifier) @fn_name
+  arguments: (argument_list) @args
+  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacallfms)$"))
+"#,
+        "Ruby deploy",
+    )
+});
+
 pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<CallSite> {
     let query = match id {
         LangId::Python => &*PYTHON_QUERY,
@@ -241,6 +254,7 @@ pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<Cal
         LangId::Cpp => &*CPP_QUERY,
         LangId::Rust => &*RUST_QUERY,
         LangId::Go => &*GO_QUERY,
+        LangId::Ruby => &*RUBY_QUERY,
     };
 
     let mut cursor = QueryCursor::new();

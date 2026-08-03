@@ -9,7 +9,7 @@
 
 Built as part of **Google Summer of Code 2026** for the **MetaCall** organization by **[Khaled Alam](https://github.com/k5602)**.
 
-Supports **8 languages**: Python, JavaScript, TypeScript, TSX, C, C++, Rust, Go.
+Supports **9 languages**: Python, JavaScript, TypeScript, TSX, C, C++, Rust, Go, Ruby.
 
 ---
 
@@ -68,8 +68,8 @@ The binary is at `./target/release/meta-ast`.
 `meta-ast` exists to give polyglot codebases a single, fast, language-agnostic
 view of their structure without executing any user code. Its objectives:
 
-- **Parse 8 languages with one tool.** Python, JavaScript, TypeScript, TSX, C,
-  C++, Rust, and Go flow through a uniform tree-sitter pipeline. A mixed
+- **Parse 9 languages with one tool.** Python, JavaScript, TypeScript, TSX, C,
+  C++, Rust, Go, and Ruby flow through a uniform tree-sitter pipeline. A mixed
   Python/JS/Rust project is one graph, not three glued together.
 - **Normalize to a stable IR.** Every declaration becomes a `Symbol` with a
   consistent shape and a stable JSON/YAML output contract. Downstream tooling

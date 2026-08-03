@@ -33,6 +33,7 @@ pub fn classify_external(external: &ExternalNode, project_root: &Path) -> Extern
         }
         LangId::Rust => classify_rust(external, project_root),
         LangId::Go => classify_go(external, project_root),
+        LangId::Ruby => classify_ruby(external, project_root),
         LangId::C | LangId::Cpp => classify_c_cpp_best_effort(external, project_root),
     }
 }
@@ -282,6 +283,33 @@ fn classify_go(external: &ExternalNode, root: &Path) -> ExternalClassification {
     }
 }
 
+fn classify_ruby(external: &ExternalNode, root: &Path) -> ExternalClassification {
+    let lf = root.join("Gemfile.lock");
+    if lf.exists() {
+        return ExternalClassification::Classified {
+            package_name: external.raw_path.clone(),
+            version: parse_version_from_gemfile_lock(&lf, &external.raw_path),
+            language: LangId::Ruby,
+            source: DependencySource::Lockfile,
+        };
+    }
+
+    let mf = root.join("Gemfile");
+    if mf.exists() {
+        return ExternalClassification::Classified {
+            package_name: external.raw_path.clone(),
+            version: None,
+            language: LangId::Ruby,
+            source: DependencySource::Manifest,
+        };
+    }
+
+    ExternalClassification::Unresolved {
+        raw_path: external.raw_path.clone(),
+        reason: "no Gemfile.lock or Gemfile found".into(),
+    }
+}
+
 fn classify_c_cpp_best_effort(external: &ExternalNode, root: &Path) -> ExternalClassification {
     // C/C++ has no universal convention. Try conanfile.txt, then vcpkg.json.
     // If neither exists, silently fall back to Unresolved.
@@ -381,6 +409,22 @@ fn parse_version_from_go_sum(path: &Path, package: &str) -> Option<String> {
     None
 }
 
+fn parse_version_from_gemfile_lock(path: &Path, name: &str) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    // Gemfile.lock lists each gem as "  <name> (<version>)" under a specs
+    // section. The name has no quotes; match the indented line exactly.
+    for line in content.lines() {
+        let line = line.trim_start();
+        if let Some(rest) = line
+            .strip_prefix(&format!("{name} ("))
+            .and_then(|rest| rest.strip_suffix(')'))
+        {
+            return Some(rest.trim().to_string());
+        }
+    }
+    None
+}
+
 /// Extract the first semver-like substring from a line.
 fn extract_semver(line: &str) -> Option<String> {
     let mut chars = line.chars().peekable();
@@ -414,4 +458,84 @@ fn extract_semver(line: &str) -> Option<String> {
     }
     let _ = start;
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn external_node(raw_path: &str) -> ExternalNode {
+        ExternalNode {
+            raw_path: raw_path.to_string(),
+            language: LangId::Ruby,
+            classification: None,
+        }
+    }
+
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("meta_ast_ruby_dep_{name}"));
+        if dir.exists() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn parse_version_from_gemfile_lock_extracts_version() {
+        let dir = test_dir("parse");
+        let lf = dir.join("Gemfile.lock");
+        std::fs::write(
+            &lf,
+            "GEM\n  remote: https://rubygems.org/\n  specs:\n    rails (7.0.8.4)\n      actioncable (= 7.0.8.4)\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_version_from_gemfile_lock(&lf, "rails"),
+            Some("7.0.8.4".to_string())
+        );
+        assert_eq!(parse_version_from_gemfile_lock(&lf, "missing"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn classify_ruby_uses_gemfile_lock() {
+        let dir = test_dir("classify_lock");
+        std::fs::write(
+            dir.join("Gemfile.lock"),
+            "GEM\n  specs:\n    rails (7.0.8.4)\n",
+        )
+        .unwrap();
+
+        let classification = classify_ruby(&external_node("rails"), &dir);
+        match classification {
+            ExternalClassification::Classified {
+                package_name,
+                version,
+                language,
+                source,
+            } => {
+                assert_eq!(package_name, "rails");
+                assert_eq!(version.as_deref(), Some("7.0.8.4"));
+                assert_eq!(language, LangId::Ruby);
+                assert_eq!(source, DependencySource::Lockfile);
+            }
+            other => panic!("expected Classified, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn classify_ruby_unresolved_without_gemfile() {
+        let missing = std::env::temp_dir().join("meta_ast_ruby_dep_missing_dir");
+        let classification = classify_ruby(&external_node("rails"), &missing);
+        match classification {
+            ExternalClassification::Unresolved { raw_path, reason } => {
+                assert_eq!(raw_path, "rails");
+                assert_eq!(reason, "no Gemfile.lock or Gemfile found");
+            }
+            other => panic!("expected Unresolved, got {other:?}"),
+        }
+    }
 }

@@ -13,6 +13,7 @@
 //! |------------|--------------|
 //! | Rust       | Implemented  |
 //! | Python     | Implemented  |
+//! | Ruby       | TODO         |
 //! | JS/TS/TSX  | TODO         |
 //! | Go         | TODO         |
 //! | C/C++      | TODO         |
@@ -51,6 +52,8 @@ pub fn extract_dataflow(
         LangId::Go => (Vec::new(), Vec::new()),
         // TODO: Implement C/C++ dataflow extraction
         LangId::C | LangId::Cpp => (Vec::new(), Vec::new()),
+        // TODO: Implement Ruby dataflow extraction
+        LangId::Ruby => (Vec::new(), Vec::new()),
     }
 }
 

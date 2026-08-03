@@ -100,7 +100,7 @@ src/deploy/
 
 ### Language coverage
 
-Queries cover all 8 supported languages: Python, JavaScript, TypeScript, TSX, C, C++, Rust, and Go.
+Queries cover all 9 supported languages: Python, JavaScript, TypeScript, TSX, C, C++, Rust, Go, and Ruby.
 
 ### Client invocation resolution
 

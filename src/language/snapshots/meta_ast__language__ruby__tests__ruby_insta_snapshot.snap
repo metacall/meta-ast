@@ -1,0 +1,347 @@
+---
+source: src/language/ruby.rs
+assertion_line: 324
+expression: symbols
+---
+[
+  {
+    "name": "Widget",
+    "kind": "Module",
+    "source_range": {
+      "byte_start": 127,
+      "byte_end": 911,
+      "start": {
+        "line": 5,
+        "column": 0
+      },
+      "end": {
+        "line": 47,
+        "column": 3
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": "The Widget namespace groups all widget-related classes.",
+    "is_async": false
+  },
+  {
+    "name": "VERSION",
+    "kind": "Constant",
+    "source_range": {
+      "byte_start": 143,
+      "byte_end": 167,
+      "start": {
+        "line": 6,
+        "column": 2
+      },
+      "end": {
+        "line": 6,
+        "column": 26
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Report",
+    "kind": "Class",
+    "source_range": {
+      "byte_start": 224,
+      "byte_end": 907,
+      "start": {
+        "line": 9,
+        "column": 2
+      },
+      "end": {
+        "line": 46,
+        "column": 5
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": "A Report renders widget metrics to text or JSON.",
+    "is_async": false
+  },
+  {
+    "name": "FORMATS",
+    "kind": "Constant",
+    "source_range": {
+      "byte_start": 241,
+      "byte_end": 271,
+      "start": {
+        "line": 10,
+        "column": 4
+      },
+      "end": {
+        "line": 10,
+        "column": 34
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "initialize",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 277,
+      "byte_end": 357,
+      "start": {
+        "line": 12,
+        "column": 4
+      },
+      "end": {
+        "line": 15,
+        "column": 7
+      }
+    },
+    "visibility": null,
+    "signature": "(title, rows = [])",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "total",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 410,
+      "byte_end": 443,
+      "start": {
+        "line": 18,
+        "column": 4
+      },
+      "end": {
+        "line": 20,
+        "column": 7
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": "Compute the total value across all rows.",
+    "is_async": false
+  },
+  {
+    "name": "render",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 505,
+      "byte_end": 548,
+      "start": {
+        "line": 23,
+        "column": 4
+      },
+      "end": {
+        "line": 25,
+        "column": 7
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": "Render the report using the configured formatter.",
+    "is_async": false
+  },
+  {
+    "name": "to_json",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 601,
+      "byte_end": 649,
+      "start": {
+        "line": 28,
+        "column": 4
+      },
+      "end": {
+        "line": 30,
+        "column": 7
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": "Serialize the report to a JSON document.",
+    "is_async": false
+  },
+  {
+    "name": "from_file",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 709,
+      "byte_end": 757,
+      "start": {
+        "line": 33,
+        "column": 4
+      },
+      "end": {
+        "line": 35,
+        "column": 7
+      }
+    },
+    "visibility": null,
+    "signature": "(path)",
+    "docstring": "Build a report directly from a local file path.",
+    "is_async": false
+  },
+  {
+    "name": "payload",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 776,
+      "byte_end": 832,
+      "start": {
+        "line": 39,
+        "column": 4
+      },
+      "end": {
+        "line": 41,
+        "column": 7
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "format_rows",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 838,
+      "byte_end": 901,
+      "start": {
+        "line": 43,
+        "column": 4
+      },
+      "end": {
+        "line": 45,
+        "column": 7
+      }
+    },
+    "visibility": null,
+    "signature": "(rows)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Auth",
+    "kind": "Module",
+    "source_range": {
+      "byte_start": 965,
+      "byte_end": 1293,
+      "start": {
+        "line": 50,
+        "column": 0
+      },
+      "end": {
+        "line": 68,
+        "column": 3
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": "The Auth namespace wraps the remote auth service.",
+    "is_async": false
+  },
+  {
+    "name": "ENDPOINT",
+    "kind": "Constant",
+    "source_range": {
+      "byte_start": 979,
+      "byte_end": 1023,
+      "start": {
+        "line": 51,
+        "column": 2
+      },
+      "end": {
+        "line": 51,
+        "column": 46
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Token",
+    "kind": "Class",
+    "source_range": {
+      "byte_start": 1073,
+      "byte_end": 1289,
+      "start": {
+        "line": 54,
+        "column": 2
+      },
+      "end": {
+        "line": 67,
+        "column": 5
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": "A Token manages an opaque session secret.",
+    "is_async": false
+  },
+  {
+    "name": "initialize",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 1089,
+      "byte_end": 1178,
+      "start": {
+        "line": 55,
+        "column": 4
+      },
+      "end": {
+        "line": 58,
+        "column": 7
+      }
+    },
+    "visibility": null,
+    "signature": "(secret)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "fresh?",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 1184,
+      "byte_end": 1231,
+      "start": {
+        "line": 60,
+        "column": 4
+      },
+      "end": {
+        "line": 62,
+        "column": 7
+      }
+    },
+    "visibility": null,
+    "signature": null,
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "for",
+    "kind": "Method",
+    "source_range": {
+      "byte_start": 1237,
+      "byte_end": 1283,
+      "start": {
+        "line": 64,
+        "column": 4
+      },
+      "end": {
+        "line": 66,
+        "column": 7
+      }
+    },
+    "visibility": null,
+    "signature": "(secret)",
+    "docstring": null,
+    "is_async": false
+  }
+]
