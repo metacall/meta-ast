@@ -20,7 +20,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Run benchmarks
-        run: cargo bench -- --output-format bencher | tee bench-results.txt
+        run: cargo bench --features watch -- --output-format bencher | tee bench-results.txt
 
       - name: Upload benchmark report
         uses: actions/upload-artifact@v4
