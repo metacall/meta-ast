@@ -503,9 +503,10 @@ fn bench_full_datagraph_pipeline(c: &mut Criterion) {
 /// Benchmark post-build edge normalization on a hub-and-spokes graph.
 ///
 /// The setup adds `out_degree` distinct Import edges from a hub node. The
-/// timed region re-inserts those same triples through `add_edge_normalized`,
-/// which exercises the duplicate-dedup path. This isolates the cost of the
-/// dedup lookup from edge insertion.
+/// timed region re-inserts those same endpoint pairs through
+/// `add_edge_normalized`, which exercises the duplicate-dedup path only.
+/// Setup inserts happen outside the timed region; the fresh-insert path is
+/// not timed. This isolates the cost of the dedup lookup from edge insertion.
 fn bench_postbuild_edge_normalization(c: &mut Criterion) {
     let mut group = c.benchmark_group("postbuild_edge_normalization");
 
@@ -516,18 +517,18 @@ fn bench_postbuild_edge_normalization(c: &mut Criterion) {
             |b, &out_degree| {
                 let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
                 let hub = graph.add_node(NodeData::File(create_test_file_node(1, "hub.rs")));
-                let mut triples: Vec<(NodeIndex, NodeIndex)> = Vec::with_capacity(out_degree);
+                let mut edges: Vec<(NodeIndex, NodeIndex)> = Vec::with_capacity(out_degree);
                 for i in 0..out_degree {
                     let target = graph.add_node(NodeData::File(create_test_file_node(
                         (i + 2) as u32,
                         &format!("target_{}.rs", i),
                     )));
                     graph.add_edge_normalized(hub, target, EdgeKind::Import, 0.5);
-                    triples.push((hub, target));
+                    edges.push((hub, target));
                 }
 
                 b.iter(|| {
-                    for &(source, target) in &triples {
+                    for &(source, target) in &edges {
                         graph.add_edge_normalized(source, target, EdgeKind::Import, 0.9);
                     }
                     black_box(graph.edge_count());

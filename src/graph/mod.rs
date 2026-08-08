@@ -160,7 +160,8 @@ impl CodeGraph {
     ) {
         let key = (source, target, kind);
         if let Some(&edge_idx) = self.edge_index.get(&key) {
-            self.graph[edge_idx].confidence = self.graph[edge_idx].confidence.max(confidence);
+            let edge = &mut self.graph[edge_idx];
+            edge.confidence = edge.confidence.max(confidence);
             return;
         }
         let edge_idx = self.graph.add_edge(
@@ -189,9 +190,10 @@ impl CodeGraph {
     ) {
         let key = (source, target, kind);
         if let Some(&edge_idx) = self.edge_index.get(&key) {
-            self.graph[edge_idx].confidence = self.graph[edge_idx].confidence.max(confidence);
-            if self.graph[edge_idx].flow_kind.is_none() {
-                self.graph[edge_idx].flow_kind = flow_kind;
+            let edge = &mut self.graph[edge_idx];
+            edge.confidence = edge.confidence.max(confidence);
+            if edge.flow_kind.is_none() {
+                edge.flow_kind = flow_kind;
             }
             return;
         }
@@ -372,20 +374,32 @@ mod tests {
     }
 
     #[test]
+    fn build_populated_edge_index_normalizes_post_build_edges() {
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        let file_a = builder.add_file(PathBuf::from("a.rs"), LangId::Rust);
+        let file_b = builder.add_file(PathBuf::from("b.rs"), LangId::Rust);
+        builder.add_import(file_a, PathBuf::from("b.rs"));
+        let mut graph = builder.build();
+        assert_eq!(graph.edge_count(), 1);
+
+        let a_idx = graph.file_node_index(file_a).unwrap();
+        let b_idx = graph.file_node_index(file_b).unwrap();
+
+        // Duplicate triple already indexed by build(): must max-merge, not grow.
+        graph.add_edge_normalized(a_idx, b_idx, EdgeKind::Import, 0.5);
+        graph.add_edge_normalized(a_idx, b_idx, EdgeKind::Import, 0.8);
+        assert_eq!(graph.edge_count(), 1);
+
+        // Distinct kind on the same pair is a new edge.
+        graph.add_edge_normalized(a_idx, b_idx, EdgeKind::Reference, 0.9);
+        assert_eq!(graph.edge_count(), 2);
+    }
+
+    #[test]
     fn add_edge_normalized_handles_multiple_edge_kinds_between_same_nodes() {
         let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
-        let n1 = graph.add_node(NodeData::File(FileNode {
-            id: FileId::new(1).unwrap(),
-            path: PathBuf::from("a.rs"),
-            language: LangId::Rust,
-            snapshot_id: SnapshotId::new(1).unwrap(),
-        }));
-        let n2 = graph.add_node(NodeData::File(FileNode {
-            id: FileId::new(2).unwrap(),
-            path: PathBuf::from("b.rs"),
-            language: LangId::Rust,
-            snapshot_id: SnapshotId::new(1).unwrap(),
-        }));
+        let n1 = graph.add_node(test_file_node(1, "a.rs"));
+        let n2 = graph.add_node(test_file_node(2, "b.rs"));
 
         // 1. Add Reference edge with confidence 0.7
         graph.add_edge_normalized(n1, n2, EdgeKind::Reference, 0.7);
