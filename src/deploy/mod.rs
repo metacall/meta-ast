@@ -21,6 +21,7 @@ pub struct DeployConfig {
     pub out: PathBuf,
     pub format: OutputFormat,
     pub check: bool,
+    pub max_pod_size: usize,
 }
 
 pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
@@ -28,6 +29,9 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     tracing::info!("Root path: {}", config.root.display());
     tracing::info!("Output path: {}", config.out.display());
     tracing::info!("Check mode: {}", config.check);
+    if config.max_pod_size == 0 {
+        anyhow::bail!("max_pod_size must be at least 1");
+    }
 
     // 1. Run full pipeline graph analysis (covers extraction + SCC)
     let snapshot_id = crate::model::SnapshotId::new(1).unwrap();
@@ -169,9 +173,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
 
     // 10. Rebalance oversized pods
     for pod in &partition.pods {
-        if let Some(cut) =
-            cut::find_oversized_pod_cut(pod, &analysis.graph, cut::DEFAULT_MAX_POD_SIZE)
-        {
+        if let Some(cut) = cut::find_oversized_pod_cut(pod, &analysis.graph, config.max_pod_size) {
             all_cuts.push(cut);
         }
     }

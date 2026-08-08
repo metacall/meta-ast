@@ -16,6 +16,7 @@ mod deploy_mixed_tests {
             out: out_path.clone(),
             format: OutputFormat::Json,
             check: false,
+            max_pod_size: 20,
         };
         run_deploy(config).expect("Deploy failed");
 
@@ -110,6 +111,7 @@ mod deploy_mixed_tests {
             out: out_path,
             format: OutputFormat::Json,
             check: true,
+            max_pod_size: 20,
         };
 
         let result = run_deploy(config);
@@ -289,6 +291,7 @@ mod deploy_mixed_tests {
             out: out_dir.path().to_path_buf(),
             format: OutputFormat::Json,
             check: true,
+            max_pod_size: 20,
         };
 
         let result = run_deploy(config);
@@ -309,6 +312,7 @@ mod deploy_mixed_tests {
             out: out_path.clone(),
             format: OutputFormat::Json,
             check: false,
+            max_pod_size: 20,
         };
 
         run_deploy(config).expect("empty root should produce empty manifest");
@@ -457,6 +461,7 @@ mod deploy_mixed_tests {
             out: out_dir.path().to_path_buf(),
             format: OutputFormat::Json,
             check: false,
+            max_pod_size: 20,
         };
         run_deploy(config).expect("deploy failed");
 
@@ -532,6 +537,7 @@ mod deploy_mixed_tests {
             out: out_dir.path().to_path_buf(),
             format: OutputFormat::Json,
             check: true,
+            max_pod_size: 20,
         };
 
         let result = run_deploy(config);

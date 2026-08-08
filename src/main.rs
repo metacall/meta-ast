@@ -178,6 +178,7 @@ fn main() -> anyhow::Result<()> {
                 out: args.out,
                 format: args.format,
                 check: args.check,
+                max_pod_size: args.max_pod_size,
             };
             meta_ast::deploy::run_deploy(config)
         }

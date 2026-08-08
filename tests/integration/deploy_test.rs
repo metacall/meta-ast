@@ -18,6 +18,7 @@ mod deploy_tests {
             out: out_path.clone(),
             format: OutputFormat::Json,
             check: false,
+            max_pod_size: 20,
         };
 
         run_deploy(config).expect("Deploy failed");
@@ -63,6 +64,7 @@ mod deploy_tests {
             out: out_path.clone(),
             format: OutputFormat::Json,
             check: true,
+            max_pod_size: 20,
         };
 
         // Without pre-existing cuts, the fairness check should pass
@@ -70,6 +72,60 @@ mod deploy_tests {
         assert!(
             result.is_ok(),
             "check mode should pass without pre-existing metadata"
+        );
+    }
+
+    #[test]
+    fn max_pod_size_forces_oversized_pod_cut() {
+        let fixture = tempdir().unwrap();
+        let root = fixture.path().join("proj");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.py"), "import b\n").unwrap();
+        fs::write(root.join("b.py"), "import a\n").unwrap();
+
+        let run = |out_path: &std::path::Path, max_pod_size: usize| -> serde_json::Value {
+            let config = DeployConfig {
+                root: root.clone(),
+                out: out_path.to_path_buf(),
+                format: OutputFormat::Json,
+                check: false,
+                max_pod_size,
+            };
+            run_deploy(config).expect("Deploy failed");
+            let content = fs::read_to_string(out_path.join("metacall.pods.json")).unwrap();
+            serde_json::from_str(&content).unwrap()
+        };
+
+        let out_default = tempdir().unwrap();
+        let default_manifest = run(out_default.path(), 20);
+        let rpc_stubs: Vec<&serde_json::Value> = default_manifest["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["kind"].as_str() == Some("rpc_stub"))
+            .collect();
+        assert!(
+            rpc_stubs.is_empty(),
+            "expected no rpc_stub edges at the default threshold, got {rpc_stubs:?}"
+        );
+
+        let out_small = tempdir().unwrap();
+        let small_manifest = run(out_small.path(), 1);
+        let oversized: Vec<&serde_json::Value> = small_manifest["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["kind"].as_str() == Some("rpc_stub"))
+            .filter(|e| {
+                e["cut_annotation"]["cut_reason"]
+                    .get("OversizedPod")
+                    .is_some()
+            })
+            .collect();
+        assert!(
+            !oversized.is_empty(),
+            "expected an OversizedPod rpc_stub edge at max_pod_size 1, edges: {}",
+            small_manifest["edges"]
         );
     }
 

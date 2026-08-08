@@ -20,6 +20,7 @@ mod deploy_client_call_tests {
             out: out_path.clone(),
             format: OutputFormat::Json,
             check: false,
+            max_pod_size: 20,
         };
         run_deploy(config).expect("Deploy failed");
 
@@ -202,6 +203,7 @@ mod deploy_client_call_tests {
                 out: out.to_path_buf(),
                 format: OutputFormat::Json,
                 check: false,
+                max_pod_size: 20,
             };
             run_deploy(config).expect("Deploy failed");
         };

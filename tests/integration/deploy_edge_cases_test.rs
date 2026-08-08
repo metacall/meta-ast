@@ -13,6 +13,7 @@ mod deploy_edge_cases_tests {
             out: out_path.clone(),
             format: OutputFormat::Json,
             check: false,
+            max_pod_size: 20,
         };
         (out_dir, config)
     }
@@ -49,6 +50,7 @@ metacall_load_from_file('py', ['other.py'])
             out: out_path.clone(),
             format: OutputFormat::Json,
             check: false,
+            max_pod_size: 20,
         };
 
         run_deploy(config).expect("Deploy failed");
@@ -82,6 +84,7 @@ metacall_load_from_file('py', ['other.py'])
             out: out_path.clone(),
             format: OutputFormat::Json,
             check: false,
+            max_pod_size: 20,
         };
 
         run_deploy(config).expect("Deploy failed");
@@ -134,6 +137,7 @@ metacall_load_from_file('py', ['other.py'])
             out: out_path.clone(),
             format: OutputFormat::Json,
             check: false,
+            max_pod_size: 20,
         };
 
         run_deploy(config).expect("Deploy failed");
@@ -184,6 +188,7 @@ metacall_load_from_file('py', ['other.py'])
             out: out_path.clone(),
             format: OutputFormat::Json,
             check: true,
+            max_pod_size: 20,
         };
 
         let result = run_deploy(config);

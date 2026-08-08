@@ -123,6 +123,10 @@ pub struct DeployArgs {
     /// Output directory for generated manifests and mesh annotation
     #[arg(short, long, default_value = ".")]
     pub out: std::path::PathBuf,
+
+    /// Maximum number of files in a single pod before rebalancing is triggered
+    #[arg(long, default_value_t = crate::deploy::cut::DEFAULT_MAX_POD_SIZE)]
+    pub max_pod_size: usize,
 }
 
 #[cfg(test)]
