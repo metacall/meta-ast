@@ -165,7 +165,7 @@ mod tests {
 
         let builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let graph = builder.build();
-        let scc = SccAnalysis::analyze(&graph.graph);
+        let scc = SccAnalysis::analyze(graph.graph());
         let analysis = GraphAnalysis {
             graph,
             scc,
@@ -197,7 +197,7 @@ mod tests {
 
         let builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let graph = builder.build();
-        let scc = SccAnalysis::analyze(&graph.graph);
+        let scc = SccAnalysis::analyze(graph.graph());
         let analysis = GraphAnalysis {
             graph,
             scc,

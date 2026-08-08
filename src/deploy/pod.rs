@@ -96,22 +96,23 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
     // Union same-language Import+Reference edges.
     let n = file_ids.len();
     let mut uf = UnionFind::new(n);
+    let g = graph.graph();
 
-    for edge_idx in graph.graph.edge_indices() {
-        let weight = &graph.graph[edge_idx];
+    for edge_idx in g.edge_indices() {
+        let weight = &g[edge_idx];
         if !weight.participates_in_scc() {
             // Ownership edges are excluded - same rule as SCC analysis.
             continue;
         }
 
-        let Some((u, v)) = graph.graph.edge_endpoints(edge_idx) else {
+        let Some((u, v)) = g.edge_endpoints(edge_idx) else {
             continue;
         };
 
-        let Some(src_fid) = node_to_file_id(&graph.graph[u]) else {
+        let Some(src_fid) = node_to_file_id(&g[u]) else {
             continue;
         };
-        let Some(dst_fid) = node_to_file_id(&graph.graph[v]) else {
+        let Some(dst_fid) = node_to_file_id(&g[v]) else {
             continue;
         };
 
@@ -163,18 +164,18 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
     // exists.
     let mut client_call_edges: Vec<InterPodEdge> = Vec::new();
 
-    for edge_idx in graph.graph.edge_indices() {
-        let weight = graph.graph[edge_idx];
+    for edge_idx in g.edge_indices() {
+        let weight = g[edge_idx];
         if !weight.participates_in_scc() {
             continue;
         }
-        let Some((u, v)) = graph.graph.edge_endpoints(edge_idx) else {
+        let Some((u, v)) = g.edge_endpoints(edge_idx) else {
             continue;
         };
-        let Some(src_fid) = node_to_file_id(&graph.graph[u]) else {
+        let Some(src_fid) = node_to_file_id(&g[u]) else {
             continue;
         };
-        let Some(dst_fid) = node_to_file_id(&graph.graph[v]) else {
+        let Some(dst_fid) = node_to_file_id(&g[v]) else {
             continue;
         };
 
@@ -192,7 +193,7 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
 
         // Scope-resolution references are always symbol -> symbol; a
         // file -> symbol Reference edge can only be an injected client call.
-        if weight.kind == EdgeKind::Reference && matches!(graph.graph[u], NodeData::File(_)) {
+        if weight.kind == EdgeKind::Reference && matches!(g[u], NodeData::File(_)) {
             client_call_edges.push(InterPodEdge {
                 from_pod: src_pod,
                 to_pod: dst_pod,
@@ -285,7 +286,6 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::edge::EdgeData;
     use crate::graph::node::FileNode;
     use crate::model::ids::SnapshotId;
     use std::path::PathBuf;
@@ -304,7 +304,7 @@ mod tests {
             (a_js, "a.js", LangId::JavaScript),
             (b_py, "b.py", LangId::Python),
         ] {
-            let idx = graph.graph.add_node(NodeData::File(FileNode::new(
+            let idx = graph.add_node(NodeData::File(FileNode::new(
                 fid,
                 PathBuf::from(path),
                 lang,
@@ -314,10 +314,11 @@ mod tests {
         }
 
         // Cross-language import edge: c.py -> a.js becomes an inter-pod edge.
-        graph.graph.add_edge(
+        graph.add_edge_normalized(
             graph.file_to_index[&c_py],
             graph.file_to_index[&a_js],
-            EdgeData::new(EdgeKind::Import),
+            EdgeKind::Import,
+            1.0,
         );
 
         let partition = partition_into_pods(&graph);

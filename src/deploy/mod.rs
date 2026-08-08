@@ -50,8 +50,8 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
 
     // 4. Build path-to-node-index lookup once
     let mut path_to_idx: HashMap<PathBuf, petgraph::graph::NodeIndex> = HashMap::new();
-    for idx in analysis.graph.graph.node_indices() {
-        if let crate::graph::node::NodeData::File(f) = &analysis.graph.graph[idx] {
+    for idx in analysis.graph.graph().node_indices() {
+        if let crate::graph::node::NodeData::File(f) = &analysis.graph.graph()[idx] {
             path_to_idx.insert(f.path.clone(), idx);
         }
     }
@@ -151,7 +151,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
         );
     }
 
-    analysis.scc = crate::graph::scc::SccAnalysis::analyze(&analysis.graph.graph);
+    analysis.scc = crate::graph::scc::SccAnalysis::analyze(analysis.graph.graph());
 
     // 7. Pod partitioning
     let partition = pod::partition_into_pods(&analysis.graph);
@@ -291,7 +291,7 @@ fn add_metacall_edge(
 ) {
     let graph = &mut analysis.graph;
 
-    let source_file = match &graph.graph[from_idx] {
+    let source_file = match &graph.graph()[from_idx] {
         crate::graph::node::NodeData::File(f) => f.path.clone(),
         _ => return,
     };

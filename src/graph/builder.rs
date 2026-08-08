@@ -536,7 +536,7 @@ impl GraphBuilder {
 
         // Finalize and compute SCC
         let graph = builder.build();
-        let scc = crate::graph::SccAnalysis::analyze(&graph.graph);
+        let scc = crate::graph::SccAnalysis::analyze(graph.graph());
 
         (graph, scc)
     }

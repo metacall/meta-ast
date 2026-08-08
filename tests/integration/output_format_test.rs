@@ -68,7 +68,7 @@ fn yaml_serialize_graph_output() {
     builder.add_symbol(&sym).unwrap();
 
     let graph = builder.build();
-    let scc = SccAnalysis::analyze(&graph.graph);
+    let scc = SccAnalysis::analyze(graph.graph());
 
     let yaml =
         meta_ast::output::graph::serialize_graph(&graph, &scc, 1, &OutputFormat::Yaml).unwrap();

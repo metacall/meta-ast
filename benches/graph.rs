@@ -397,7 +397,7 @@ fn bench_full_pipeline_small(c: &mut Criterion) {
 
                 // Build and analyze
                 let graph = builder.build();
-                let scc = SccAnalysis::analyze(&graph.graph);
+                let scc = SccAnalysis::analyze(graph.graph());
 
                 black_box((graph.node_count(), scc.has_cycles()));
             });
@@ -523,7 +523,7 @@ fn bench_dataflow_nodes_and_edges(c: &mut Criterion) {
                             end: LineColumn { line: 0, column: 0 },
                         },
                     });
-                    let idx = graph.graph.add_node(dnode);
+                    let idx = graph.add_node(dnode);
                     node_indices.push(idx);
                 }
                 for i in 0..(size - 1) {

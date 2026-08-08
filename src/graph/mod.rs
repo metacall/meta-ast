@@ -27,7 +27,7 @@
 //! let graph = builder.build();
 //!
 //! // Run SCC analysis
-//! let scc = SccAnalysis::analyze(&graph.graph);
+//! let scc = SccAnalysis::analyze(graph.graph());
 //! ```
 
 pub mod builder;
@@ -53,7 +53,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 #[derive(Debug, Clone)]
 pub struct CodeGraph {
     /// The underlying petgraph with our node/edge data types.
-    pub graph: DiGraph<NodeData, EdgeData>,
+    graph: DiGraph<NodeData, EdgeData>,
 
     /// Map from FileId to graph node index for O(1) lookup.
     pub(crate) file_to_index: HashMap<FileId, NodeIndex>,
@@ -78,6 +78,18 @@ impl CodeGraph {
             external_index: HashMap::new(),
             snapshot_id,
         }
+    }
+    /// Immutable access to the underlying petgraph graph for SCC analysis,
+    /// serialization, and deploy algorithms.
+    pub fn graph(&self) -> &DiGraph<NodeData, EdgeData> {
+        &self.graph
+    }
+
+    /// Adds a raw node to the graph. Node additions do not affect edge
+    /// normalization, so this is the only direct mutation needed by
+    /// deploy/test code that injects synthetic nodes post-build.
+    pub fn add_node(&mut self, node: NodeData) -> NodeIndex {
+        self.graph.add_node(node)
     }
     pub fn file_node_index(&self, file_id: FileId) -> Option<NodeIndex> {
         self.file_to_index.get(&file_id).copied()
@@ -346,13 +358,13 @@ mod tests {
     #[test]
     fn add_edge_normalized_handles_multiple_edge_kinds_between_same_nodes() {
         let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
-        let n1 = graph.graph.add_node(NodeData::File(FileNode {
+        let n1 = graph.add_node(NodeData::File(FileNode {
             id: FileId::new(1).unwrap(),
             path: PathBuf::from("a.rs"),
             language: LangId::Rust,
             snapshot_id: SnapshotId::new(1).unwrap(),
         }));
-        let n2 = graph.graph.add_node(NodeData::File(FileNode {
+        let n2 = graph.add_node(NodeData::File(FileNode {
             id: FileId::new(2).unwrap(),
             path: PathBuf::from("b.rs"),
             language: LangId::Rust,
@@ -367,7 +379,7 @@ mod tests {
         graph.add_edge_normalized(n1, n2, EdgeKind::Reference, 0.9);
 
         let ref_count = graph
-            .graph
+            .graph()
             .edges_connecting(n1, n2)
             .filter(|e| e.weight().kind == EdgeKind::Reference)
             .count();
@@ -382,7 +394,7 @@ mod tests {
     fn add_edge_normalized_with_flow_preserves_first_flow_kind() {
         use crate::model::{DataNodeId, DataScope, FlowKind};
         let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
-        let n1 = graph.graph.add_node(NodeData::Data(DataGraphNode {
+        let n1 = graph.add_node(NodeData::Data(DataGraphNode {
             id: DataNodeId::new(1).unwrap(),
             symbol_id: None,
             name: Some("x".into()),
@@ -390,7 +402,7 @@ mod tests {
             type_hint: None,
             source_range: test_range(),
         }));
-        let n2 = graph.graph.add_node(NodeData::Data(DataGraphNode {
+        let n2 = graph.add_node(NodeData::Data(DataGraphNode {
             id: DataNodeId::new(2).unwrap(),
             symbol_id: None,
             name: Some("y".into()),
@@ -403,7 +415,7 @@ mod tests {
         graph.add_edge_normalized_with_flow(n1, n2, EdgeKind::Flow, 0.8, Some(FlowKind::Argument));
 
         assert_eq!(graph.edge_count(), 1);
-        let edge = graph.graph.edges_connecting(n1, n2).next().unwrap();
+        let edge = graph.graph().edges_connecting(n1, n2).next().unwrap();
         assert_eq!(edge.weight().flow_kind, Some(FlowKind::DefUse));
         assert_eq!(edge.weight().confidence, 0.9);
     }

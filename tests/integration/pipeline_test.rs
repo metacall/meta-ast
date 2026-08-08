@@ -940,13 +940,13 @@ fn analyze_graph_external_imports_appear_in_graph() {
     assert_eq!(analysis.graph.file_count(), 1);
 
     // Should have at least one external node
-    let external_nodes: Vec<_> = analysis
-        .graph
-        .graph
-        .node_indices()
-        .filter_map(|idx| analysis.graph.graph.node_weight(idx))
-        .filter(|node| matches!(node, NodeData::External(_)))
-        .collect();
+    let external_nodes: Vec<_> = {
+        let g = analysis.graph.graph();
+        g.node_indices()
+            .filter_map(|idx| g.node_weight(idx))
+            .filter(|node| matches!(node, NodeData::External(_)))
+            .collect()
+    };
     assert!(
         !external_nodes.is_empty(),
         "should have external nodes for 'import os' and 'import json'"

@@ -68,6 +68,7 @@ pub fn generate_mesh_annotation(
     // (e.g. a metacall_load_from_file call site) so they resolve to a real
     // unit instead of a skipped component index.
     let mut file_to_unit: HashMap<String, usize> = HashMap::new();
+    let g = analysis.graph.graph();
 
     for (idx, scc) in analysis.scc.components.iter().enumerate() {
         let mut symbols = Vec::new();
@@ -75,7 +76,7 @@ pub fn generate_mesh_annotation(
         let mut has_real_node = false;
 
         for &node_idx in &scc.nodes {
-            let node_data = &analysis.graph.graph[node_idx];
+            let node_data = &g[node_idx];
             match node_data {
                 NodeData::Symbol(sym) => {
                     has_real_node = true;
@@ -84,7 +85,7 @@ pub fn generate_mesh_annotation(
                             .graph
                             .file_to_index
                             .get(&sym.file_id)
-                            .and_then(|&f_idx| match &analysis.graph.graph[f_idx] {
+                            .and_then(|&f_idx| match &g[f_idx] {
                                 NodeData::File(f) => Some(f),
                                 _ => None,
                             });
@@ -173,7 +174,7 @@ pub fn generate_mesh_annotation(
     let mut file_to_component: HashMap<String, usize> = HashMap::new();
     for (idx, scc) in analysis.scc.components.iter().enumerate() {
         for &node_idx in &scc.nodes {
-            if let NodeData::File(f) = &analysis.graph.graph[node_idx] {
+            if let NodeData::File(f) = &g[node_idx] {
                 let path_str = f.path.to_string_lossy().replace('\\', "/");
                 file_to_component.insert(path_str, idx);
             }
@@ -189,7 +190,7 @@ pub fn generate_mesh_annotation(
             return Some(uid);
         }
         for &node_idx in &analysis.scc.components[comp].nodes {
-            if let NodeData::File(f) = &analysis.graph.graph[node_idx] {
+            if let NodeData::File(f) = &g[node_idx] {
                 let path_str = f.path.to_string_lossy().replace('\\', "/");
                 if let Some(&uid) = file_to_unit.get(&path_str) {
                     return Some(uid);
@@ -201,13 +202,13 @@ pub fn generate_mesh_annotation(
 
     // Detect cross-language edges from graph, annotated with call-site info.
     let mut seen_edges: HashSet<(usize, usize, &str, &str)> = HashSet::new();
-    for edge_idx in analysis.graph.graph.edge_indices() {
-        let weight = &analysis.graph.graph[edge_idx];
+    for edge_idx in g.edge_indices() {
+        let weight = &g[edge_idx];
         if weight.kind == EdgeKind::Ownership {
             continue;
         }
 
-        let Some((u, v)) = analysis.graph.graph.edge_endpoints(edge_idx) else {
+        let Some((u, v)) = g.edge_endpoints(edge_idx) else {
             continue;
         };
         let (Some(u_comp), Some(v_comp)) =
@@ -217,8 +218,8 @@ pub fn generate_mesh_annotation(
         };
 
         if u_comp != v_comp {
-            let u_lang = get_node_language(&analysis.graph.graph[u], &analysis.graph);
-            let v_lang = get_node_language(&analysis.graph.graph[v], &analysis.graph);
+            let u_lang = get_node_language(&g[u], &analysis.graph);
+            let v_lang = get_node_language(&g[v], &analysis.graph);
 
             // Remap raw SCC indices to emitted unit ids. Edges whose
             // endpoints are skipped components anchor to the unit owning their
@@ -241,7 +242,7 @@ pub fn generate_mesh_annotation(
                 // the edge targets a symbol, prefer a ClientCall site that
                 // names that exact function; otherwise fall back to the load
                 // attribution below.
-                let client_call_site = match &analysis.graph.graph[v] {
+                let client_call_site = match &g[v] {
                     NodeData::Symbol(sym) => call_sites.iter().find_map(|site| {
                         let site_path = site.source_file.to_string_lossy().replace('\\', "/");
                         if file_to_component.get(&site_path) != Some(&u_comp) {
@@ -271,7 +272,7 @@ pub fn generate_mesh_annotation(
                         });
                         if site_target_lang == Some(v_lang) {
                             Some(site_path)
-                        } else if let NodeData::File(dst_file) = &analysis.graph.graph[v] {
+                        } else if let NodeData::File(dst_file) = &g[v] {
                             let dst_name = dst_file
                                 .path
                                 .file_name()
@@ -324,7 +325,7 @@ fn get_node_language<'a>(node: &'a NodeData, graph: &'a crate::graph::CodeGraph)
     match node {
         NodeData::Symbol(s) => {
             if let Some(&f_idx) = graph.file_to_index.get(&s.file_id)
-                && let NodeData::File(f) = &graph.graph[f_idx]
+                && let NodeData::File(f) = &graph.graph()[f_idx]
             {
                 return crate::deploy::tags::metacall_tag(f.language);
             }
