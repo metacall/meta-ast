@@ -9,12 +9,12 @@ use std::path::PathBuf;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use meta_ast::graph::node::{FileNode, SymbolNode};
-use meta_ast::graph::{EdgeData, EdgeKind, GraphBuilder, NodeData, SccAnalysis};
+use meta_ast::graph::{CodeGraph, EdgeData, EdgeKind, GraphBuilder, NodeData, SccAnalysis};
 use meta_ast::language::LangId;
 use meta_ast::model::{
     LineColumn, SourceRange, Symbol, SymbolId, SymbolKind, Visibility, ids::SnapshotId,
 };
-use petgraph::graph::DiGraph;
+use petgraph::graph::{DiGraph, NodeIndex};
 use std::hint::black_box;
 
 /// Create a test symbol with the given ID and name.
@@ -500,6 +500,45 @@ fn bench_full_datagraph_pipeline(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark post-build edge normalization on a hub-and-spokes graph.
+///
+/// The setup adds `out_degree` distinct Import edges from a hub node. The
+/// timed region re-inserts those same triples through `add_edge_normalized`,
+/// which exercises the duplicate-dedup path. This isolates the cost of the
+/// dedup lookup from edge insertion.
+fn bench_postbuild_edge_normalization(c: &mut Criterion) {
+    let mut group = c.benchmark_group("postbuild_edge_normalization");
+
+    for out_degree in [100, 1000].iter() {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(out_degree),
+            out_degree,
+            |b, &out_degree| {
+                let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+                let hub = graph.add_node(NodeData::File(create_test_file_node(1, "hub.rs")));
+                let mut triples: Vec<(NodeIndex, NodeIndex)> = Vec::with_capacity(out_degree);
+                for i in 0..out_degree {
+                    let target = graph.add_node(NodeData::File(create_test_file_node(
+                        (i + 2) as u32,
+                        &format!("target_{}.rs", i),
+                    )));
+                    graph.add_edge_normalized(hub, target, EdgeKind::Import, 0.5);
+                    triples.push((hub, target));
+                }
+
+                b.iter(|| {
+                    for &(source, target) in &triples {
+                        graph.add_edge_normalized(source, target, EdgeKind::Import, 0.9);
+                    }
+                    black_box(graph.edge_count());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 /// Benchmark adding Data nodes and Flow edges to the graph.
 fn bench_dataflow_nodes_and_edges(c: &mut Criterion) {
     let mut group = c.benchmark_group("dataflow_nodes_edges");
@@ -556,5 +595,6 @@ criterion_group!(
     bench_datagraph_export,
     bench_full_datagraph_pipeline,
     bench_dataflow_nodes_and_edges,
+    bench_postbuild_edge_normalization,
 );
 criterion_main!(graph_benches);
