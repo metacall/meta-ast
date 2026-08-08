@@ -395,8 +395,17 @@ impl GraphBuilder {
 
     /// Finalizes the graph and returns the constructed CodeGraph.
     pub fn build(self) -> CodeGraph {
+        let edge_index = self
+            .graph
+            .edge_indices()
+            .map(|e| {
+                let (s, t) = self.graph.edge_endpoints(e).expect("edge endpoints exist");
+                ((s, t, self.graph[e].kind), e)
+            })
+            .collect();
         CodeGraph {
             graph: self.graph,
+            edge_index,
             file_to_index: self.file_to_index,
             symbol_to_index: self.symbol_to_index,
             external_index: self.external_index,
