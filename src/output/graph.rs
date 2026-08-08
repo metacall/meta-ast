@@ -396,7 +396,30 @@ mod tests {
         assert_eq!(output.nodes.len(), 1);
         assert_eq!(output.nodes[0].kind, "file");
         assert_eq!(output.nodes[0].path.as_deref(), Some("src/main.py"));
-        assert!(output.nodes[0].language.is_some());
+        assert_eq!(output.nodes[0].language.as_deref(), Some("python"));
+    }
+
+    #[test]
+    fn graph_output_language_uses_canonical_names() {
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        builder.add_file(PathBuf::from("src/main.js"), LangId::JavaScript);
+        builder.add_file(PathBuf::from("src/main.ts"), LangId::TypeScript);
+        builder.add_file(PathBuf::from("src/main.tsx"), LangId::Tsx);
+        let graph = builder.build();
+        let scc = sample_scc_analysis();
+
+        let output = GraphOutput::from_graph(&graph, Some(&scc), 1);
+
+        let language_of = |path: &str| {
+            output
+                .nodes
+                .iter()
+                .find(|n| n.path.as_deref() == Some(path))
+                .and_then(|n| n.language.as_deref())
+        };
+        assert_eq!(language_of("src/main.js"), Some("javascript"));
+        assert_eq!(language_of("src/main.ts"), Some("typescript"));
+        assert_eq!(language_of("src/main.tsx"), Some("tsx"));
     }
 
     #[test]

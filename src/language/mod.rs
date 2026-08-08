@@ -211,6 +211,24 @@ mod tests {
     }
 
     #[test]
+    fn lang_id_vocabulary_is_canonical() {
+        let expected = [
+            "python",
+            "javascript",
+            "typescript",
+            "tsx",
+            "c",
+            "cpp",
+            "rust",
+            "go",
+            "ruby",
+        ];
+        let all = LangId::all();
+        let actual: Vec<&str> = all.iter().map(|l| l.as_ref()).collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn lang_id_from_str_round_trip() {
         for id in LangId::all() {
             let name: &str = id.as_ref();
