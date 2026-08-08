@@ -779,6 +779,28 @@ fn analyze_graph_multi_language() {
 }
 
 #[test]
+fn analyze_graph_language_filter_only_includes_requested_language() {
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(
+        Path::new("tests/fixtures/mixed"),
+        meta_ast::model::SnapshotId::new(1).unwrap(),
+        Some(&[meta_ast::LangId::Python]),
+    )
+    .unwrap();
+
+    assert!(
+        analysis.graph.file_count() > 0,
+        "mixed fixture should contain Python files"
+    );
+    for (_, file_node) in analysis.graph.files() {
+        assert_eq!(
+            file_node.language,
+            meta_ast::LangId::Python,
+            "filtered graph should only contain Python files"
+        );
+    }
+}
+
+#[test]
 fn analyze_graph_empty_dir() {
     let tmp = std::env::temp_dir().join("meta_ast_test_empty_pipeline");
     std::fs::create_dir_all(&tmp).unwrap();

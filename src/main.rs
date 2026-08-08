@@ -18,9 +18,10 @@ fn main() -> anyhow::Result<()> {
 
     match cli {
         Cli::Inspect(args) => {
+            let languages = args.language.map(|l| [l]);
             let files = meta_ast::input::discover_files(
                 &args.path,
-                args.language.map(|l| vec![l]).as_deref(),
+                languages.as_ref().map(|a| a.as_slice()),
             )?;
 
             let result = meta_ast::extractor::extract_with_options(
@@ -110,10 +111,11 @@ fn main() -> anyhow::Result<()> {
             }
 
             let snapshot_id = SnapshotId::new(1).unwrap();
+            let languages = args.language.map(|l| [l]);
             let (analysis, diags) = meta_ast::pipeline::analyze_graph(
                 &args.path,
                 snapshot_id,
-                args.language.map(|l| vec![l]).as_deref(),
+                languages.as_ref().map(|a| a.as_slice()),
             )?;
 
             for diag in &diags {

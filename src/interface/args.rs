@@ -60,7 +60,7 @@ pub struct InspectArgs {
     #[arg(short, long)]
     pub output: Option<std::path::PathBuf>,
 
-    /// Override automatic language detection and force a specific language
+    /// Only analyze files detected as this language
     #[arg(short, long, value_parser = parse_language)]
     pub language: Option<crate::language::LangId>,
 
@@ -78,7 +78,7 @@ pub struct GraphArgs {
     #[arg(short, long)]
     pub output: Option<std::path::PathBuf>,
 
-    /// Override automatic language detection and force a specific language
+    /// Only analyze files detected as this language
     #[arg(short, long, value_parser = parse_language)]
     pub language: Option<crate::language::LangId>,
 

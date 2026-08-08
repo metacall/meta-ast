@@ -28,9 +28,10 @@ pub fn run_watch(
 
     let mut state = WatchState::new();
 
+    let languages = config.languages.as_deref();
+
     tracing::info!(root = %root.display(), "Running initial analysis");
-    let (analysis, change_set, diags) =
-        incremental_reanalyze(&root, config.languages.as_deref(), &mut state)?;
+    let (analysis, change_set, diags) = incremental_reanalyze(&root, languages, &mut state)?;
 
     for d in &diags {
         tracing::warn!(
@@ -62,15 +63,17 @@ pub fn run_watch(
     for res in rx {
         match res {
             Ok(events) => {
-                let relevant = events
-                    .iter()
-                    .any(|e| input::detect_language(&e.path).is_some() || e.path.is_dir());
+                let relevant = events.iter().any(|e| {
+                    e.path.is_dir()
+                        || input::detect_language(&e.path)
+                            .is_some_and(|lang| languages.is_none_or(|langs| langs.contains(&lang)))
+                });
                 if !relevant && !events.is_empty() {
                     continue;
                 }
 
                 tracing::debug!(count = events.len(), "Debounced change detected");
-                match incremental_reanalyze(&root, config.languages.as_deref(), &mut state) {
+                match incremental_reanalyze(&root, languages, &mut state) {
                     Ok((analysis, change_set, diags)) => {
                         for d in &diags {
                             tracing::warn!(

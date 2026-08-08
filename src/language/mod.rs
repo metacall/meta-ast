@@ -70,8 +70,10 @@ pub enum DefaultVisibility {
 pub enum LangId {
     Python,
     #[strum(serialize = "javascript")]
+    #[serde(rename = "javascript")]
     JavaScript,
     #[strum(serialize = "typescript")]
+    #[serde(rename = "typescript")]
     TypeScript,
     Tsx,
     C,
@@ -227,6 +229,12 @@ mod tests {
 
         let json = serde_json::to_string(&LangId::Ruby).unwrap();
         assert_eq!(json, "\"ruby\"");
+
+        let json = serde_json::to_string(&LangId::JavaScript).unwrap();
+        assert_eq!(json, "\"javascript\"");
+
+        let json = serde_json::to_string(&LangId::TypeScript).unwrap();
+        assert_eq!(json, "\"typescript\"");
     }
 
     #[test]
