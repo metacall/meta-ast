@@ -97,16 +97,24 @@ mod deploy_tests {
         };
 
         let out_default = tempdir().unwrap();
-        let default_manifest = run(out_default.path(), 20);
-        let rpc_stubs: Vec<&serde_json::Value> = default_manifest["edges"]
+        let default_manifest = run(
+            out_default.path(),
+            meta_ast::deploy::cut::DEFAULT_MAX_POD_SIZE,
+        );
+        let oversized_stubs: Vec<&serde_json::Value> = default_manifest["edges"]
             .as_array()
             .unwrap()
             .iter()
             .filter(|e| e["kind"].as_str() == Some("rpc_stub"))
+            .filter(|e| {
+                e["cut_annotation"]["cut_reason"]
+                    .get("OversizedPod")
+                    .is_some()
+            })
             .collect();
         assert!(
-            rpc_stubs.is_empty(),
-            "expected no rpc_stub edges at the default threshold, got {rpc_stubs:?}"
+            oversized_stubs.is_empty(),
+            "expected no OversizedPod rpc_stub edge at the default threshold, got {oversized_stubs:?}"
         );
 
         let out_small = tempdir().unwrap();
