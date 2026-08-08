@@ -233,6 +233,8 @@ mod tests {
         }
 
         let idx_of = |fid: FileId| -> NodeIndex { *graph.file_to_index.get(&fid).unwrap() };
+        // Precompute edge endpoints first: idx_of borrows graph immutably
+        // and cannot coexist with the &mut graph of add_edge_normalized.
         let weak_edge = if n >= 2 {
             Some((idx_of(fids[0]), idx_of(fids[n - 1])))
         } else {

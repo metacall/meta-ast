@@ -50,8 +50,9 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
 
     // 4. Build path-to-node-index lookup once
     let mut path_to_idx: HashMap<PathBuf, petgraph::graph::NodeIndex> = HashMap::new();
-    for idx in analysis.graph.graph().node_indices() {
-        if let crate::graph::node::NodeData::File(f) = &analysis.graph.graph()[idx] {
+    let g = analysis.graph.graph();
+    for idx in g.node_indices() {
+        if let crate::graph::node::NodeData::File(f) = &g[idx] {
             path_to_idx.insert(f.path.clone(), idx);
         }
     }

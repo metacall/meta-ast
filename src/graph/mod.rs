@@ -88,6 +88,11 @@ impl CodeGraph {
     /// Adds a raw node to the graph. Node additions do not affect edge
     /// normalization, so this is the only direct mutation needed by
     /// deploy/test code that injects synthetic nodes post-build.
+    ///
+    /// The caller remains responsible for registering the node in the
+    /// index maps (`file_to_index`, `symbol_to_index`, `external_index`)
+    /// when it is a `File`/`Symbol`/`External` node. This method does not
+    /// sync those maps; a bare `Data` node needs no registration.
     pub fn add_node(&mut self, node: NodeData) -> NodeIndex {
         self.graph.add_node(node)
     }
