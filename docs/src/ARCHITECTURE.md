@@ -89,7 +89,7 @@ The CLI supports JSON and YAML for programmatic consumption, plus an interactive
 - **JSON / YAML:** Controlled by the `-f, --format` flag. JSON is the default. YAML requires no extra setup - just pass `--format yaml`.
 - **HTML dashboard:** Separate concern, activated with `--html`. Generates a single `.html` file with an interactive Cytoscape.js graph loaded from a CDN (cached by the browser after first fetch). The browser auto-opens unless you redirect.
 - **Datagraph JSON:** Activated with `--datagraph` (requires `--features dataflow`). Exports detailed data/flow node definitions and def-use relations.
-- **Language Override:** Force a specific language with `-l, --language <lang>`.
+- **Language Filter:** Only analyze files detected as this language with `-l, --language <lang>`.
 
 The dashboard turns SCC analysis into something you can actually see. Nodes in cyclic clusters (co-deployment required) are colored red. Independent Deployment Units are green. This is the difference between "your code has cycles" and "here is the exact knot you need to untangle before you can split this into independent mesh units."
 

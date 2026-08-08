@@ -76,6 +76,19 @@ mod deploy_tests {
     }
 
     #[test]
+    fn max_pod_size_zero_returns_error() {
+        let root = tempdir().unwrap();
+        let config = DeployConfig {
+            root: root.path().to_path_buf(),
+            out: root.path().to_path_buf(),
+            format: OutputFormat::Json,
+            check: false,
+            max_pod_size: 0,
+        };
+        assert!(run_deploy(config).is_err());
+    }
+
+    #[test]
     fn max_pod_size_forces_oversized_pod_cut() {
         let fixture = tempdir().unwrap();
         let root = fixture.path().join("proj");
