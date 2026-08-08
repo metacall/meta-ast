@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use clap::Parser;
 
 /// Polyglot static analyzer that builds symbol surfaces and cross-file dependency graphs.
@@ -37,6 +39,29 @@ fn parse_format(s: &str) -> Result<crate::output::OutputFormat, String> {
     }
 }
 
+fn parse_language(s: &str) -> Result<crate::language::LangId, String> {
+    let normalized = s.to_lowercase();
+    let matched = crate::language::LangId::from_str(&normalized)
+        .ok()
+        .or_else(|| {
+            crate::language::LangId::all().into_iter().find(|id| {
+                let name = id.to_string();
+                normalized == name.replace('_', "")
+            })
+        });
+    if let Some(id) = matched {
+        return Ok(id);
+    }
+    let names: Vec<_> = crate::language::LangId::all()
+        .into_iter()
+        .map(|l| l.to_string().replace('_', ""))
+        .collect();
+    Err(format!(
+        "invalid language '{s}': expected one of {}",
+        names.join(", ")
+    ))
+}
+
 #[derive(Parser)]
 pub struct InspectArgs {
     /// Root directory or source file to inspect
@@ -47,8 +72,8 @@ pub struct InspectArgs {
     pub output: Option<std::path::PathBuf>,
 
     /// Override automatic language detection and force a specific language
-    #[arg(short, long)]
-    pub language: Option<String>,
+    #[arg(short, long, value_parser = parse_language)]
+    pub language: Option<crate::language::LangId>,
 
     /// Output format for the extracted symbols
     #[arg(short = 'f', long, default_value = "json", value_parser = parse_format)]
@@ -65,8 +90,8 @@ pub struct GraphArgs {
     pub output: Option<std::path::PathBuf>,
 
     /// Override automatic language detection and force a specific language
-    #[arg(short, long)]
-    pub language: Option<String>,
+    #[arg(short, long, value_parser = parse_language)]
+    pub language: Option<crate::language::LangId>,
 
     /// Output serialization format for the graph structure
     #[arg(short = 'f', long, default_value = "json", value_parser = parse_format)]
@@ -109,4 +134,50 @@ pub struct DeployArgs {
     /// Output directory for generated manifests and mesh annotation
     #[arg(short, long, default_value = ".")]
     pub out: std::path::PathBuf,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_language_valid_lowercase() {
+        assert_eq!(
+            parse_language("python"),
+            Ok(crate::language::LangId::Python)
+        );
+        assert_eq!(
+            parse_language("typescript"),
+            Ok(crate::language::LangId::TypeScript)
+        );
+    }
+
+    #[test]
+    fn parse_language_case_insensitive() {
+        assert_eq!(
+            parse_language("Python"),
+            Ok(crate::language::LangId::Python)
+        );
+        assert_eq!(
+            parse_language("TYPESCRIPT"),
+            Ok(crate::language::LangId::TypeScript)
+        );
+    }
+
+    #[test]
+    fn parse_language_invalid_returns_all_names() {
+        let err = parse_language("pytho").unwrap_err();
+        for id in crate::language::LangId::all() {
+            let name: String = id.to_string().replace('_', "");
+            assert!(
+                err.contains(&name),
+                "error {err:?} should list the valid name {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_language_empty_returns_err() {
+        assert!(parse_language("").is_err());
+    }
 }

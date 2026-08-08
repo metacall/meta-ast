@@ -29,7 +29,8 @@ pub fn run_watch(
     let mut state = WatchState::new();
 
     tracing::info!(root = %root.display(), "Running initial analysis");
-    let (analysis, change_set, diags) = incremental_reanalyze(&root, &mut state)?;
+    let (analysis, change_set, diags) =
+        incremental_reanalyze(&root, config.languages.as_deref(), &mut state)?;
 
     for d in &diags {
         tracing::warn!(
@@ -69,7 +70,7 @@ pub fn run_watch(
                 }
 
                 tracing::debug!(count = events.len(), "Debounced change detected");
-                match incremental_reanalyze(&root, &mut state) {
+                match incremental_reanalyze(&root, config.languages.as_deref(), &mut state) {
                     Ok((analysis, change_set, diags)) => {
                         for d in &diags {
                             tracing::warn!(

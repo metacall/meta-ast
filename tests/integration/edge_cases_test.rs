@@ -13,7 +13,7 @@ use meta_ast::pipeline;
 /// Run the full pipeline and assert it does not panic on malformed input.
 fn analyze_recovers(root: &Path) {
     let (analysis, diags) =
-        pipeline::analyze_graph(root, meta_ast::model::SnapshotId::new(1).unwrap())
+        pipeline::analyze_graph(root, meta_ast::model::SnapshotId::new(1).unwrap(), None)
             .expect("pipeline must not fail on malformed input");
     // Every symbol node must belong to a discovered file; the graph must stay
     // internally consistent even after recovering from broken syntax.
@@ -74,7 +74,7 @@ fn malformed_file_emits_diagnostics_per_language() {
     for (name, _lang, src) in MALFORMED {
         std::fs::write(tmp.join(name), src).expect("write");
         let (analysis, diags) =
-            pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId::new(1).unwrap())
+            pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId::new(1).unwrap(), None)
                 .expect("no panic");
         // A single malformed file should at least be discovered and analyzed
         // without panicking, regardless of whether a diagnostic is emitted.
@@ -108,7 +108,7 @@ fn empty_files_produce_empty_symbols() {
         std::fs::write(tmp.join(name), "").expect("write");
     }
     let (analysis, diags) =
-        pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId::new(1).unwrap())
+        pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId::new(1).unwrap(), None)
             .expect("no panic on empty");
     assert!(
         analysis.graph.symbol_count() == 0,
@@ -149,7 +149,7 @@ fn unreadable_file_accumulates_diagnostic() {
         std::mem::forget(held);
     }
     let (analysis, diags) =
-        pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId::new(1).unwrap())
+        pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId::new(1).unwrap(), None)
             .expect("no panic");
     assert!(
         diags
@@ -173,7 +173,8 @@ fn unreadable_file_accumulates_diagnostic() {
 #[test]
 fn missing_root_errors_gracefully() {
     let missing = std::env::temp_dir().join("meta_ast_test_does_not_exist_xyz");
-    let result = pipeline::analyze_graph(&missing, meta_ast::model::SnapshotId::new(1).unwrap());
+    let result =
+        pipeline::analyze_graph(&missing, meta_ast::model::SnapshotId::new(1).unwrap(), None);
     assert!(result.is_err(), "missing root must return Err");
 }
 
@@ -186,7 +187,7 @@ fn empty_directory_is_valid() {
     }
     std::fs::create_dir_all(&tmp).expect("temp dir");
     let (analysis, diags) =
-        pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId::new(1).unwrap())
+        pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId::new(1).unwrap(), None)
             .expect("no panic");
     assert_eq!(analysis.graph.file_count(), 0);
     assert!(analysis.scc.components.is_empty());

@@ -32,7 +32,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     // 1. Run full pipeline graph analysis (covers extraction + SCC)
     let snapshot_id = crate::model::SnapshotId::new(1).unwrap();
     let (mut analysis, mut diagnostics) =
-        crate::pipeline::analyze_graph(&config.root, snapshot_id)?;
+        crate::pipeline::analyze_graph(&config.root, snapshot_id, None)?;
 
     // 2. Collect MetaCall call sites from pipeline extractions (zero duplicate
     // I/O / parsing for the source scan; configuration JSONs referenced by

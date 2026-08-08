@@ -32,11 +32,12 @@ use crate::watch::state::{ChangeSet, WatchState};
 /// parse+extract cost for changed files.
 pub fn incremental_reanalyze(
     root: &Path,
+    languages: Option<&[LangId]>,
     state: &mut WatchState,
 ) -> Result<(GraphAnalysis, ChangeSet, Vec<Diagnostic>), crate::Error> {
     let started = Instant::now();
 
-    let files = input::discover_files(root, None)?;
+    let files = input::discover_files(root, languages)?;
 
     let (current_fingerprints, read_diagnostics): (HashMap<PathBuf, Fingerprint>, Vec<Diagnostic>) =
         files
@@ -207,7 +208,7 @@ mod tests {
         write_file(&root, "a.py", "def foo(): pass\n");
 
         let mut state = WatchState::new();
-        let (analysis, cs, diags) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (analysis, cs, diags) = incremental_reanalyze(&root, None, &mut state).unwrap();
 
         assert!(diags.is_empty());
         assert_eq!(cs.files_added, 1);
@@ -224,11 +225,11 @@ mod tests {
         write_file(&root, "b.py", "def bar(): pass\n");
 
         let mut state = WatchState::new();
-        let (analysis, cs, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (analysis, cs, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs.files_added, 2);
         assert_eq!(analysis.graph.symbol_count(), 2);
 
-        let (analysis2, cs2, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (analysis2, cs2, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs2.files_unchanged, 2);
         assert_eq!(cs2.files_modified, 0);
         assert_eq!(cs2.files_added, 0);
@@ -243,7 +244,7 @@ mod tests {
         write_file(&root, "b.py", "def bar(): pass\n");
 
         let mut state = WatchState::new();
-        let (analysis, cs, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (analysis, cs, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs.files_added, 2);
         assert_eq!(analysis.graph.symbol_count(), 2);
 
@@ -256,7 +257,7 @@ mod tests {
 
         std::fs::write(&a, "def modified(): pass\ndef extra(): pass\n").unwrap();
 
-        let (analysis2, cs2, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (analysis2, cs2, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs2.files_unchanged, 1);
         assert_eq!(cs2.files_modified, 1);
         assert_eq!(analysis2.graph.symbol_count(), 3);
@@ -278,13 +279,13 @@ mod tests {
         write_file(&root, "b.py", "def bar(): pass\n");
 
         let mut state = WatchState::new();
-        let (analysis, cs, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (analysis, cs, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs.files_added, 2);
         assert_eq!(analysis.graph.file_count(), 2);
 
         std::fs::remove_file(&a).unwrap();
 
-        let (analysis2, cs2, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (analysis2, cs2, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs2.files_removed, 1);
         assert_eq!(analysis2.graph.file_count(), 1);
         assert_eq!(state.cache.extractions.len(), 1);
@@ -296,12 +297,12 @@ mod tests {
         write_file(&root, "a.py", "def foo(): pass\n");
 
         let mut state = WatchState::new();
-        let (_, cs, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (_, cs, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs.files_added, 1);
 
         write_file(&root, "b.py", "def bar(): pass\n");
 
-        let (analysis2, cs2, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (analysis2, cs2, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs2.files_added, 1);
         assert_eq!(analysis2.graph.file_count(), 2);
     }
@@ -313,11 +314,11 @@ mod tests {
         write_file(&root, "b.py", "def two(): pass\n");
 
         let mut state = WatchState::new();
-        let (_, _, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (_, _, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
 
         write_file(&root, "c.py", "def three(): pass\n");
 
-        let (analysis, _, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (analysis, _, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
 
         let mut ids: Vec<u32> = analysis
             .graph
@@ -337,11 +338,11 @@ mod tests {
         write_file(&root, "b.py", "z = 2\n");
 
         let mut state = WatchState::new();
-        let (_, _, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (_, _, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
 
         write_file(&root, "b.py", "z = 2\nw = z + 3\n");
 
-        let (_, _, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (_, _, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
 
         let mut ids: Vec<u32> = state
             .cache
@@ -366,13 +367,13 @@ mod tests {
         let _b = write_file(&root, "b.py", "def b(): pass\n");
 
         let mut state = WatchState::new();
-        let (_, cs1, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (_, cs1, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs1.files_added, 2);
         assert_eq!(cs1.files_removed, 0);
 
         std::fs::remove_file(&a).unwrap();
 
-        let (_, cs2, _) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (_, cs2, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs2.files_removed, 1);
         assert_eq!(cs2.files_added, 0);
         assert_eq!(cs2.files_modified, 0);
@@ -385,7 +386,7 @@ mod tests {
         let a = write_file(&root, "a.py", "def a(): pass\n");
 
         let mut state = WatchState::new();
-        let (_, _, diags1) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (_, _, diags1) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert!(diags1.is_empty());
 
         #[cfg(unix)]
@@ -396,7 +397,7 @@ mod tests {
             let _ = std::fs::set_permissions(&a, perms);
         }
 
-        let (_, _, diags2) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (_, _, diags2) = incremental_reanalyze(&root, None, &mut state).unwrap();
 
         #[cfg(unix)]
         {
@@ -414,7 +415,7 @@ mod tests {
     fn empty_project_handled() {
         let root = temp_dir("empty");
         let mut state = WatchState::new();
-        let (analysis, cs, diags) = incremental_reanalyze(&root, &mut state).unwrap();
+        let (analysis, cs, diags) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert!(diags.is_empty());
         assert_eq!(cs.files_added, 0);
         assert_eq!(analysis.graph.node_count(), 0);

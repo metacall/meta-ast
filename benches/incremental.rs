@@ -50,11 +50,11 @@ fn bench_cold_vs_warm(c: &mut Criterion) {
     group.sample_size(10);
 
     group.bench_function("cold_analyze_graph", |b| {
-        b.iter(|| analyze_graph(&root, SnapshotId::new(1).unwrap()).unwrap());
+        b.iter(|| analyze_graph(&root, SnapshotId::new(1).unwrap(), None).unwrap());
     });
 
     let mut state = WatchState::new();
-    incremental_reanalyze(&root, &mut state).unwrap();
+    incremental_reanalyze(&root, None, &mut state).unwrap();
 
     let modified = root.join("mod_42.py");
     let original = std::fs::read_to_string(&modified).unwrap();
@@ -72,13 +72,13 @@ fn bench_cold_vs_warm(c: &mut Criterion) {
                 }
             },
             |_| {
-                incremental_reanalyze(&root, &mut state).unwrap();
+                incremental_reanalyze(&root, None, &mut state).unwrap();
             },
         );
     });
 
     std::fs::write(&modified, &original).unwrap();
-    let _ = incremental_reanalyze(&root, &mut state).unwrap();
+    let _ = incremental_reanalyze(&root, None, &mut state).unwrap();
 
     group.finish();
 }

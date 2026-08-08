@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::language::LangId;
 use crate::output::OutputFormat;
 
 /// Configuration parameters governing the debounced file-system watcher.
@@ -18,6 +19,8 @@ pub struct WatchConfig {
     pub html: bool,
     /// Automatically open the browser when generating an HTML dashboard.
     pub open_browser: bool,
+    /// Optional language filter applied to discovered files.
+    pub languages: Option<Vec<LangId>>,
 }
 
 impl WatchConfig {
@@ -29,6 +32,7 @@ impl WatchConfig {
             output: None,
             html: false,
             open_browser: true,
+            languages: None,
         }
     }
 }
@@ -51,5 +55,6 @@ mod tests {
         assert!(cfg.output.is_none());
         assert!(!cfg.html);
         assert!(cfg.open_browser);
+        assert!(cfg.languages.is_none());
     }
 }
