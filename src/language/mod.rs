@@ -69,7 +69,9 @@ pub enum DefaultVisibility {
 #[repr(usize)]
 pub enum LangId {
     Python,
+    #[strum(serialize = "javascript")]
     JavaScript,
+    #[strum(serialize = "typescript")]
     TypeScript,
     Tsx,
     C,
@@ -202,6 +204,8 @@ mod tests {
     fn lang_id_display() {
         assert_eq!(format!("{}", LangId::Python), "python");
         assert_eq!(format!("{}", LangId::Ruby), "ruby");
+        assert_eq!(format!("{}", LangId::JavaScript), "javascript");
+        assert_eq!(format!("{}", LangId::TypeScript), "typescript");
     }
 
     #[test]
@@ -209,9 +213,11 @@ mod tests {
         for id in LangId::all() {
             let name: &str = id.as_ref();
             let parsed = LangId::from_str(name)
-                .unwrap_or_else(|e| panic!("from_str failed for snake_case name {name:?}: {e}"));
+                .unwrap_or_else(|e| panic!("from_str failed for documented name {name:?}: {e}"));
             assert_eq!(parsed, id);
         }
+        assert_eq!(LangId::from_str("typescript"), Ok(LangId::TypeScript));
+        assert_eq!(LangId::from_str("javascript"), Ok(LangId::JavaScript));
     }
 
     #[test]

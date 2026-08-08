@@ -41,25 +41,14 @@ fn parse_format(s: &str) -> Result<crate::output::OutputFormat, String> {
 
 fn parse_language(s: &str) -> Result<crate::language::LangId, String> {
     let normalized = s.to_lowercase();
-    let matched = crate::language::LangId::from_str(&normalized)
-        .ok()
-        .or_else(|| {
-            crate::language::LangId::all().into_iter().find(|id| {
-                let name = id.to_string();
-                normalized == name.replace('_', "")
-            })
-        });
-    if let Some(id) = matched {
-        return Ok(id);
-    }
-    let names: Vec<_> = crate::language::LangId::all()
-        .into_iter()
-        .map(|l| l.to_string().replace('_', ""))
-        .collect();
-    Err(format!(
-        "invalid language '{s}': expected one of {}",
-        names.join(", ")
-    ))
+    crate::language::LangId::from_str(&normalized).map_err(|_| {
+        let all = crate::language::LangId::all();
+        let names: Vec<_> = all.iter().map(|l| l.as_ref()).collect();
+        format!(
+            "invalid language '{s}': expected one of {}",
+            names.join(", ")
+        )
+    })
 }
 
 #[derive(Parser)]
@@ -168,9 +157,9 @@ mod tests {
     fn parse_language_invalid_returns_all_names() {
         let err = parse_language("pytho").unwrap_err();
         for id in crate::language::LangId::all() {
-            let name: String = id.to_string().replace('_', "");
+            let name: &str = id.as_ref();
             assert!(
-                err.contains(&name),
+                err.contains(name),
                 "error {err:?} should list the valid name {name:?}"
             );
         }
