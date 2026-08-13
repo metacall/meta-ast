@@ -86,7 +86,7 @@ pub(crate) fn resolve_client_calls(
     // Path -> FileId, used to filter Phase A candidates by loaded file.
     let mut path_to_file_id: HashMap<PathBuf, FileId> = HashMap::new();
     for (&fid, &idx) in &graph.file_to_index {
-        if let NodeData::File(f) = &graph.graph[idx] {
+        if let NodeData::File(f) = &graph.graph()[idx] {
             path_to_idx.insert(f.path.clone(), idx);
             path_to_file_id.insert(f.path.clone(), fid);
         }
@@ -167,7 +167,7 @@ pub(crate) fn resolve_client_calls(
             else {
                 continue;
             };
-            if let NodeData::File(f) = &graph.graph[file_idx]
+            if let NodeData::File(f) = &graph.graph()[file_idx]
                 && !loaded.iter().any(|(fid, _)| *fid == f.id)
             {
                 loaded.push((f.id, tag));
@@ -359,7 +359,7 @@ mod tests {
 
         fn add_file(&mut self, path: &str, lang: LangId) -> (FileId, NodeIndex) {
             let id = FileId::new(self.graph.file_to_index.len() as u32 + 1).unwrap();
-            let idx = self.graph.graph.add_node(NodeData::File(FileNode::new(
+            let idx = self.graph.add_node(NodeData::File(FileNode::new(
                 id,
                 PathBuf::from(path),
                 lang,
@@ -377,7 +377,6 @@ mod tests {
             lang: LangId,
         ) -> NodeIndex {
             let idx = self
-                .graph
                 .graph
                 .add_node(NodeData::Symbol(SymbolNode::from_symbol(sym, file_id)));
             self.graph.symbol_to_index.insert(sym.id, idx);

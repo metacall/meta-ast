@@ -65,6 +65,7 @@ pub fn find_cross_language_cuts(
     }
 
     let mut cuts = Vec::new();
+    let g = graph.graph();
 
     for comp in &scc.components {
         if !comp.is_cyclic {
@@ -80,7 +81,7 @@ pub fn find_cross_language_cuts(
         // NodeData variant that carries a language to avoid missing such cycles.
         let mut langs = HashSet::new();
         for &node_idx in &comp.nodes {
-            match graph.graph.node_weight(node_idx) {
+            match g.node_weight(node_idx) {
                 Some(NodeData::Symbol(s)) => {
                     if let Some(&lang) = file_languages.get(&s.file_id) {
                         langs.insert(lang);
@@ -102,21 +103,21 @@ pub fn find_cross_language_cuts(
 
         // Find the lowest-confidence cross-language edge inside this SCC.
         let mut best_edge: Option<(FileId, FileId, f32)> = None;
-        for edge_idx in graph.graph.edge_indices() {
-            let weight = &graph.graph[edge_idx];
+        for edge_idx in g.edge_indices() {
+            let weight = &g[edge_idx];
             if !weight.participates_in_scc() {
                 continue;
             }
-            let Some((u, v)) = graph.graph.edge_endpoints(edge_idx) else {
+            let Some((u, v)) = g.edge_endpoints(edge_idx) else {
                 continue;
             };
             if !comp_nodes.contains(&u) || !comp_nodes.contains(&v) {
                 continue;
             }
-            let Some(src_fid) = node_to_file_id(&graph.graph[u]) else {
+            let Some(src_fid) = node_to_file_id(&g[u]) else {
                 continue;
             };
-            let Some(dst_fid) = node_to_file_id(&graph.graph[v]) else {
+            let Some(dst_fid) = node_to_file_id(&g[v]) else {
                 continue;
             };
             if file_languages.get(&src_fid) != file_languages.get(&dst_fid) {
@@ -158,20 +159,21 @@ pub fn find_oversized_pod_cut(pod: &Pod, graph: &CodeGraph, max_size: usize) -> 
 
     let files_set: HashSet<FileId> = pod.files.iter().copied().collect();
     let mut best_edge: Option<(FileId, FileId, f32)> = None;
+    let g = graph.graph();
 
     // Single pass over all edges -- filter to intra-pod edges only.
-    for edge_idx in graph.graph.edge_indices() {
-        let weight = &graph.graph[edge_idx];
+    for edge_idx in g.edge_indices() {
+        let weight = &g[edge_idx];
         if !weight.participates_in_scc() {
             continue;
         }
-        let Some((u, v)) = graph.graph.edge_endpoints(edge_idx) else {
+        let Some((u, v)) = g.edge_endpoints(edge_idx) else {
             continue;
         };
-        let Some(src_fid) = node_to_file_id(&graph.graph[u]) else {
+        let Some(src_fid) = node_to_file_id(&g[u]) else {
             continue;
         };
-        let Some(dst_fid) = node_to_file_id(&graph.graph[v]) else {
+        let Some(dst_fid) = node_to_file_id(&g[v]) else {
             continue;
         };
         // Only edges where both endpoints are in this pod.
@@ -203,7 +205,7 @@ pub fn find_oversized_pod_cut(pod: &Pod, graph: &CodeGraph, max_size: usize) -> 
 mod tests {
     use super::*;
     use crate::deploy::pod::partition_into_pods;
-    use crate::graph::edge::{EdgeData, EdgeKind};
+    use crate::graph::edge::EdgeKind;
     use crate::graph::node::{FileNode, NodeData};
     use crate::graph::scc::SccAnalysis;
     use crate::language::LangId;
@@ -220,7 +222,7 @@ mod tests {
         let mut fids = Vec::with_capacity(n);
         for i in 0..n {
             let id = FileId::new(i as u32 + 1).unwrap();
-            let idx = graph.graph.add_node(NodeData::File(FileNode::new(
+            let idx = graph.add_node(NodeData::File(FileNode::new(
                 id,
                 PathBuf::from(format!("f{i}.py")),
                 LangId::Python,
@@ -231,19 +233,22 @@ mod tests {
         }
 
         let idx_of = |fid: FileId| -> NodeIndex { *graph.file_to_index.get(&fid).unwrap() };
+        // Precompute edge endpoints first: idx_of borrows graph immutably
+        // and cannot coexist with the &mut graph of add_edge_normalized.
+        let weak_edge = if n >= 2 {
+            Some((idx_of(fids[0]), idx_of(fids[n - 1])))
+        } else {
+            None
+        };
+        let mut link_edges: Vec<(NodeIndex, NodeIndex)> = Vec::new();
         for i in 0..n.saturating_sub(1) {
-            graph.graph.add_edge(
-                idx_of(fids[i]),
-                idx_of(fids[i + 1]),
-                EdgeData::new(EdgeKind::Import),
-            );
+            link_edges.push((idx_of(fids[i]), idx_of(fids[i + 1])));
         }
-        if n >= 2 {
-            graph.graph.add_edge(
-                idx_of(fids[0]),
-                idx_of(fids[n - 1]),
-                EdgeData::with_confidence(EdgeKind::Import, 0.3),
-            );
+        for (src, dst) in &link_edges {
+            graph.add_edge_normalized(*src, *dst, EdgeKind::Import, 1.0);
+        }
+        if let Some((src, dst)) = weak_edge {
+            graph.add_edge_normalized(src, dst, EdgeKind::Import, 0.3);
         }
 
         let pod = Pod {
@@ -285,13 +290,13 @@ mod tests {
         let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
         let py_id = FileId::new(1).unwrap();
         let go_id = FileId::new(2).unwrap();
-        let py_idx = graph.graph.add_node(NodeData::File(FileNode::new(
+        let py_idx = graph.add_node(NodeData::File(FileNode::new(
             py_id,
             PathBuf::from("orch.py"),
             LangId::Python,
             SnapshotId::new(1).unwrap(),
         )));
-        let go_idx = graph.graph.add_node(NodeData::File(FileNode::new(
+        let go_idx = graph.add_node(NodeData::File(FileNode::new(
             go_id,
             PathBuf::from("auth.go"),
             LangId::Go,
@@ -300,17 +305,13 @@ mod tests {
         graph.file_to_index.insert(py_id, py_idx);
         graph.file_to_index.insert(go_id, go_idx);
 
-        graph
-            .graph
-            .add_edge(py_idx, go_idx, EdgeData::new(EdgeKind::Import));
-        graph
-            .graph
-            .add_edge(go_idx, py_idx, EdgeData::new(EdgeKind::Import));
+        graph.add_edge_normalized(py_idx, go_idx, EdgeKind::Import, 1.0);
+        graph.add_edge_normalized(go_idx, py_idx, EdgeKind::Import, 1.0);
 
-        let scc = SccAnalysis::analyze(&graph.graph);
+        let scc = SccAnalysis::analyze(graph.graph());
         let mut file_languages: HashMap<FileId, LangId> = HashMap::new();
         for (&fid, &idx) in &graph.file_to_index {
-            if let NodeData::File(f) = &graph.graph[idx] {
+            if let NodeData::File(f) = &graph.graph()[idx] {
                 file_languages.insert(fid, f.language);
             }
         }

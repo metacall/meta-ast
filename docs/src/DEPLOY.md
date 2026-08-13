@@ -31,6 +31,7 @@ meta-ast deploy <path> --check
 | `-o, --out <dir>` | `.` | Directory to write generated artifacts |
 | `-f, --format <json\|yaml>` | `json` | Serialization format |
 | `--check` | off | Fairness check mode: exits non-zero on missing RPC stubs |
+| `--max-pod-size <N>` | `20` | Files per pod before rebalancing triggers |
 
 ---
 
@@ -144,7 +145,7 @@ When both an Import edge and a Reference edge connect the same pod pair, confide
 `cut.rs` implements two cut rules:
 
 1. **Cross-language SCC cuts:** Cuts the lowest-confidence internal edge when an SCC spans multiple languages (`CutReason::CrossLanguageScc`). The manifest marks these as RPC stubs.
-2. **Oversized pod cuts:** Greedy single-pass cut on pods exceeding `DEFAULT_MAX_POD_SIZE` (20 files).
+2. **Oversized pod cuts:** Greedy single-pass cut on pods exceeding the pod size limit (`DEFAULT_MAX_POD_SIZE`, 20 files by default). Override the limit with `--max-pod-size <N>`.
 
 ---
 

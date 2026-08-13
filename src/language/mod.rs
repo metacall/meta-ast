@@ -51,14 +51,29 @@ pub enum DefaultVisibility {
     PrivateByDefault,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, strum::Display, strum::AsRefStr)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    strum::Display,
+    strum::AsRefStr,
+    strum::EnumString,
+)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 #[repr(usize)]
 pub enum LangId {
     Python,
+    #[strum(serialize = "javascript")]
+    #[serde(rename = "javascript")]
     JavaScript,
+    #[strum(serialize = "typescript")]
+    #[serde(rename = "typescript")]
     TypeScript,
     Tsx,
     C,
@@ -173,6 +188,8 @@ pub fn extract_imports_and_references_for<'a>(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     #[test]
@@ -189,6 +206,38 @@ mod tests {
     fn lang_id_display() {
         assert_eq!(format!("{}", LangId::Python), "python");
         assert_eq!(format!("{}", LangId::Ruby), "ruby");
+        assert_eq!(format!("{}", LangId::JavaScript), "javascript");
+        assert_eq!(format!("{}", LangId::TypeScript), "typescript");
+    }
+
+    #[test]
+    fn lang_id_vocabulary_is_canonical() {
+        let expected = [
+            "python",
+            "javascript",
+            "typescript",
+            "tsx",
+            "c",
+            "cpp",
+            "rust",
+            "go",
+            "ruby",
+        ];
+        let all = LangId::all();
+        let actual: Vec<&str> = all.iter().map(|l| l.as_ref()).collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn lang_id_from_str_round_trip() {
+        for id in LangId::all() {
+            let name: &str = id.as_ref();
+            let parsed = LangId::from_str(name)
+                .unwrap_or_else(|e| panic!("from_str failed for documented name {name:?}: {e}"));
+            assert_eq!(parsed, id);
+        }
+        assert_eq!(LangId::from_str("typescript"), Ok(LangId::TypeScript));
+        assert_eq!(LangId::from_str("javascript"), Ok(LangId::JavaScript));
     }
 
     #[test]
@@ -198,6 +247,12 @@ mod tests {
 
         let json = serde_json::to_string(&LangId::Ruby).unwrap();
         assert_eq!(json, "\"ruby\"");
+
+        let json = serde_json::to_string(&LangId::JavaScript).unwrap();
+        assert_eq!(json, "\"javascript\"");
+
+        let json = serde_json::to_string(&LangId::TypeScript).unwrap();
+        assert_eq!(json, "\"typescript\"");
     }
 
     #[test]

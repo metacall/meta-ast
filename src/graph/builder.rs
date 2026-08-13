@@ -249,52 +249,6 @@ impl GraphBuilder {
         self.add_edge_internal(from_idx, to_idx, EdgeKind::Import, 1.0);
     }
 
-    /// Adds a MetaCall load edge between files.
-    pub fn add_metacall_load(
-        &mut self,
-        from_path: PathBuf,
-        target_lang: LangId,
-        scripts: &[String],
-        confidence: f64,
-        root: &std::path::Path,
-    ) {
-        let Some(&from_fid) = self.path_to_file.get(&from_path) else {
-            return;
-        };
-        let Some(&from_idx) = self.file_to_index.get(&from_fid) else {
-            return;
-        };
-
-        for script in scripts {
-            let target_path = root.join(script);
-            // Resolve to FileId if it exists
-            if let Some(&to_fid) = self.path_to_file.get(&target_path) {
-                if let Some(&to_idx) = self.file_to_index.get(&to_fid) {
-                    let edge_data = EdgeData::with_confidence(EdgeKind::Import, confidence as f32);
-                    self.graph.add_edge(from_idx, to_idx, edge_data);
-                }
-            } else {
-                // External or not discovered
-                let raw_path = script.clone();
-                if let Some(&to_idx) = self.external_index.get(&raw_path) {
-                    let edge_data = EdgeData::with_confidence(EdgeKind::Import, confidence as f32);
-                    self.graph.add_edge(from_idx, to_idx, edge_data);
-                } else {
-                    let node = ExternalNode {
-                        raw_path: raw_path.clone(),
-                        language: target_lang,
-                        classification: None,
-                    };
-                    let idx = self.graph.add_node(NodeData::External(node));
-                    self.external_index.insert(raw_path, idx);
-
-                    let edge_data = EdgeData::with_confidence(EdgeKind::Import, confidence as f32);
-                    self.graph.add_edge(from_idx, idx, edge_data);
-                }
-            }
-        }
-    }
-
     /// Internal edge addition with flow kind, respecting normalization.
     #[cfg(feature = "dataflow")]
     fn add_edge_internal_with_flow(
@@ -395,8 +349,17 @@ impl GraphBuilder {
 
     /// Finalizes the graph and returns the constructed CodeGraph.
     pub fn build(self) -> CodeGraph {
+        let edge_index = self
+            .graph
+            .edge_indices()
+            .map(|e| {
+                let (s, t) = self.graph.edge_endpoints(e).expect("edge endpoints exist");
+                ((s, t, self.graph[e].kind), e)
+            })
+            .collect();
         CodeGraph {
             graph: self.graph,
+            edge_index,
             file_to_index: self.file_to_index,
             symbol_to_index: self.symbol_to_index,
             external_index: self.external_index,
@@ -536,7 +499,7 @@ impl GraphBuilder {
 
         // Finalize and compute SCC
         let graph = builder.build();
-        let scc = crate::graph::SccAnalysis::analyze(&graph.graph);
+        let scc = crate::graph::SccAnalysis::analyze(graph.graph());
 
         (graph, scc)
     }

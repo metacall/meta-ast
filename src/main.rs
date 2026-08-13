@@ -18,7 +18,11 @@ fn main() -> anyhow::Result<()> {
 
     match cli {
         Cli::Inspect(args) => {
-            let files = meta_ast::input::discover_files(&args.path, None)?;
+            let languages = args.language.map(|l| [l]);
+            let files = meta_ast::input::discover_files(
+                &args.path,
+                languages.as_ref().map(|a| a.as_slice()),
+            )?;
 
             let result = meta_ast::extractor::extract_with_options(
                 &files,
@@ -63,6 +67,7 @@ fn main() -> anyhow::Result<()> {
                     output: args.output.clone(),
                     html: args.html,
                     open_browser: false,
+                    languages: args.language.map(|l| vec![l]),
                 };
 
                 let output = args.output.clone();
@@ -106,7 +111,12 @@ fn main() -> anyhow::Result<()> {
             }
 
             let snapshot_id = SnapshotId::new(1).unwrap();
-            let (analysis, diags) = meta_ast::pipeline::analyze_graph(&args.path, snapshot_id)?;
+            let languages = args.language.map(|l| [l]);
+            let (analysis, diags) = meta_ast::pipeline::analyze_graph(
+                &args.path,
+                snapshot_id,
+                languages.as_ref().map(|a| a.as_slice()),
+            )?;
 
             for diag in &diags {
                 tracing::warn!(
@@ -168,6 +178,7 @@ fn main() -> anyhow::Result<()> {
                 out: args.out,
                 format: args.format,
                 check: args.check,
+                max_pod_size: args.max_pod_size,
             };
             meta_ast::deploy::run_deploy(config)
         }

@@ -39,7 +39,7 @@ fn build_sample_graph() -> (meta_ast::graph::CodeGraph, SccAnalysis) {
     builder.add_reference(sym1.id, sym2.id, 1.0);
 
     let graph = builder.build();
-    let scc = SccAnalysis::analyze(&graph.graph);
+    let scc = SccAnalysis::analyze(graph.graph());
     (graph, scc)
 }
 
@@ -106,7 +106,7 @@ fn to_graph_html_cdn_link() {
 fn to_graph_html_empty_graph() {
     let builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
     let graph = builder.build();
-    let scc = SccAnalysis::analyze(&graph.graph);
+    let scc = SccAnalysis::analyze(graph.graph());
     let html = meta_ast::output::dashboard::to_graph_html(&graph, &scc, 1).unwrap();
     assert!(
         html.contains("\"node_count\":0"),

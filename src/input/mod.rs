@@ -32,7 +32,9 @@ pub fn discover_files(
     let mut results = Vec::new();
 
     if root.is_file() {
-        if let Some(lang_id) = detect_language(root) {
+        if let Some(lang_id) = detect_language(root)
+            && languages.is_none_or(|langs| langs.contains(&lang_id))
+        {
             results.push((root.to_path_buf(), lang_id));
         }
         return Ok(results);
@@ -204,6 +206,17 @@ mod tests {
         let files = discover_files(&path, None).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].1, LangId::Python);
+    }
+
+    #[test]
+    fn discover_single_file_honors_language_filter() {
+        let path = PathBuf::from("tests/fixtures/mixed/app.py");
+        let matching = discover_files(&path, Some(&[LangId::Python])).unwrap();
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].1, LangId::Python);
+
+        let excluded = discover_files(&path, Some(&[LangId::Go])).unwrap();
+        assert!(excluded.is_empty());
     }
 
     #[test]

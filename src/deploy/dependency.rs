@@ -59,17 +59,19 @@ pub fn resolve_dependencies(
         }
     }
 
-    for edge_idx in graph.graph.edge_indices() {
-        let weight = &graph.graph[edge_idx];
+    let g = graph.graph();
+
+    for edge_idx in g.edge_indices() {
+        let weight = &g[edge_idx];
         if weight.kind != crate::graph::EdgeKind::Import {
             continue;
         }
-        let Some((src, dst)) = graph.graph.edge_endpoints(edge_idx) else {
+        let Some((src, dst)) = g.edge_endpoints(edge_idx) else {
             continue;
         };
 
         // Source must be a file in a known pod.
-        let src_fid = match &graph.graph[src] {
+        let src_fid = match &g[src] {
             crate::graph::NodeData::File(f) => f.id,
             crate::graph::NodeData::Symbol(s) => s.file_id,
             _ => continue,
@@ -79,7 +81,7 @@ pub fn resolve_dependencies(
         };
 
         // Target must be an ExternalNode.
-        let ext = match &graph.graph[dst] {
+        let ext = match &g[dst] {
             crate::graph::NodeData::External(e) => e,
             _ => continue,
         };

@@ -60,7 +60,7 @@ pub fn compute_pod_metrics(
     // Build a reverse mapping from FileId -> Path using the graph's file nodes.
     let mut fid_to_path: HashMap<FileId, PathBuf> = HashMap::new();
     for (&fid, &idx) in &graph.file_to_index {
-        if let Some(NodeData::File(f)) = graph.graph.node_weight(idx) {
+        if let Some(NodeData::File(f)) = graph.graph().node_weight(idx) {
             fid_to_path.insert(fid, f.path.clone());
         }
     }

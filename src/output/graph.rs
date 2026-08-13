@@ -167,15 +167,16 @@ impl GraphOutput {
         scc_analysis: Option<&SccAnalysis>,
         snapshot_id: u64,
     ) -> GraphMetadata {
-        let node_count = graph.graph.node_count();
-        let edge_count = graph.graph.edge_count();
+        let g = graph.graph();
+        let node_count = g.node_count();
+        let edge_count = g.edge_count();
         let scc_count = scc_analysis.map_or(0, |s| s.components.len());
 
         let mut file_count = 0;
         let mut symbol_count = 0;
         let mut data_node_count = 0;
 
-        for node_data in graph.graph.node_weights() {
+        for node_data in g.node_weights() {
             match node_data {
                 NodeData::File(_) => file_count += 1,
                 NodeData::Symbol(_) => symbol_count += 1,
@@ -196,11 +197,10 @@ impl GraphOutput {
     }
 
     fn serialize_nodes(graph: &CodeGraph) -> Vec<SerializedNode> {
-        graph
-            .graph
-            .node_indices()
+        let g = graph.graph();
+        g.node_indices()
             .map(|idx| {
-                let node_data = &graph.graph[idx];
+                let node_data = &g[idx];
                 Self::serialize_node(idx.index(), node_data)
             })
             .collect()
@@ -264,12 +264,11 @@ impl GraphOutput {
     }
 
     fn serialize_edges(graph: &CodeGraph) -> Vec<SerializedEdge> {
-        graph
-            .graph
-            .edge_indices()
+        let g = graph.graph();
+        g.edge_indices()
             .filter_map(|edge_idx| {
-                let (source, target) = graph.graph.edge_endpoints(edge_idx)?;
-                let edge_data = graph.graph.edge_weight(edge_idx)?;
+                let (source, target) = g.edge_endpoints(edge_idx)?;
+                let edge_data = g.edge_weight(edge_idx)?;
                 let confidence = if edge_data.confidence < 1.0 {
                     Some(edge_data.confidence)
                 } else {
@@ -397,7 +396,30 @@ mod tests {
         assert_eq!(output.nodes.len(), 1);
         assert_eq!(output.nodes[0].kind, "file");
         assert_eq!(output.nodes[0].path.as_deref(), Some("src/main.py"));
-        assert!(output.nodes[0].language.is_some());
+        assert_eq!(output.nodes[0].language.as_deref(), Some("python"));
+    }
+
+    #[test]
+    fn graph_output_language_uses_canonical_names() {
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        builder.add_file(PathBuf::from("src/main.js"), LangId::JavaScript);
+        builder.add_file(PathBuf::from("src/main.ts"), LangId::TypeScript);
+        builder.add_file(PathBuf::from("src/main.tsx"), LangId::Tsx);
+        let graph = builder.build();
+        let scc = sample_scc_analysis();
+
+        let output = GraphOutput::from_graph(&graph, Some(&scc), 1);
+
+        let language_of = |path: &str| {
+            output
+                .nodes
+                .iter()
+                .find(|n| n.path.as_deref() == Some(path))
+                .and_then(|n| n.language.as_deref())
+        };
+        assert_eq!(language_of("src/main.js"), Some("javascript"));
+        assert_eq!(language_of("src/main.ts"), Some("typescript"));
+        assert_eq!(language_of("src/main.tsx"), Some("tsx"));
     }
 
     #[test]
@@ -465,7 +487,7 @@ mod tests {
             type_hint: Some("u32".into()),
             source_range: sample_source_range(),
         };
-        graph.graph.add_node(NodeData::Data(dnode));
+        graph.add_node(NodeData::Data(dnode));
         let scc = sample_scc_analysis();
 
         let output = GraphOutput::from_graph(&graph, Some(&scc), 1);
@@ -482,7 +504,7 @@ mod tests {
     fn flow_edge_serializes_with_flow_kind() {
         use crate::graph::node::DataGraphNode;
         let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
-        let src = graph.graph.add_node(NodeData::Data(DataGraphNode {
+        let src = graph.add_node(NodeData::Data(DataGraphNode {
             id: DataNodeId::new(1).unwrap(),
             symbol_id: None,
             name: Some("x".into()),
@@ -490,7 +512,7 @@ mod tests {
             type_hint: None,
             source_range: sample_source_range(),
         }));
-        let dst = graph.graph.add_node(NodeData::Data(DataGraphNode {
+        let dst = graph.add_node(NodeData::Data(DataGraphNode {
             id: DataNodeId::new(2).unwrap(),
             symbol_id: None,
             name: Some("y".into()),
@@ -518,7 +540,7 @@ mod tests {
     fn flow_edge_without_flow_kind_omits_field() {
         use crate::graph::node::DataGraphNode;
         let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
-        let src = graph.graph.add_node(NodeData::Data(DataGraphNode {
+        let src = graph.add_node(NodeData::Data(DataGraphNode {
             id: DataNodeId::new(1).unwrap(),
             symbol_id: None,
             name: Some("a".into()),
@@ -526,7 +548,7 @@ mod tests {
             type_hint: None,
             source_range: sample_source_range(),
         }));
-        let dst = graph.graph.add_node(NodeData::Data(DataGraphNode {
+        let dst = graph.add_node(NodeData::Data(DataGraphNode {
             id: DataNodeId::new(2).unwrap(),
             symbol_id: None,
             name: Some("b".into()),

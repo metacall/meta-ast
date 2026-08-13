@@ -21,6 +21,7 @@ pub struct DeployConfig {
     pub out: PathBuf,
     pub format: OutputFormat,
     pub check: bool,
+    pub max_pod_size: usize,
 }
 
 pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
@@ -28,11 +29,14 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     tracing::info!("Root path: {}", config.root.display());
     tracing::info!("Output path: {}", config.out.display());
     tracing::info!("Check mode: {}", config.check);
+    if config.max_pod_size == 0 {
+        anyhow::bail!("max_pod_size must be at least 1");
+    }
 
     // 1. Run full pipeline graph analysis (covers extraction + SCC)
     let snapshot_id = crate::model::SnapshotId::new(1).unwrap();
     let (mut analysis, mut diagnostics) =
-        crate::pipeline::analyze_graph(&config.root, snapshot_id)?;
+        crate::pipeline::analyze_graph(&config.root, snapshot_id, None)?;
 
     // 2. Collect MetaCall call sites from pipeline extractions (zero duplicate
     // I/O / parsing for the source scan; configuration JSONs referenced by
@@ -46,8 +50,9 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
 
     // 4. Build path-to-node-index lookup once
     let mut path_to_idx: HashMap<PathBuf, petgraph::graph::NodeIndex> = HashMap::new();
-    for idx in analysis.graph.graph.node_indices() {
-        if let crate::graph::node::NodeData::File(f) = &analysis.graph.graph[idx] {
+    let g = analysis.graph.graph();
+    for idx in g.node_indices() {
+        if let crate::graph::node::NodeData::File(f) = &g[idx] {
             path_to_idx.insert(f.path.clone(), idx);
         }
     }
@@ -147,7 +152,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
         );
     }
 
-    analysis.scc = crate::graph::scc::SccAnalysis::analyze(&analysis.graph.graph);
+    analysis.scc = crate::graph::scc::SccAnalysis::analyze(analysis.graph.graph());
 
     // 7. Pod partitioning
     let partition = pod::partition_into_pods(&analysis.graph);
@@ -169,9 +174,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
 
     // 10. Rebalance oversized pods
     for pod in &partition.pods {
-        if let Some(cut) =
-            cut::find_oversized_pod_cut(pod, &analysis.graph, cut::DEFAULT_MAX_POD_SIZE)
-        {
+        if let Some(cut) = cut::find_oversized_pod_cut(pod, &analysis.graph, config.max_pod_size) {
             all_cuts.push(cut);
         }
     }
@@ -289,7 +292,7 @@ fn add_metacall_edge(
 ) {
     let graph = &mut analysis.graph;
 
-    let source_file = match &graph.graph[from_idx] {
+    let source_file = match &graph.graph()[from_idx] {
         crate::graph::node::NodeData::File(f) => f.path.clone(),
         _ => return,
     };

@@ -78,6 +78,14 @@ Graph serialization for external consumers shall preserve:
 
 Sink adapters (e.g., Dgraph) that must preserve semantic equivalence.
 
+The serialized `language` field on file and external nodes uses the canonical
+lowercase language names, in enum declaration order:
+
+`python`, `javascript`, `typescript`, `tsx`, `c`, `cpp`, `rust`, `go`, `ruby`
+
+These values also parse back through the CLI `--language` flag. The same names
+apply to the strum `Display`/`AsRefStr` and serde representations of `LangId`.
+
 ## 7. Known limitations
 
 - Cross-language resolution is initially best-effort string/scope matching.

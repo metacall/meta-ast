@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::error::Diagnostic;
 use crate::graph::{CodeGraph, GraphBuilder, SccAnalysis};
 use crate::input;
+use crate::language::LangId;
 use crate::model::SnapshotId;
 
 /// Metadata about a snapshot analysis run.
@@ -29,8 +30,9 @@ pub struct GraphAnalysis {
 pub fn analyze_graph(
     root: &Path,
     snapshot_id: SnapshotId,
+    languages: Option<&[LangId]>,
 ) -> anyhow::Result<(GraphAnalysis, Vec<Diagnostic>)> {
-    let files = input::discover_files(root, None)?;
+    let files = input::discover_files(root, languages)?;
     let extraction = crate::extractor::extract(&files);
     let mut diagnostics: Vec<Diagnostic> = extraction
         .files

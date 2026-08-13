@@ -27,7 +27,7 @@
 //! let graph = builder.build();
 //!
 //! // Run SCC analysis
-//! let scc = SccAnalysis::analyze(&graph.graph);
+//! let scc = SccAnalysis::analyze(graph.graph());
 //! ```
 
 pub mod builder;
@@ -47,13 +47,18 @@ pub use scc::{DeployabilityHint, Scc, SccAnalysis};
 
 use crate::language::LangId;
 use crate::model::{FileId, SnapshotId, SymbolId};
-use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 
 /// The canonical dependency graph for a codebase snapshot.
 #[derive(Debug, Clone)]
 pub struct CodeGraph {
     /// The underlying petgraph with our node/edge data types.
-    pub graph: DiGraph<NodeData, EdgeData>,
+    graph: DiGraph<NodeData, EdgeData>,
+
+    /// O(1) dedup index: (source, target, kind) -> EdgeIndex, kept in sync
+    /// with `graph`. Every edge added through the normalized-add methods is
+    /// registered here; the builder populates it in `GraphBuilder::build`.
+    edge_index: HashMap<(NodeIndex, NodeIndex, EdgeKind), EdgeIndex>,
 
     /// Map from FileId to graph node index for O(1) lookup.
     pub(crate) file_to_index: HashMap<FileId, NodeIndex>,
@@ -73,11 +78,29 @@ impl CodeGraph {
     pub fn new(snapshot_id: SnapshotId) -> Self {
         Self {
             graph: DiGraph::new(),
+            edge_index: HashMap::new(),
             file_to_index: HashMap::new(),
             symbol_to_index: HashMap::new(),
             external_index: HashMap::new(),
             snapshot_id,
         }
+    }
+    /// Immutable access to the underlying petgraph graph for SCC analysis,
+    /// serialization, and deploy algorithms.
+    pub fn graph(&self) -> &DiGraph<NodeData, EdgeData> {
+        &self.graph
+    }
+
+    /// Adds a raw node to the graph. Node additions do not affect edge
+    /// normalization, so this is the only direct mutation needed by
+    /// deploy/test code that injects synthetic nodes post-build.
+    ///
+    /// The caller remains responsible for registering the node in the
+    /// index maps (`file_to_index`, `symbol_to_index`, `external_index`)
+    /// when it is a `File`/`Symbol`/`External` node. This method does not
+    /// sync those maps; a bare `Data` node needs no registration.
+    pub fn add_node(&mut self, node: NodeData) -> NodeIndex {
+        self.graph.add_node(node)
     }
     pub fn file_node_index(&self, file_id: FileId) -> Option<NodeIndex> {
         self.file_to_index.get(&file_id).copied()
@@ -127,6 +150,7 @@ impl CodeGraph {
     }
     /// Adds an edge, normalizing duplicate `(src, dst, kind)` triples by max-merging
     /// confidence so injected edges obey the same invariant as builder-constructed ones.
+    /// The O(1) `edge_index` makes duplicate detection independent of out-degree.
     pub fn add_edge_normalized(
         &mut self,
         source: NodeIndex,
@@ -134,16 +158,13 @@ impl CodeGraph {
         kind: EdgeKind,
         confidence: f32,
     ) {
-        let mut edge_idx = self.graph.first_edge(source, petgraph::Direction::Outgoing);
-        while let Some(e) = edge_idx {
-            let (_src, dst) = self.graph.edge_endpoints(e).unwrap();
-            if dst == target && self.graph[e].kind == kind {
-                self.graph[e].confidence = self.graph[e].confidence.max(confidence);
-                return;
-            }
-            edge_idx = self.graph.next_edge(e, petgraph::Direction::Outgoing);
+        let key = (source, target, kind);
+        if let Some(&edge_idx) = self.edge_index.get(&key) {
+            let edge = &mut self.graph[edge_idx];
+            edge.confidence = edge.confidence.max(confidence);
+            return;
         }
-        self.graph.add_edge(
+        let edge_idx = self.graph.add_edge(
             source,
             target,
             EdgeData {
@@ -152,11 +173,13 @@ impl CodeGraph {
                 flow_kind: None,
             },
         );
+        self.edge_index.insert(key, edge_idx);
     }
 
     /// Adds a Flow edge with a specific flow kind, normalizing duplicates by
     /// max-merging confidence (same (src, dst, Flow) triple). When a duplicate
-    /// edge exists, the first non-None `flow_kind` is preserved.
+    /// edge exists, the first non-None `flow_kind` is preserved. The lookup is
+    /// O(1) via the dedup index.
     pub fn add_edge_normalized_with_flow(
         &mut self,
         source: NodeIndex,
@@ -165,19 +188,16 @@ impl CodeGraph {
         confidence: f32,
         flow_kind: Option<crate::model::FlowKind>,
     ) {
-        let mut edge_idx = self.graph.first_edge(source, petgraph::Direction::Outgoing);
-        while let Some(e) = edge_idx {
-            let (_src, dst) = self.graph.edge_endpoints(e).unwrap();
-            if dst == target && self.graph[e].kind == kind {
-                self.graph[e].confidence = self.graph[e].confidence.max(confidence);
-                if self.graph[e].flow_kind.is_none() {
-                    self.graph[e].flow_kind = flow_kind;
-                }
-                return;
+        let key = (source, target, kind);
+        if let Some(&edge_idx) = self.edge_index.get(&key) {
+            let edge = &mut self.graph[edge_idx];
+            edge.confidence = edge.confidence.max(confidence);
+            if edge.flow_kind.is_none() {
+                edge.flow_kind = flow_kind;
             }
-            edge_idx = self.graph.next_edge(e, petgraph::Direction::Outgoing);
+            return;
         }
-        self.graph.add_edge(
+        let edge_idx = self.graph.add_edge(
             source,
             target,
             EdgeData {
@@ -186,6 +206,7 @@ impl CodeGraph {
                 flow_kind,
             },
         );
+        self.edge_index.insert(key, edge_idx);
     }
 
     pub fn files(&self) -> impl Iterator<Item = (FileId, &FileNode)> + '_ {
@@ -235,6 +256,15 @@ mod tests {
                 column: 10,
             },
         }
+    }
+
+    fn test_file_node(id: u32, path: &str) -> NodeData {
+        NodeData::File(FileNode {
+            id: FileId::new(id).unwrap(),
+            path: PathBuf::from(path),
+            language: LangId::Rust,
+            snapshot_id: SnapshotId::new(1).unwrap(),
+        })
     }
 
     fn test_symbol(id: u32, name: &str) -> Symbol {
@@ -344,20 +374,32 @@ mod tests {
     }
 
     #[test]
+    fn build_populated_edge_index_normalizes_post_build_edges() {
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        let file_a = builder.add_file(PathBuf::from("a.rs"), LangId::Rust);
+        let file_b = builder.add_file(PathBuf::from("b.rs"), LangId::Rust);
+        builder.add_import(file_a, PathBuf::from("b.rs"));
+        let mut graph = builder.build();
+        assert_eq!(graph.edge_count(), 1);
+
+        let a_idx = graph.file_node_index(file_a).unwrap();
+        let b_idx = graph.file_node_index(file_b).unwrap();
+
+        // Duplicate triple already indexed by build(): must max-merge, not grow.
+        graph.add_edge_normalized(a_idx, b_idx, EdgeKind::Import, 0.5);
+        graph.add_edge_normalized(a_idx, b_idx, EdgeKind::Import, 0.8);
+        assert_eq!(graph.edge_count(), 1);
+
+        // Distinct kind on the same pair is a new edge.
+        graph.add_edge_normalized(a_idx, b_idx, EdgeKind::Reference, 0.9);
+        assert_eq!(graph.edge_count(), 2);
+    }
+
+    #[test]
     fn add_edge_normalized_handles_multiple_edge_kinds_between_same_nodes() {
         let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
-        let n1 = graph.graph.add_node(NodeData::File(FileNode {
-            id: FileId::new(1).unwrap(),
-            path: PathBuf::from("a.rs"),
-            language: LangId::Rust,
-            snapshot_id: SnapshotId::new(1).unwrap(),
-        }));
-        let n2 = graph.graph.add_node(NodeData::File(FileNode {
-            id: FileId::new(2).unwrap(),
-            path: PathBuf::from("b.rs"),
-            language: LangId::Rust,
-            snapshot_id: SnapshotId::new(1).unwrap(),
-        }));
+        let n1 = graph.add_node(test_file_node(1, "a.rs"));
+        let n2 = graph.add_node(test_file_node(2, "b.rs"));
 
         // 1. Add Reference edge with confidence 0.7
         graph.add_edge_normalized(n1, n2, EdgeKind::Reference, 0.7);
@@ -367,7 +409,7 @@ mod tests {
         graph.add_edge_normalized(n1, n2, EdgeKind::Reference, 0.9);
 
         let ref_count = graph
-            .graph
+            .graph()
             .edges_connecting(n1, n2)
             .filter(|e| e.weight().kind == EdgeKind::Reference)
             .count();
@@ -382,7 +424,7 @@ mod tests {
     fn add_edge_normalized_with_flow_preserves_first_flow_kind() {
         use crate::model::{DataNodeId, DataScope, FlowKind};
         let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
-        let n1 = graph.graph.add_node(NodeData::Data(DataGraphNode {
+        let n1 = graph.add_node(NodeData::Data(DataGraphNode {
             id: DataNodeId::new(1).unwrap(),
             symbol_id: None,
             name: Some("x".into()),
@@ -390,7 +432,7 @@ mod tests {
             type_hint: None,
             source_range: test_range(),
         }));
-        let n2 = graph.graph.add_node(NodeData::Data(DataGraphNode {
+        let n2 = graph.add_node(NodeData::Data(DataGraphNode {
             id: DataNodeId::new(2).unwrap(),
             symbol_id: None,
             name: Some("y".into()),
@@ -403,8 +445,39 @@ mod tests {
         graph.add_edge_normalized_with_flow(n1, n2, EdgeKind::Flow, 0.8, Some(FlowKind::Argument));
 
         assert_eq!(graph.edge_count(), 1);
-        let edge = graph.graph.edges_connecting(n1, n2).next().unwrap();
+        let edge = graph.graph().edges_connecting(n1, n2).next().unwrap();
         assert_eq!(edge.weight().flow_kind, Some(FlowKind::DefUse));
         assert_eq!(edge.weight().confidence, 0.9);
+    }
+
+    #[test]
+    fn add_edge_normalized_duplicate_never_grows_edge_count() {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let n1 = graph.add_node(test_file_node(1, "a.rs"));
+        let n2 = graph.add_node(test_file_node(2, "b.rs"));
+
+        graph.add_edge_normalized(n1, n2, EdgeKind::Import, 0.5);
+        for confidence in [0.6, 0.3, 0.9, 0.4, 0.7] {
+            graph.add_edge_normalized(n1, n2, EdgeKind::Import, confidence);
+        }
+
+        assert_eq!(graph.edge_count(), 1);
+        let edge = graph.graph().edges_connecting(n1, n2).next().unwrap();
+        assert_eq!(edge.weight().confidence, 0.9);
+    }
+
+    #[test]
+    fn add_edge_normalized_counts_only_distinct_triples() {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let n1 = graph.add_node(test_file_node(1, "a.rs"));
+        let n2 = graph.add_node(test_file_node(2, "b.rs"));
+        let n3 = graph.add_node(test_file_node(3, "c.rs"));
+
+        graph.add_edge_normalized(n1, n2, EdgeKind::Import, 0.5);
+        graph.add_edge_normalized(n1, n2, EdgeKind::Reference, 0.6);
+        graph.add_edge_normalized(n1, n3, EdgeKind::Reference, 0.7);
+        graph.add_edge_normalized(n1, n2, EdgeKind::Import, 0.9);
+
+        assert_eq!(graph.edge_count(), 3);
     }
 }

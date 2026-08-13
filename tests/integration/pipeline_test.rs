@@ -21,7 +21,7 @@ fn run_pipeline(
     Vec<meta_ast::error::Diagnostic>,
 ) {
     let (analysis, diags) =
-        meta_ast::pipeline::analyze_graph(root, meta_ast::model::SnapshotId::new(1).unwrap())
+        meta_ast::pipeline::analyze_graph(root, meta_ast::model::SnapshotId::new(1).unwrap(), None)
             .unwrap();
     (analysis.graph, analysis.scc, diags)
 }
@@ -753,6 +753,7 @@ fn analyze_graph_python_project() {
     let (analysis, _diags) = meta_ast::pipeline::analyze_graph(
         Path::new("tests/fixtures/python"),
         meta_ast::model::SnapshotId::new(1).unwrap(),
+        None,
     )
     .unwrap();
 
@@ -769,6 +770,7 @@ fn analyze_graph_multi_language() {
     let (analysis, _diags) = meta_ast::pipeline::analyze_graph(
         Path::new("tests/fixtures/multi"),
         meta_ast::model::SnapshotId::new(1).unwrap(),
+        None,
     )
     .unwrap();
 
@@ -777,12 +779,34 @@ fn analyze_graph_multi_language() {
 }
 
 #[test]
+fn analyze_graph_language_filter_only_includes_requested_language() {
+    let (analysis, _diags) = meta_ast::pipeline::analyze_graph(
+        Path::new("tests/fixtures/mixed"),
+        meta_ast::model::SnapshotId::new(1).unwrap(),
+        Some(&[meta_ast::LangId::Python]),
+    )
+    .unwrap();
+
+    assert!(
+        analysis.graph.file_count() > 0,
+        "mixed fixture should contain Python files"
+    );
+    for (_, file_node) in analysis.graph.files() {
+        assert_eq!(
+            file_node.language,
+            meta_ast::LangId::Python,
+            "filtered graph should only contain Python files"
+        );
+    }
+}
+
+#[test]
 fn analyze_graph_empty_dir() {
     let tmp = std::env::temp_dir().join("meta_ast_test_empty_pipeline");
     std::fs::create_dir_all(&tmp).unwrap();
 
     let (analysis, _diags) =
-        meta_ast::pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId::new(1).unwrap())
+        meta_ast::pipeline::analyze_graph(&tmp, meta_ast::model::SnapshotId::new(1).unwrap(), None)
             .unwrap();
 
     assert_eq!(analysis.graph.node_count(), 0);
@@ -796,9 +820,12 @@ fn analyze_graph_empty_dir() {
 fn analyze_graph_diagnostics_propagated() {
     let path = Path::new("tests/fixtures/multi");
     if path.exists() {
-        let (_analysis, diags) =
-            meta_ast::pipeline::analyze_graph(path, meta_ast::model::SnapshotId::new(1).unwrap())
-                .unwrap();
+        let (_analysis, diags) = meta_ast::pipeline::analyze_graph(
+            path,
+            meta_ast::model::SnapshotId::new(1).unwrap(),
+            None,
+        )
+        .unwrap();
         let _ = diags;
     }
 }
@@ -808,6 +835,7 @@ fn analyze_graph_nonexistent_root() {
     let result = meta_ast::pipeline::analyze_graph(
         Path::new("/nonexistent/path/that/does/not/exist"),
         meta_ast::model::SnapshotId::new(1).unwrap(),
+        None,
     );
     assert!(result.is_err(), "nonexistent root should return Err");
 }
@@ -817,6 +845,7 @@ fn analyze_graph_snapshot_id_passthrough() {
     let (analysis, _diags) = meta_ast::pipeline::analyze_graph(
         Path::new("tests/fixtures/python"),
         meta_ast::model::SnapshotId::new(42).unwrap(),
+        None,
     )
     .unwrap();
 
@@ -833,7 +862,7 @@ fn analyze_graph_python_cross_file_import() {
     std::fs::write(tmp.join("main.py"), "from utils import helper\nhelper()\n").unwrap();
 
     let (analysis, _diags) =
-        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap()).unwrap();
+        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap(), None).unwrap();
 
     assert_eq!(analysis.graph.file_count(), 2);
 
@@ -879,7 +908,7 @@ fn analyze_graph_js_relative_import() {
     .unwrap();
 
     let (analysis, _diags) =
-        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap()).unwrap();
+        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap(), None).unwrap();
 
     assert_eq!(analysis.graph.file_count(), 2);
 
@@ -905,19 +934,19 @@ fn analyze_graph_external_imports_appear_in_graph() {
     .unwrap();
 
     let (analysis, _diags) =
-        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap()).unwrap();
+        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap(), None).unwrap();
 
     // Should have 1 file node
     assert_eq!(analysis.graph.file_count(), 1);
 
     // Should have at least one external node
-    let external_nodes: Vec<_> = analysis
-        .graph
-        .graph
-        .node_indices()
-        .filter_map(|idx| analysis.graph.graph.node_weight(idx))
-        .filter(|node| matches!(node, NodeData::External(_)))
-        .collect();
+    let external_nodes: Vec<_> = {
+        let g = analysis.graph.graph();
+        g.node_indices()
+            .filter_map(|idx| g.node_weight(idx))
+            .filter(|node| matches!(node, NodeData::External(_)))
+            .collect()
+    };
     assert!(
         !external_nodes.is_empty(),
         "should have external nodes for 'import os' and 'import json'"
@@ -1013,7 +1042,7 @@ fn analyze_graph_python_multiline_import_edges() {
     .unwrap();
 
     let (analysis, _diags) =
-        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap()).unwrap();
+        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap(), None).unwrap();
     assert_eq!(analysis.graph.file_count(), 2);
 
     let import_edges: Vec<_> = analysis.graph.edges_of_kind(EdgeKind::Import).collect();
@@ -1042,7 +1071,7 @@ fn analyze_graph_js_multiline_import_edges() {
     .unwrap();
 
     let (analysis, _diags) =
-        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap()).unwrap();
+        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap(), None).unwrap();
     assert_eq!(analysis.graph.file_count(), 2);
 
     let import_edges: Vec<_> = analysis.graph.edges_of_kind(EdgeKind::Import).collect();
@@ -1071,7 +1100,7 @@ fn analyze_graph_rust_multiline_use_edges() {
     .unwrap();
 
     let (analysis, _diags) =
-        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap()).unwrap();
+        meta_ast::pipeline::analyze_graph(&tmp, SnapshotId::new(1).unwrap(), None).unwrap();
     assert_eq!(analysis.graph.file_count(), 2);
 
     let import_edges: Vec<_> = analysis.graph.edges_of_kind(EdgeKind::Import).collect();

@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use clap::Parser;
 
 /// Polyglot static analyzer that builds symbol surfaces and cross-file dependency graphs.
@@ -37,6 +39,18 @@ fn parse_format(s: &str) -> Result<crate::output::OutputFormat, String> {
     }
 }
 
+fn parse_language(s: &str) -> Result<crate::language::LangId, String> {
+    let normalized = s.to_lowercase();
+    crate::language::LangId::from_str(&normalized).map_err(|_| {
+        let all = crate::language::LangId::all();
+        let names: Vec<_> = all.iter().map(|l| l.as_ref()).collect();
+        format!(
+            "invalid language '{s}': expected one of {}",
+            names.join(", ")
+        )
+    })
+}
+
 #[derive(Parser)]
 pub struct InspectArgs {
     /// Root directory or source file to inspect
@@ -46,9 +60,9 @@ pub struct InspectArgs {
     #[arg(short, long)]
     pub output: Option<std::path::PathBuf>,
 
-    /// Override automatic language detection and force a specific language
-    #[arg(short, long)]
-    pub language: Option<String>,
+    /// Only analyze files detected as this language
+    #[arg(short, long, value_parser = parse_language)]
+    pub language: Option<crate::language::LangId>,
 
     /// Output format for the extracted symbols
     #[arg(short = 'f', long, default_value = "json", value_parser = parse_format)]
@@ -64,9 +78,9 @@ pub struct GraphArgs {
     #[arg(short, long)]
     pub output: Option<std::path::PathBuf>,
 
-    /// Override automatic language detection and force a specific language
-    #[arg(short, long)]
-    pub language: Option<String>,
+    /// Only analyze files detected as this language
+    #[arg(short, long, value_parser = parse_language)]
+    pub language: Option<crate::language::LangId>,
 
     /// Output serialization format for the graph structure
     #[arg(short = 'f', long, default_value = "json", value_parser = parse_format)]
@@ -109,4 +123,54 @@ pub struct DeployArgs {
     /// Output directory for generated manifests and mesh annotation
     #[arg(short, long, default_value = ".")]
     pub out: std::path::PathBuf,
+
+    /// Maximum number of files in a single pod before rebalancing is triggered
+    #[arg(long, default_value_t = crate::deploy::cut::DEFAULT_MAX_POD_SIZE)]
+    pub max_pod_size: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_language_valid_lowercase() {
+        assert_eq!(
+            parse_language("python"),
+            Ok(crate::language::LangId::Python)
+        );
+        assert_eq!(
+            parse_language("typescript"),
+            Ok(crate::language::LangId::TypeScript)
+        );
+    }
+
+    #[test]
+    fn parse_language_case_insensitive() {
+        assert_eq!(
+            parse_language("Python"),
+            Ok(crate::language::LangId::Python)
+        );
+        assert_eq!(
+            parse_language("TYPESCRIPT"),
+            Ok(crate::language::LangId::TypeScript)
+        );
+    }
+
+    #[test]
+    fn parse_language_invalid_returns_all_names() {
+        let err = parse_language("pytho").unwrap_err();
+        for id in crate::language::LangId::all() {
+            let name: &str = id.as_ref();
+            assert!(
+                err.contains(name),
+                "error {err:?} should list the valid name {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_language_empty_returns_err() {
+        assert!(parse_language("").is_err());
+    }
 }
