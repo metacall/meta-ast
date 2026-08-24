@@ -53,8 +53,8 @@ DataNode represents a value or variable instance used for def-use and flow analy
 
 1. Every SymbolNode must map to exactly one FileNode.
 2. Ownership edges must form an acyclic containment structure.
-3. SCC computation applies to dependency/reference subgraph, not ownership edges.
-4. Duplicate edges should be normalized by `(src, dst, edge_kind)` key.
+3. SCC computation applies to dependency/reference subgraph, not ownership edges. Self-loop detection and independence classification follow the same subgraph rule.
+4. Duplicate edges should be normalized by `(src, dst, edge_kind)` key. Client-call edges (FileNode to SymbolNode) can only merge with other client-call edges; scope-resolved references (SymbolNode to SymbolNode) never collide with them. Strongest evidence wins within a triple.
 
 ## 5. SCC semantics
 

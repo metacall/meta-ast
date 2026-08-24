@@ -696,4 +696,52 @@ mod tests {
             None
         );
     }
+
+    /// Characterization: a file-to-symbol client-call edge can never be
+    /// absorbed by a scope-resolved symbol-to-symbol reference (endpoint node
+    /// types differ, so `(src, dst, kind)` triples never collide).
+    #[test]
+    fn computed_name_client_call_survives_alongside_scope_reference() {
+        use crate::graph::edge::EdgeKind;
+
+        let mut fx = Fixture::new();
+        let (py_id, py_idx) = fx.add_file("orchestrator.py", LangId::Python);
+        let (js_id, _) = fx.add_file("math.js", LangId::JavaScript);
+        let multiply = symbol(1, "multiply", "math.js", LangId::JavaScript);
+        let sym_idx = fx.add_symbol(&multiply, js_id, "math.js", LangId::JavaScript);
+        let caller = symbol(2, "caller", "orchestrator.py", LangId::Python);
+        let caller_idx = fx.add_symbol(&caller, py_id, "orchestrator.py", LangId::Python);
+
+        // Scope-resolved reference (what GraphBuilder produces): sym -> sym @ 1.0.
+        fx.graph
+            .add_edge_normalized(caller_idx, sym_idx, EdgeKind::Reference, 1.0);
+
+        // Computed-name client call: file -> sym @ 0.4.
+        let call_sites = vec![client_call("orchestrator.py", "multiply", 0.4)];
+        let resolution =
+            resolve_client_calls(&fx.graph, &fx.extractions, &call_sites, Path::new("."));
+        assert_eq!(resolution.edges.len(), 1);
+        let (from, to, confidence) = resolution.edges[0];
+        assert_eq!((from, to, confidence), (py_idx, sym_idx, 0.4));
+        fx.graph
+            .add_edge_normalized(from, to, EdgeKind::Reference, confidence);
+
+        // Both edges coexist with their own confidences.
+        let client_edge = fx.graph.graph().find_edge(py_idx, sym_idx).unwrap();
+        let scope_edge = fx.graph.graph().find_edge(caller_idx, sym_idx).unwrap();
+        assert_ne!(client_edge, scope_edge);
+        assert_eq!(
+            fx.graph
+                .graph()
+                .edge_weight(client_edge)
+                .unwrap()
+                .confidence,
+            0.4
+        );
+        assert_eq!(
+            fx.graph.graph().edge_weight(scope_edge).unwrap().confidence,
+            1.0
+        );
+        assert!(resolution.diagnostics.is_empty());
+    }
 }

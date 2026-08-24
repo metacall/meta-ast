@@ -13,10 +13,10 @@
 //! preserved as a single deployment unit whenever possible.
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::EdgeFiltered;
+use petgraph::visit::{EdgeFiltered, EdgeRef};
 use std::collections::HashMap;
 
-use crate::graph::edge::{EdgeData, EdgeKind};
+use crate::graph::edge::EdgeData;
 use crate::graph::node::NodeData;
 
 /// A single strongly connected component.
@@ -91,10 +91,13 @@ impl SccAnalysis {
         let mut node_to_component = HashMap::new();
 
         for (index, nodes) in scc_groups.into_iter().enumerate() {
+            // Self-loop detection must use the dependency subgraph too:
+            // a Flow or Ownership self-loop does not make the component
+            // cyclic because those edges are excluded from SCC analysis.
             let has_self_loop = nodes.iter().any(|&node| {
                 graph
-                    .neighbors_directed(node, petgraph::Direction::Outgoing)
-                    .any(|neighbor| neighbor == node)
+                    .edges_directed(node, petgraph::Direction::Outgoing)
+                    .any(|edge| edge.weight().kind.participates_in_scc() && edge.target() == node)
             });
 
             let is_cyclic = nodes.len() > 1 || has_self_loop;
@@ -142,7 +145,9 @@ impl SccAnalysis {
             let Some(weight) = graph.edge_weight(edge_idx) else {
                 continue;
             };
-            if weight.kind == EdgeKind::Ownership {
+            // Independence follows the dependency subgraph: Ownership and
+            // Flow edges do not create deployment coupling between units.
+            if !weight.kind.participates_in_scc() {
                 continue;
             }
             let Some((source, target)) = graph.edge_endpoints(edge_idx) else {
@@ -211,6 +216,7 @@ impl SccAnalysis {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::edge::EdgeKind;
     use crate::graph::node::{FileNode, SymbolNode};
     use crate::language::LangId;
     use crate::model::{LineColumn, SourceRange, SymbolId, Visibility, ids::FileId};
@@ -333,6 +339,39 @@ mod tests {
         let comp = &analysis.components[0];
         assert!(comp.is_cyclic);
         assert_eq!(comp.hint, DeployabilityHint::SelfLoop);
+    }
+
+    #[test]
+    fn scc_flow_self_loop_not_cyclic() {
+        let mut graph = DiGraph::new();
+        let a = graph.add_node(make_symbol_node(1, "a", 0));
+
+        graph.add_edge(a, a, make_edge(EdgeKind::Flow));
+
+        let analysis = SccAnalysis::analyze(&graph);
+
+        assert!(!analysis.has_cycles());
+        let comp = &analysis.components[0];
+        assert!(!comp.is_cyclic);
+        assert_eq!(comp.hint, DeployabilityHint::Independent);
+    }
+
+    #[test]
+    fn scc_flow_edge_not_external_dependency() {
+        let mut graph = DiGraph::new();
+        let a = graph.add_node(make_symbol_node(1, "a", 0));
+        let b = graph.add_node(make_symbol_node(2, "b", 0));
+
+        // Only dependency between the two nodes is a Flow edge.
+        graph.add_edge(a, b, make_edge(EdgeKind::Flow));
+
+        let analysis = SccAnalysis::analyze(&graph);
+
+        assert_eq!(analysis.components.len(), 2);
+        assert!(!analysis.has_cycles());
+        for comp in &analysis.components {
+            assert_eq!(comp.hint, DeployabilityHint::Independent);
+        }
     }
 
     #[test]
