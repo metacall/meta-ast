@@ -101,7 +101,6 @@ Rationale for this specific shape:
 - This mirrors rust-analyzer's `main_loop.rs` task-passing design without salsa.
 - Cancellation: `$/cancelRequest` becomes a token registry checked between handler phases. With sub-millisecond queries, cancellation pressure is minimal.
 
-
 ### 3.4 Client layer
 
 A thin VSCode/Zed extension (~200 lines): activate on the supported languages, spawn `meta-ast-lsp` over stdio, forward `didOpen/didChange/didSave/didClose`, surface status. No providers live in the client. Any LSP-capable editor works with zero client code beyond launch configuration "emacs/vim/helix".
@@ -132,19 +131,22 @@ A thin VSCode/Zed extension (~200 lines): activate on the supported languages, s
 
 ### Phase 3: enrichment and ecosystem
 
-- Hover merge with runtime metadata: parse `metacall inspect` JSON (parameter and return annotations where the loader captured them, e.g. Python type hints). Enrichment only; absence changes nothing statically.
+- Hover merge with runtime metadata. Two sources, both optional enrichment:
+    1. Local: parse `metacall inspect` JSON (parameter and return annotations where the loader captured them, e.g. Python type hints).
+    2. Deployed: query a live FaaS deployment through the same `metacall/protocol` API that `metacall/deploy-mcp-server` wraps, so signatures reflect the running runtime.
+  Absence of either changes nothing statically.
 - Semantic tokens (symbol kinds map cleanly).
 - Stub generation (salvaged concept from `deprecated/intellisense`, done right): emit `.pyi` / `.d.ts` from the static model so native per-language servers also see cross-language signatures. Never write into user source files; write sibling stub directories configured as extra paths.
 - `meta-ast export scip`.
 
-## 6. Non-Goals
+## 5. Non-Goals
 
 - Full type inference (RFC 0006 scope stands).
 - Renaming across languages (write path; later decision if demand appears).
 - Running or loading user code. Static analysis only; runtime inspection happens out-of-band via `metacall inspect`.
 - Replacing native per-language servers. This server coexists; editors keep their TypeScript or Python LSP for deep single-language semantics and gain cross-language features from this one.
 
-## 7. Failure Modes We Will Not Repeat
+## 6. Failure Modes We Will Not Repeat
 
 From the old forensics:
 
@@ -154,7 +156,7 @@ From the old forensics:
 4. No committed caches with machine-specific paths.
 5. No VSCode-only logic. Intelligence lives in the server; clients stay thin.
 
-## 8. Deliverables
+## 7. Deliverables
 
 1. `meta-ast` Phase 0 patches (serializer ranges, memory-text extraction seam, shard IO).
 2. New crate `crates/meta-ast-lsp` (this repo becomes a workspace) containing engine host, server, and index store.
