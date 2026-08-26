@@ -26,6 +26,8 @@ The etags shape, upgraded:
 
 The LSP does not re-parse anything. It serves queries from an immutable index snapshot and coordinates re-indexing when files change.
 
+Home: the server lives in its own repository, `metacall/lsp`, not in this one. `meta-ast` stays a library dependency as discussed, Phase 0 patches below are the only changes required here.
+
 ## 3. Architecture
 
 ```text
@@ -103,7 +105,18 @@ Rationale for this specific shape:
 
 ### 3.4 Client layer
 
-A thin VSCode/Zed extension (~200 lines): activate on the supported languages, spawn `meta-ast-lsp` over stdio, forward `didOpen/didChange/didSave/didClose`, surface status. No providers live in the client. Any LSP-capable editor works with zero client code beyond launch configuration "emacs/vim/helix".
+Thin clients hosted under `clients/` in `metacall/lsp`: VSCode and Zed first. Each client (~200 lines) activates on supported languages, spawns the server binary over stdio, forwards `didOpen/didChange/didSave/didClose`, and surfaces status. No intelligence lives in a client.
+
+Editors without an extension story (emacs, vim, helix) work with zero client code: any LSP configuration pointing at the binary is enough. The TypeScript/Rust clients are deliberately simple onboarding tasks for new contributors arriving through Discord.
+
+### 3.5 Distribution and packaging
+
+The end user installs one extension and sees none of this machinery:
+
+1. CI publishes static server binaries per platform to GitHub releases of `metacall/lsp`.
+2. The client extension downloads the matching binary on activation and checks releases for updates automatically.
+3. If MetaCall itself is missing, the extension guides installation instead of failing silently. Static features never require MetaCall; only runtime enrichment (Phase 3) does.
+4. Optional later step: bundle the server into the existing MetaCall installer 'not decided', which already ships deploy and FaaS components. The maintainer confirmed this path stays open. Default stays GitHub releases because it decouples tooling releases from runtime releases.
 
 ## 4. Feature Phasing
 
@@ -136,7 +149,7 @@ A thin VSCode/Zed extension (~200 lines): activate on the supported languages, s
     2. Deployed: query a live FaaS deployment through the same `metacall/protocol` API that `metacall/deploy-mcp-server` wraps, so signatures reflect the running runtime.
   Absence of either changes nothing statically.
 - Semantic tokens (symbol kinds map cleanly).
-- Stub generation (salvaged concept from `deprecated/intellisense`, done right): emit `.pyi` / `.d.ts` from the static model so native per-language servers also see cross-language signatures. Never write into user source files; write sibling stub directories configured as extra paths.
+- Stub generation (recycled concept from `deprecated/intellisense`, done right): emit `.pyi` / `.d.ts` from the static model so native per-language servers also see cross-language signatures. Never write into user source files; write sibling stub directories configured as extra paths. Stubs are a one-way complement that feeds foreign signatures to native servers, they never carry navigation or diagnostics. The two-way channel is this LSP itself.
 - `meta-ast export scip`.
 
 ## 5. Non-Goals
@@ -144,7 +157,7 @@ A thin VSCode/Zed extension (~200 lines): activate on the supported languages, s
 - Full type inference (RFC 0006 scope stands).
 - Renaming across languages (write path; later decision if demand appears).
 - Running or loading user code. Static analysis only; runtime inspection happens out-of-band via `metacall inspect`.
-- Replacing native per-language servers. This server coexists; editors keep their TypeScript or Python LSP for deep single-language semantics and gain cross-language features from this one.
+- Replacing native per-language servers. This server coexists; editors keep their TypeScript or Python LSP for deep single-language semantics and gain cross-language features from this one. We do not rebuild nine type systems: pyright and tsserver stay authoritative for deep inference.
 
 ## 6. Failure Modes We Will Not Repeat
 
@@ -158,11 +171,11 @@ From the old forensics:
 
 ## 7. Deliverables
 
-1. `meta-ast` Phase 0 patches (serializer ranges, memory-text extraction seam, shard IO).
-2. New crate `crates/meta-ast-lsp` (this repo becomes a workspace) containing engine host, server, and index store.
-3. Minimal VSCode client extension (separate repository, `metacall/meta-ast-vscode` & `metacall/meta-ast-zed`).
+1. `meta-ast` Phase 0 patches in this repository: serializer ranges, memory-text extraction seam, shard IO. These land first so `metacall/lsp` starts against a capable library.
+2. `metacall/lsp` repository: server crate (`meta-ast-lsp`: engine host, sync server loop, index store) plus thin TypeScript clients under `clients/vscode` and `clients/zed`.
+3. Release engineering: per-platform binary builds published to GitHub releases; extension-side download and auto-update flow.
 
-Verification follows repo standards:
+Verification for `metacall/lsp` follows the same repo standards:
 
 ```bash
 cargo build --features watch --features metacall-deploy --features dataflow
