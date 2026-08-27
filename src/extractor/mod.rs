@@ -185,14 +185,14 @@ fn extract_source(
         });
     }
 
-    let raw_symbols = crate::language::extract_symbols_for(*lang, &tree, &source);
+    let raw_symbols = crate::language::extract_symbols_for(lang, &tree, source);
     let symbols = raw_symbols
         .into_iter()
         .map(|raw| Symbol {
-            id: id_gen.next(),
+            id: id_generators.symbols.next(),
             name: raw.name.into_owned(),
             kind: raw.kind,
-            language: *lang,
+            language: lang,
             file_path: path.to_path_buf(),
             source_range: raw.source_range,
             visibility: raw.visibility,
@@ -205,19 +205,19 @@ fn extract_source(
     let (imports, references) = if opts.skip_imports_and_refs {
         (Vec::new(), Vec::new())
     } else {
-        crate::language::extract_imports_and_references_for(*lang, &tree, &source, path)
+        crate::language::extract_imports_and_references_for(lang, &tree, source, path)
     };
 
     #[cfg(feature = "metacall-deploy")]
-    let call_sites = crate::deploy::scanner::scan_file(*lang, &tree, &source, path);
+    let call_sites = crate::deploy::scanner::scan_file(lang, &tree, source, path);
 
     #[cfg(feature = "dataflow")]
     let (data_nodes, flow_edges) =
-        crate::language::dataflow::extract_dataflow(*lang, &tree, &source, data_id_gen);
+        crate::language::dataflow::extract_dataflow(lang, &tree, source, &id_generators.data_nodes);
 
     FileExtraction {
         path: path.to_path_buf(),
-        lang: *lang,
+        lang,
         symbols,
         imports,
         references,
