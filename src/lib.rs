@@ -19,6 +19,10 @@ pub mod deploy;
 pub mod sink;
 
 pub use error::{Diagnostic, Error, Severity};
+pub use extractor::{
+    ExtractOptions, ExtractionIdGenerators, ExtractionResult, InMemorySource, VersionedExtraction,
+    extract_text_with_id_gen, extract_with_id_gen,
+};
 pub use input::detect_language;
 pub use language::{LangId, LanguageSpec};
 pub use model::{

@@ -59,6 +59,7 @@ pub enum DefaultVisibility {
     Eq,
     Hash,
     Serialize,
+    Deserialize,
     strum::Display,
     strum::AsRefStr,
     strum::EnumString,
