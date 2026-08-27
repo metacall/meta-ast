@@ -26,6 +26,7 @@ name = "incremental"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 strum = { version = "0.28", features = ["derive"] }
+url = "2.5"
 yaml_serde = "0.10"
 
 # Browser
@@ -40,7 +41,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Tree-Sitter Dependencies
-tree-sitter = "0.26.11"
+tree-sitter = "0.26.13"
 tree-sitter-c = "0.24.2"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-go = "0.25.0"
@@ -63,8 +64,10 @@ rayon = "1.12"
 dunce = "1"
 ignore = "0.4"
 
+# Hashing
+blake3 = "1.8"
+
 # Watch mode (feature-gated)
-blake3 = { version = "1.8", optional = true }
 notify = { version = "8.2", optional = true }
 notify-debouncer-mini = { version = "0.7", optional = true }
 
