@@ -80,7 +80,7 @@ tempfile = "3.27"
 default = []
 metacall-deploy = []
 dataflow = []
-watch = ["dep:notify", "dep:notify-debouncer-mini", "dep:blake3"]
+watch = ["dep:notify", "dep:notify-debouncer-mini"]
 
 [profile.bench]
 opt-level = 3
