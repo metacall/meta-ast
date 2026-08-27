@@ -329,6 +329,10 @@ impl ImportResolver for TsConfigResolver {
 
         (self.f)(raw, source_dir, project_root)
     }
+
+    fn clear_cache(&self) {
+        TsConfigResolver::clear_cache(self);
+    }
 }
 
 /// Construct a boxed `ImportResolver` for the given language.

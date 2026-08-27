@@ -201,19 +201,21 @@ impl GraphOutput {
         g.node_indices()
             .map(|idx| {
                 let node_data = &g[idx];
-                Self::serialize_node(idx.index(), node_data)
+                Self::serialize_node(graph, idx.index(), node_data)
             })
             .collect()
     }
 
-    fn serialize_node(id: usize, node_data: &NodeData) -> SerializedNode {
+    fn serialize_node(graph: &CodeGraph, id: usize, node_data: &NodeData) -> SerializedNode {
         match node_data {
             NodeData::File(f) => Self::serialize_file_node(id, f),
-            NodeData::Symbol(s) => Self::serialize_symbol_node(id, s),
+            NodeData::Symbol(s) => Self::serialize_symbol_node(graph, id, s),
             NodeData::External(e) => SerializedNode {
                 id,
                 kind: "external".to_string(),
                 path: Some(e.raw_path.clone()),
+                file_path: None,
+                source_range: None,
                 language: Some(e.language.as_ref().to_string()),
                 name: None,
                 symbol_kind: None,
