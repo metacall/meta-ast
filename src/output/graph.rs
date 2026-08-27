@@ -61,9 +61,15 @@ pub struct SerializedNode {
     pub id: usize,
     /// Node kind: "file", "symbol", "external", or "data"
     pub kind: String,
-    /// File path (for file/external nodes)
+    /// File or external path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// Defining file path for symbol nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    /// Source range for symbol nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_range: Option<crate::model::SourceRange>,
     /// Language identifier (for file/external nodes)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
@@ -227,6 +233,8 @@ impl GraphOutput {
                 id,
                 kind: "data".to_string(),
                 path: None,
+                file_path: None,
+                source_range: None,
                 language: None,
                 name: d.name.clone(),
                 symbol_kind: None,
