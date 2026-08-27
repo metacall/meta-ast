@@ -253,6 +253,10 @@ impl ImportResolver for JsResolver {
 
         (self.f)(raw, source_dir, project_root)
     }
+
+    fn clear_cache(&self) {
+        JsResolver::clear_cache(self);
+    }
 }
 
 /// Stateful resolver for TypeScript import paths using `tsconfig.json`.
@@ -266,6 +270,12 @@ impl TsConfigResolver {
         Self {
             f,
             is_file_cache: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub fn clear_cache(&self) {
+        if let Ok(mut cache) = self.is_file_cache.write() {
+            cache.clear();
         }
     }
 }
