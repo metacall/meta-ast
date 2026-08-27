@@ -8,6 +8,8 @@
 //! symbol listing is needed (e.g. inspect mode); skips the import and
 //! reference query passes, roughly halving per-file extraction time.
 
+use std::path::{Path, PathBuf};
+
 use rayon::prelude::*;
 
 use crate::error::{Diagnostic, Severity};
