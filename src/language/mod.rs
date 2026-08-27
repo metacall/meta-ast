@@ -19,7 +19,7 @@ pub(crate) mod rust;
 pub(crate) mod tsx;
 pub(crate) mod typescript;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tree_sitter::Query;
 
 use crate::model::Visibility;

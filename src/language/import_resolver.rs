@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{OnceLock, RwLock};
+use std::sync::RwLock;
 
 /// Stateful import path resolution seam.
 ///
