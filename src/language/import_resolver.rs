@@ -143,25 +143,42 @@ impl ImportResolver for GoModResolver {
             return Some(path.with_extension("go"));
         }
 
-        let module_info = self.cached_module.get_or_init(|| {
-            let mut current = Some(project_root);
-            while let Some(dir) = current {
-                let go_mod = dir.join("go.mod");
-                if go_mod.is_file() {
-                    if let Ok(content) = std::fs::read_to_string(&go_mod) {
-                        for line in content.lines() {
-                            let line = line.trim();
-                            if let Some(module) = line.strip_prefix("module ") {
-                                return Some((dir.to_path_buf(), module.trim().to_string()));
+        let cached = self
+            .cached_module
+            .read()
+            .ok()
+            .and_then(|guard| guard.clone());
+        let module_info = match cached {
+            Some(info) => info,
+            None => {
+                let computed = {
+                    let mut current = Some(project_root);
+                    let mut found = None;
+                    while let Some(dir) = current {
+                        let go_mod = dir.join("go.mod");
+                        if go_mod.is_file() {
+                            if let Ok(content) = std::fs::read_to_string(&go_mod) {
+                                for line in content.lines() {
+                                    let line = line.trim();
+                                    if let Some(module) = line.strip_prefix("module ") {
+                                        found =
+                                            Some((dir.to_path_buf(), module.trim().to_string()));
+                                        break;
+                                    }
+                                }
                             }
+                            break;
                         }
+                        current = dir.parent();
                     }
-                    break;
+                    found
+                };
+                if let Ok(mut guard) = self.cached_module.write() {
+                    *guard = Some(computed.clone());
                 }
-                current = dir.parent();
+                computed
             }
-            None
-        });
+        };
 
         let matched_module = module_info.as_ref().and_then(|(dir, name)| {
             if raw.starts_with(name) {
