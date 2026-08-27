@@ -85,36 +85,18 @@ pub fn extract_with_options(
     files: &[(std::path::PathBuf, LangId)],
     opts: &ExtractOptions,
 ) -> ExtractionResult {
-    let id_gen = IdGenerator::<SymbolId>::new();
-    #[cfg(feature = "dataflow")]
-    let data_id_gen = IdGenerator::<crate::model::DataNodeId>::new();
-    extract_with_id_gen(
-        files,
-        opts,
-        id_gen,
-        #[cfg(feature = "dataflow")]
-        data_id_gen,
-    )
+    let id_generators = ExtractionIdGenerators::new();
+    extract_with_id_gen(files, opts, &id_generators)
 }
 
-pub(crate) fn extract_with_id_gen(
-    files: &[(std::path::PathBuf, LangId)],
+pub fn extract_with_id_gen(
+    files: &[(PathBuf, LangId)],
     opts: &ExtractOptions,
-    id_gen: IdGenerator<SymbolId>,
-    #[cfg(feature = "dataflow")] data_id_gen: IdGenerator<crate::model::DataNodeId>,
+    id_generators: &ExtractionIdGenerators,
 ) -> ExtractionResult {
     let mut file_extractions: Vec<_> = files
         .par_iter()
-        .map(|(path, lang)| {
-            extract_single_file(
-                path,
-                lang,
-                &id_gen,
-                #[cfg(feature = "dataflow")]
-                &data_id_gen,
-                opts,
-            )
-        })
+        .map(|(path, lang)| extract_single_file(path, lang, id_generators, opts))
         .collect();
 
     file_extractions.sort_by(|a, b| a.path.cmp(&b.path));

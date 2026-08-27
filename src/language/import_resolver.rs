@@ -15,6 +15,9 @@ use std::sync::{OnceLock, RwLock};
 /// config file reads (tsconfig.json, go.mod, sys.path) on first use.
 pub trait ImportResolver: Send + Sync {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf>;
+
+    /// Invalidate any memoized filesystem state or configuration caches.
+    fn clear_cache(&self) {}
 }
 
 /// Zero-cost adapter wrapping a stateless function pointer.
