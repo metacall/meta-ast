@@ -250,6 +250,8 @@ impl GraphOutput {
             id,
             kind: "file".to_string(),
             path: Some(file_node.path.to_string_lossy().to_string()),
+            file_path: None,
+            source_range: None,
             language: Some(file_node.language.as_ref().to_string()),
             name: None,
             symbol_kind: None,
@@ -472,7 +474,7 @@ mod tests {
 
         assert!(json.contains("\"node_count\":0"));
         assert!(json.contains("\"edge_count\":0"));
-        assert!(json.contains("\"schema_version\":1"));
+        assert!(json.contains("\"schema_version\":2"));
     }
 
     #[test]
