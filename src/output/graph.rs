@@ -251,11 +251,20 @@ impl GraphOutput {
         }
     }
 
-    fn serialize_symbol_node(id: usize, symbol_node: &SymbolNode) -> SerializedNode {
+    fn serialize_symbol_node(
+        graph: &CodeGraph,
+        id: usize,
+        symbol_node: &SymbolNode,
+    ) -> SerializedNode {
+        let file_path = graph
+            .file_node(symbol_node.file_id)
+            .map(|file| file.path.to_string_lossy().to_string());
         SerializedNode {
             id,
             kind: "symbol".to_string(),
             path: None,
+            file_path,
+            source_range: Some(symbol_node.source_range.clone()),
             language: None,
             name: Some(symbol_node.name.clone()),
             symbol_kind: Some(format!("{:?}", symbol_node.kind)),
