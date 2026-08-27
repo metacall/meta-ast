@@ -13,7 +13,7 @@ use crate::graph::scc::{DeployabilityHint, SccAnalysis};
 
 /// Version of the graph export schema.
 /// Incremented on breaking changes to the serialized structure.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Complete graph analysis output for serialization.
 ///
