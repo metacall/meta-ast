@@ -30,6 +30,53 @@ pub struct ExtractionResult {
     pub files: Vec<FileExtraction>,
 }
 
+/// ID allocation state shared by disk and in-memory extraction.
+#[derive(Debug, Default)]
+pub struct ExtractionIdGenerators {
+    symbols: IdGenerator<SymbolId>,
+    #[cfg(feature = "dataflow")]
+    data_nodes: IdGenerator<crate::model::DataNodeId>,
+}
+
+impl ExtractionIdGenerators {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_symbol_start(symbol_start: u32) -> Self {
+        Self {
+            symbols: IdGenerator::with_start(symbol_start),
+            #[cfg(feature = "dataflow")]
+            data_nodes: IdGenerator::new(),
+        }
+    }
+
+    #[cfg(feature = "dataflow")]
+    pub fn with_starts(symbol_start: u32, data_node_start: u32) -> Self {
+        Self {
+            symbols: IdGenerator::with_start(symbol_start),
+            data_nodes: IdGenerator::with_start(data_node_start),
+        }
+    }
+}
+
+/// Source text supplied by an editor buffer.
+#[derive(Debug, Clone, Copy)]
+pub struct InMemorySource<'a> {
+    pub uri: &'a str,
+    pub text: &'a str,
+    pub version: i32,
+    pub language: LangId,
+}
+
+/// Extraction result tied to the editor document version that produced it.
+#[derive(Debug, Clone)]
+pub struct VersionedExtraction {
+    pub uri: String,
+    pub version: i32,
+    pub file: FileExtraction,
+}
+
 pub fn extract(files: &[(std::path::PathBuf, LangId)]) -> ExtractionResult {
     extract_with_options(files, &ExtractOptions::default())
 }

@@ -55,6 +55,14 @@ src/
 │   ├── emitter.rs            EmitConfig, emit_inspect(), emit_graph() - CLI output dispatch
 │   ├── inspect.rs            Inspect-compatible JSON/YAML emission
 │   ├── graph.rs              Unified GraphOutput (schema_version, metadata, nodes, edges, sccs, deployability)
+│   ├── shard/                `.metast` v2 stable-name JSONL shard and index persistence
+│   │   ├── mod.rs            Module root, re-exports, unit tests
+│   │   ├── error.rs          ShardError enum
+│   │   ├── file.rs           ShardFile, ShardSymbol, write_shard(), read_shard()
+│   │   ├── edge.rs           ShardEdge, ShardEdgeKind, restore_shard_edges()
+│   │   ├── manifest.rs       ShardManifestRecord, write_manifest(), read_manifest()
+│   │   ├── header.rs         ShardHeader, write_header(), read_header()
+│   │   └── name.rs           Stable naming, descriptors, and parent hierarchy resolution
 │   └── dashboard.rs          Interactive HTML dashboard (Cytoscape.js via CDN, --html)
 │
 └── sink/                     [feature: dataflow] GraphSink trait + JsonSink

@@ -34,6 +34,9 @@ pub enum Error {
     #[error("config: {0}")]
     Config(String),
 
+    #[error("invalid source URI '{uri}': {message}")]
+    InvalidSourceUri { uri: String, message: String },
+
     #[error("graph error: {0}")]
     Graph(String),
 }
