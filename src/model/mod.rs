@@ -14,9 +14,9 @@ pub use ids::{DataNodeId, FileId, IdGenerator, SnapshotId, SymbolId};
 pub use output::{ClassEntry, FuncEntry, InspectOutput, ObjectEntry};
 
 use crate::language::LangId;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnresolvedImport {
     pub import_specifier: String,
     pub alias: Option<String>,

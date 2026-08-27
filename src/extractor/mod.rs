@@ -125,65 +125,68 @@ pub(crate) fn extract_with_id_gen(
 }
 
 fn extract_single_file(
-    path: &std::path::Path,
+    path: &Path,
     lang: &LangId,
-    id_gen: &IdGenerator<SymbolId>,
-    #[cfg(feature = "dataflow")] data_id_gen: &IdGenerator<crate::model::DataNodeId>,
+    id_generators: &ExtractionIdGenerators,
     opts: &ExtractOptions,
 ) -> FileExtraction {
     let source = match std::fs::read(path) {
-        Ok(s) => s,
-        Err(e) => {
-            return FileExtraction {
-                path: path.to_path_buf(),
-                lang: *lang,
-                symbols: Vec::new(),
-                imports: Vec::new(),
-                references: Vec::new(),
-                diagnostics: vec![Diagnostic {
-                    path: path.to_path_buf(),
-                    severity: Severity::Error,
-                    message: format!("failed to read file: {e}"),
-                    source_range: None,
-                }],
-                ast_node_count: 0,
-                #[cfg(feature = "metacall-deploy")]
-                call_sites: Vec::new(),
-                #[cfg(feature = "dataflow")]
-                data_nodes: Vec::new(),
-                #[cfg(feature = "dataflow")]
-                flow_edges: Vec::new(),
-            };
+        Ok(source) => source,
+        Err(error) => {
+            return failed_extraction(path, *lang, format!("failed to read file: {error}"));
         }
     };
 
-    let tree = match crate::parser::parse_tree(*lang, &source) {
+    extract_source(path, *lang, &source, id_generators, opts)
+}
+
+/// Extract an open editor buffer without reading its backing file.
+pub fn extract_text_with_id_gen(
+    source: InMemorySource<'_>,
+    opts: &ExtractOptions,
+    id_generators: &ExtractionIdGenerators,
+) -> Result<VersionedExtraction, crate::Error> {
+    let parsed_uri =
+        url::Url::parse(source.uri).map_err(|error| crate::Error::InvalidSourceUri {
+            uri: source.uri.to_string(),
+            message: error.to_string(),
+        })?;
+    let path = parsed_uri
+        .to_file_path()
+        .map_err(|()| crate::Error::InvalidSourceUri {
+            uri: source.uri.to_string(),
+            message: "URI must use the file scheme and contain an absolute path".to_string(),
+        })?;
+    let file = extract_source(
+        &path,
+        source.language,
+        source.text.as_bytes(),
+        id_generators,
+        opts,
+    );
+
+    Ok(VersionedExtraction {
+        uri: source.uri.to_string(),
+        version: source.version,
+        file,
+    })
+}
+
+fn extract_source(
+    path: &Path,
+    lang: LangId,
+    source: &[u8],
+    id_generators: &ExtractionIdGenerators,
+    opts: &ExtractOptions,
+) -> FileExtraction {
+    let tree = match crate::parser::parse_tree(lang, source) {
         Ok(t) => t,
         Err(e) => {
-            return FileExtraction {
-                path: path.to_path_buf(),
-                lang: *lang,
-                symbols: Vec::new(),
-                imports: Vec::new(),
-                references: Vec::new(),
-                diagnostics: vec![Diagnostic {
-                    path: path.to_path_buf(),
-                    severity: Severity::Error,
-                    message: e.to_string(),
-                    source_range: None,
-                }],
-                ast_node_count: 0,
-                #[cfg(feature = "metacall-deploy")]
-                call_sites: Vec::new(),
-                #[cfg(feature = "dataflow")]
-                data_nodes: Vec::new(),
-                #[cfg(feature = "dataflow")]
-                flow_edges: Vec::new(),
-            };
+            return failed_extraction(path, lang, e.to_string());
         }
     };
 
-    let metrics = parser::tree_metrics(&tree, &source);
+    let metrics = parser::tree_metrics(&tree, source);
     let mut diags = Vec::new();
 
     if metrics.error_ratio > 0.5 {
@@ -242,6 +245,29 @@ fn extract_single_file(
         data_nodes,
         #[cfg(feature = "dataflow")]
         flow_edges,
+    }
+}
+
+fn failed_extraction(path: &Path, lang: LangId, message: String) -> FileExtraction {
+    FileExtraction {
+        path: path.to_path_buf(),
+        lang,
+        symbols: Vec::new(),
+        imports: Vec::new(),
+        references: Vec::new(),
+        diagnostics: vec![Diagnostic {
+            path: path.to_path_buf(),
+            severity: Severity::Error,
+            message,
+            source_range: None,
+        }],
+        ast_node_count: 0,
+        #[cfg(feature = "metacall-deploy")]
+        call_sites: Vec::new(),
+        #[cfg(feature = "dataflow")]
+        data_nodes: Vec::new(),
+        #[cfg(feature = "dataflow")]
+        flow_edges: Vec::new(),
     }
 }
 
