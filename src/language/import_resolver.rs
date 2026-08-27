@@ -53,6 +53,12 @@ impl PythonResolver {
             exists_cache: RwLock::new(HashMap::new()),
         }
     }
+
+    pub fn clear_cache(&self) {
+        if let Ok(mut cache) = self.exists_cache.write() {
+            cache.clear();
+        }
+    }
 }
 
 impl ImportResolver for PythonResolver {
@@ -98,19 +104,29 @@ impl ImportResolver for PythonResolver {
 
         (self.f)(raw, source_dir, project_root)
     }
+
+    fn clear_cache(&self) {
+        PythonResolver::clear_cache(self);
+    }
 }
 
 /// Stateful resolver for Go module import paths.
 pub struct GoModResolver {
     f: fn(&str, &Path, &Path) -> Option<PathBuf>,
-    cached_module: OnceLock<Option<(PathBuf, String)>>,
+    cached_module: RwLock<Option<Option<(PathBuf, String)>>>,
 }
 
 impl GoModResolver {
     pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
         Self {
             f,
-            cached_module: OnceLock::new(),
+            cached_module: RwLock::new(None),
+        }
+    }
+
+    pub fn clear_cache(&self) {
+        if let Ok(mut guard) = self.cached_module.write() {
+            *guard = None;
         }
     }
 }
