@@ -178,6 +178,44 @@ pub(crate) const TS_SPEC: LanguageSpec = LanguageSpec {
     }),
 };
 
+// ── Dataflow extraction ─────────────────────────────────────────────
+
+#[cfg(feature = "dataflow")]
+static TS_DATAFLOW_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    crate::language::common::compile_query(
+        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        crate::language::javascript::TS_FAMILY_DATAFLOW_QUERY,
+        "TypeScript dataflow",
+    )
+});
+
+/// TypeScript AST node kinds that introduce a new intra-procedural scope.
+#[cfg(feature = "dataflow")]
+pub(crate) const TS_FUNCTION_KINDS: &[&str] = &[
+    "function_declaration",
+    "generator_function_declaration",
+    "function_expression",
+    "generator_function",
+    "arrow_function",
+    "method_definition",
+];
+
+/// Extract data nodes and flow edges from a TypeScript parse tree.
+#[cfg(feature = "dataflow")]
+pub fn extract_typescript_dataflow(
+    tree: &tree_sitter::Tree,
+    source: &[u8],
+    id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
+) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+    crate::language::javascript::extract_js_family_dataflow_with_query(
+        tree,
+        source,
+        &TS_DATAFLOW_QUERY,
+        TS_FUNCTION_KINDS,
+        id_gen,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use crate::language::{LangId, extract_symbols_for, grammar_for};

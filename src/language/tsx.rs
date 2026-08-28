@@ -82,6 +82,44 @@ pub(crate) const TSX_SPEC: LanguageSpec = LanguageSpec {
     }),
 };
 
+// ── Dataflow extraction ─────────────────────────────────────────────
+
+#[cfg(feature = "dataflow")]
+static TSX_DATAFLOW_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
+    crate::language::common::compile_query(
+        &tree_sitter_typescript::LANGUAGE_TSX.into(),
+        crate::language::javascript::TS_FAMILY_DATAFLOW_QUERY,
+        "TSX dataflow",
+    )
+});
+
+/// TSX AST node kinds that introduce a new intra-procedural scope.
+#[cfg(feature = "dataflow")]
+pub(crate) const TSX_FUNCTION_KINDS: &[&str] = &[
+    "function_declaration",
+    "generator_function_declaration",
+    "function_expression",
+    "generator_function",
+    "arrow_function",
+    "method_definition",
+];
+
+/// Extract data nodes and flow edges from a TSX parse tree.
+#[cfg(feature = "dataflow")]
+pub fn extract_tsx_dataflow(
+    tree: &tree_sitter::Tree,
+    source: &[u8],
+    id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
+) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+    crate::language::javascript::extract_js_family_dataflow_with_query(
+        tree,
+        source,
+        &TSX_DATAFLOW_QUERY,
+        TSX_FUNCTION_KINDS,
+        id_gen,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use crate::language::{LangId, extract_symbols_for, grammar_for};
