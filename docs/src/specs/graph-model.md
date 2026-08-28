@@ -86,6 +86,10 @@ lowercase language names, in enum declaration order:
 These values also parse back through the CLI `--language` flag. The same names
 apply to the strum `Display`/`AsRefStr` and serde representations of `LangId`.
 
+Graph output schema version 2 adds `file_path` and `source_range` to serialized
+symbol nodes. `.metast` v2 shards do not persist numeric IDs. They store stable
+language-scoped endpoint names and regenerate symbol IDs when loaded.
+
 ## 7. Known limitations
 
 - Cross-language resolution is initially best-effort string/scope matching.
