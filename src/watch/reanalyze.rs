@@ -15,7 +15,7 @@ use crate::extractor;
 use crate::graph::GraphBuilder;
 use crate::input;
 use crate::language::LangId;
-use crate::model::{FileExtraction, IdGenerator, SymbolId};
+use crate::model::FileExtraction;
 use crate::pipeline::GraphAnalysis;
 use crate::watch::cache::{Fingerprint, compute_fingerprint};
 use crate::watch::state::{ChangeSet, WatchState};
