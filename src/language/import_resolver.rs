@@ -527,4 +527,84 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn resolver_clear_cache_invalidates_memoized_state() {
+        let temp_dir = std::env::temp_dir().join("resolver_clear_cache_invalidates_memoized_state");
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // 1. Python resolver cache invalidation
+        let pkg_dir = temp_dir.join("py_pkg");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        let init_py = pkg_dir.join("__init__.py");
+        std::fs::write(&init_py, "").unwrap();
+        let py_resolver = make_resolver(crate::language::LangId::Python);
+        assert_eq!(
+            py_resolver.resolve("py_pkg", &temp_dir, &temp_dir),
+            Some(init_py.clone())
+        );
+        std::fs::remove_file(&init_py).unwrap();
+        // Still cached:
+        assert_eq!(
+            py_resolver.resolve("py_pkg", &temp_dir, &temp_dir),
+            Some(init_py.clone())
+        );
+        // Invalidate:
+        py_resolver.clear_cache();
+        assert_eq!(
+            py_resolver.resolve("py_pkg", &temp_dir, &temp_dir),
+            Some(temp_dir.join("py_pkg.py"))
+        );
+
+        // 2. Go resolver cache invalidation
+        let go_mod_path = temp_dir.join("go.mod");
+        std::fs::write(&go_mod_path, "module oldmod\n").unwrap();
+        let go_resolver = make_resolver(crate::language::LangId::Go);
+        assert_eq!(
+            go_resolver.resolve("oldmod/sub", &temp_dir, &temp_dir),
+            Some(temp_dir.join("sub.go"))
+        );
+        std::fs::write(&go_mod_path, "module newmod\n").unwrap();
+        // Still cached to oldmod:
+        assert_eq!(
+            go_resolver.resolve("oldmod/sub", &temp_dir, &temp_dir),
+            Some(temp_dir.join("sub.go"))
+        );
+        // Invalidate:
+        go_resolver.clear_cache();
+        assert_eq!(
+            go_resolver.resolve("oldmod/sub", &temp_dir, &temp_dir),
+            None
+        );
+        assert_eq!(
+            go_resolver.resolve("newmod/sub", &temp_dir, &temp_dir),
+            Some(temp_dir.join("sub.go"))
+        );
+
+        // 3. TypeScript resolver cache invalidation
+        let ts_file = temp_dir.join("ts_file.ts");
+        std::fs::write(&ts_file, "").unwrap();
+        let ts_resolver = make_resolver(crate::language::LangId::TypeScript);
+        assert_eq!(
+            ts_resolver.resolve("./ts_file", &temp_dir, &temp_dir),
+            Some(ts_file.clone())
+        );
+        std::fs::remove_file(&ts_file).unwrap();
+        // Still cached:
+        assert_eq!(
+            ts_resolver.resolve("./ts_file", &temp_dir, &temp_dir),
+            Some(ts_file)
+        );
+        // Invalidate:
+        ts_resolver.clear_cache();
+        assert_eq!(
+            ts_resolver.resolve("./ts_file", &temp_dir, &temp_dir),
+            Some(temp_dir.join("./ts_file"))
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

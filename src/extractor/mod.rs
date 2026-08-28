@@ -359,6 +359,50 @@ mod tests {
     }
 
     #[test]
+    fn in_memory_extraction_uses_unsaved_text_and_preserves_version() {
+        let path = test_dir().join("buffer.py");
+        let _ = std::fs::remove_file(&path);
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        let id_generators = ExtractionIdGenerators::with_symbol_start(40);
+
+        let result = extract_text_with_id_gen(
+            InMemorySource {
+                uri: &uri,
+                text: "def unsaved(): pass\n",
+                version: 7,
+                language: LangId::Python,
+            },
+            &ExtractOptions::default(),
+            &id_generators,
+        )
+        .unwrap();
+
+        assert_eq!(result.version, 7);
+        assert_eq!(result.uri, uri);
+        assert_eq!(result.file.path, path);
+        assert_eq!(result.file.symbols[0].name, "unsaved");
+        assert_eq!(result.file.symbols[0].id, SymbolId::new(40).unwrap());
+    }
+
+    #[test]
+    fn in_memory_extraction_rejects_non_file_uri() {
+        let id_generators = ExtractionIdGenerators::new();
+        let error = extract_text_with_id_gen(
+            InMemorySource {
+                uri: "untitled:buffer.py",
+                text: "def value(): pass\n",
+                version: 1,
+                language: LangId::Python,
+            },
+            &ExtractOptions::default(),
+            &id_generators,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, crate::Error::InvalidSourceUri { .. }));
+    }
+
+    #[test]
     fn symbols_assigned_ids() {
         let path = write_temp("ids.py", b"def a(): pass\ndef b(): pass\ndef c(): pass\n");
         let result = extract(&[(path, LangId::Python)]);

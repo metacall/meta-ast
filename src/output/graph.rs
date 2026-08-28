@@ -453,7 +453,7 @@ mod tests {
         let json = serialize_graph(&graph, &scc, 1, &OutputFormat::Json).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(parsed["schema_version"], 1);
+        assert_eq!(parsed["schema_version"], 2);
         assert!(parsed["metadata"].is_object());
         assert!(parsed["nodes"].is_array());
         assert!(parsed["edges"].is_array());
