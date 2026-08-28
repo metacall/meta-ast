@@ -72,9 +72,9 @@ Deployability hint policy:
 
 Graph serialization for external consumers shall preserve:
 
-- stable IDs
+- snapshot-local node IDs
 - edge kinds
-- source ranges for symbol nodes
+- defining file paths and source ranges for symbol nodes
 
 Sink adapters (e.g., Dgraph) that must preserve semantic equivalence.
 

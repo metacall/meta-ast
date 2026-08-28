@@ -43,7 +43,7 @@ Goals:
 Exit gates:
 
 1. Export format validated via integration tests (JSON roundtrip, field checks).
-2. Snapshot/version semantics documented and tested (SCHEMA_VERSION = 1).
+2. Snapshot/version semantics documented and tested (SCHEMA_VERSION = 2).
 3. End-to-end pipeline extracts data nodes from real Rust fixtures.
 4. Flow edges created for def-use chains (param→usage, let→let shadowing).
 
