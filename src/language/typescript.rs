@@ -317,4 +317,145 @@ mod tests {
         let symbols = extract_symbols_for(LangId::TypeScript, &tree, src.as_bytes());
         insta::assert_json_snapshot!(symbols);
     }
+
+    #[cfg(feature = "dataflow")]
+    mod dataflow_tests {
+        use super::*;
+        use crate::language::typescript::extract_typescript_dataflow;
+        use crate::model::{DataScope, FlowKind};
+
+        fn extract(source: &[u8]) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+            let id_gen = crate::model::IdGenerator::new();
+            extract_typescript_dataflow(&parse(source), source, &id_gen)
+        }
+
+        #[test]
+        fn typed_let_binding_captured() {
+            let src = b"function f(): number { let x: number = 42; return x; }";
+            let (nodes, edges) = extract(src);
+            assert!(
+                nodes
+                    .iter()
+                    .any(|n| n.name.as_deref() == Some("x") && n.scope == DataScope::Local)
+            );
+            assert!(!edges.is_empty(), "x usage should yield an edge");
+        }
+
+        #[test]
+        fn typed_parameter_captured_as_parameter() {
+            let src = b"function add(a: number, b: number): number { return a + b; }";
+            let (nodes, edges) = extract(src);
+            let params: Vec<_> = nodes
+                .iter()
+                .filter(|n| n.scope == DataScope::Parameter)
+                .collect();
+            assert_eq!(params.len(), 2);
+            let names: Vec<_> = params.iter().map(|n| n.name.as_deref()).collect();
+            assert!(names.contains(&Some("a")));
+            assert!(names.contains(&Some("b")));
+            assert!(!edges.is_empty());
+        }
+
+        #[test]
+        fn flow_edges_anchored_to_real_nodes() {
+            let src = b"function f() { let x = 1; return x; }";
+            let (nodes, edges) = extract(src);
+            let ids: std::collections::HashSet<_> = nodes.iter().map(|n| n.id).collect();
+            for edge in &edges {
+                assert!(ids.contains(&edge.source), "edge source not in nodes");
+                assert!(ids.contains(&edge.target), "edge target not in nodes");
+                assert_eq!(edge.kind, FlowKind::DefUse);
+                assert!((edge.confidence - 0.9).abs() < f32::EPSILON);
+            }
+        }
+
+        #[test]
+        fn no_duplicate_def_for_typed_let() {
+            // Regression: the type annotation must not double-capture the var.
+            let src = b"function f() { let x: number = 1; return x; }";
+            let (nodes, _edges) = extract(src);
+            let x_defs: Vec<_> = nodes
+                .iter()
+                .filter(|n| n.name.as_deref() == Some("x") && n.scope == DataScope::Local)
+                .collect();
+            // 1 definition + 1 usage-node.
+            assert_eq!(
+                x_defs.len(),
+                2,
+                "expected exactly one def + one use for `x` (no double-capture)"
+            );
+        }
+
+        #[test]
+        fn cross_function_scoping() {
+            let src = b"function outer() { let x = 1; function inner() { let x = 2; return x; } return x; }";
+            let (nodes, edges) = extract(src);
+            // 2 def + 2 use nodes for `x`, all named "x".
+            let defs: Vec<_> = nodes
+                .iter()
+                .filter(|n| n.name.as_deref() == Some("x") && n.scope == DataScope::Local)
+                .collect();
+            assert_eq!(defs.len(), 4);
+            // Of those, the defs are the ones without an incoming edge.
+            let true_defs: Vec<_> = nodes
+                .iter()
+                .filter(|n| {
+                    n.name.as_deref() == Some("x")
+                        && n.scope == DataScope::Local
+                        && !edges.iter().any(|e| e.target == n.id)
+                })
+                .collect();
+            assert_eq!(true_defs.len(), 2, "two distinct `x` defs expected");
+            // 2 use edges must exist.
+            assert!(edges.len() >= 2);
+            // Each use must be anchored to a def in the same function scope.
+            let inner_def = true_defs
+                .iter()
+                .max_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let outer_def = true_defs
+                .iter()
+                .min_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let uses: Vec<_> = nodes
+                .iter()
+                .filter(|n| {
+                    n.name.as_deref() == Some("x")
+                        && n.scope == DataScope::Local
+                        && edges.iter().any(|e| e.target == n.id)
+                })
+                .collect();
+            let inner_use = uses
+                .iter()
+                .min_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let outer_use = uses
+                .iter()
+                .max_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let inner_edge = edges.iter().find(|e| e.target == inner_use.id).unwrap();
+            let outer_edge = edges.iter().find(|e| e.target == outer_use.id).unwrap();
+            assert_eq!(inner_edge.source, inner_def.id);
+            assert_eq!(outer_edge.source, outer_def.id);
+            assert_ne!(inner_edge.source, outer_edge.source);
+        }
+
+        #[test]
+        fn dataflow_against_fixture_file() {
+            let src = std::fs::read_to_string(
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/typescript/interfaces.ts"),
+            )
+            .unwrap();
+            let (nodes, edges) = extract(src.as_bytes());
+            // Interfaces / type aliases don't introduce data nodes,
+            // but the class methods in the fixture should produce some.
+            assert!(!nodes.is_empty(), "fixture must yield some data nodes");
+            let ids: std::collections::HashSet<_> = nodes.iter().map(|n| n.id).collect();
+            for edge in &edges {
+                assert!(ids.contains(&edge.source));
+                assert!(ids.contains(&edge.target));
+            }
+        }
+    }
 }

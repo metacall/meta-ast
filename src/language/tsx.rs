@@ -172,4 +172,107 @@ mod tests {
         let symbols = extract_symbols_for(LangId::Tsx, &tree, src.as_bytes());
         insta::assert_json_snapshot!(symbols);
     }
+
+    #[cfg(feature = "dataflow")]
+    mod dataflow_tests {
+        use super::*;
+        use crate::language::tsx::extract_tsx_dataflow;
+        use crate::model::{DataScope, FlowKind};
+
+        fn extract(source: &[u8]) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+            let id_gen = crate::model::IdGenerator::new();
+            extract_tsx_dataflow(&parse(source), source, &id_gen)
+        }
+
+        #[test]
+        fn typed_parameter_captured() {
+            let src = b"function App(props: { name: string }): JSX.Element { return <div>{props.name}</div>; }";
+            let (nodes, edges) = extract(src);
+            let params: Vec<_> = nodes
+                .iter()
+                .filter(|n| n.scope == DataScope::Parameter)
+                .collect();
+            assert!(
+                params.iter().any(|n| n.name.as_deref() == Some("props")),
+                "props parameter must be captured"
+            );
+            assert!(!edges.is_empty());
+        }
+
+        #[test]
+        fn flow_edges_anchored_to_real_nodes() {
+            let src = b"function App(props: { name: string }): JSX.Element { let local = 1; return <div>{local}</div>; }";
+            let (nodes, edges) = extract(src);
+            let ids: std::collections::HashSet<_> = nodes.iter().map(|n| n.id).collect();
+            for edge in &edges {
+                assert!(ids.contains(&edge.source), "edge source not in nodes");
+                assert!(ids.contains(&edge.target), "edge target not in nodes");
+                assert_eq!(edge.kind, FlowKind::DefUse);
+                assert!((edge.confidence - 0.9).abs() < f32::EPSILON);
+            }
+        }
+
+        #[test]
+        fn cross_function_scoping() {
+            let src = b"function outer() { let x = 1; const Inner = () => { let x = 2; return x; }; return x; }";
+            let (nodes, edges) = extract(src);
+            // 2 distinct `x` defs (one per scope).
+            let defs: Vec<_> = nodes
+                .iter()
+                .filter(|n| {
+                    n.name.as_deref() == Some("x")
+                        && n.scope == DataScope::Local
+                        && !edges.iter().any(|e| e.target == n.id)
+                })
+                .collect();
+            assert_eq!(defs.len(), 2);
+            // 2 use edges must exist.
+            assert!(edges.len() >= 2);
+            // Edges must connect each use to the def in the same scope.
+            let inner_def = defs
+                .iter()
+                .max_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let outer_def = defs
+                .iter()
+                .min_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let uses: Vec<_> = nodes
+                .iter()
+                .filter(|n| {
+                    n.name.as_deref() == Some("x")
+                        && n.scope == DataScope::Local
+                        && edges.iter().any(|e| e.target == n.id)
+                })
+                .collect();
+            let inner_use = uses
+                .iter()
+                .min_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let outer_use = uses
+                .iter()
+                .max_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let inner_edge = edges.iter().find(|e| e.target == inner_use.id).unwrap();
+            let outer_edge = edges.iter().find(|e| e.target == outer_use.id).unwrap();
+            assert_eq!(inner_edge.source, inner_def.id);
+            assert_eq!(outer_edge.source, outer_def.id);
+        }
+
+        #[test]
+        fn dataflow_against_fixture_file() {
+            let src = std::fs::read_to_string(
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/tsx/components.tsx"),
+            )
+            .unwrap();
+            let (nodes, edges) = extract(src.as_bytes());
+            assert!(!nodes.is_empty(), "fixture must yield data nodes");
+            let ids: std::collections::HashSet<_> = nodes.iter().map(|n| n.id).collect();
+            for edge in &edges {
+                assert!(ids.contains(&edge.source));
+                assert!(ids.contains(&edge.target));
+            }
+        }
+    }
 }

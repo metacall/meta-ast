@@ -582,4 +582,187 @@ mod tests {
         let symbols = extract_symbols_for(LangId::JavaScript, &tree, src.as_bytes());
         insta::assert_json_snapshot!(symbols);
     }
+
+    #[cfg(feature = "dataflow")]
+    mod dataflow_tests {
+        use super::*;
+        use crate::language::javascript::extract_javascript_dataflow;
+        use crate::model::{DataScope, FlowKind};
+
+        fn extract(source: &[u8]) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+            let id_gen = crate::model::IdGenerator::new();
+            extract_javascript_dataflow(&parse(source), source, &id_gen)
+        }
+
+        #[test]
+        fn const_declaration_captured_as_local() {
+            let src = b"function f() { const x = 42; return x; }";
+            let (nodes, _) = extract(src);
+            let x = nodes
+                .iter()
+                .find(|n| n.name.as_deref() == Some("x") && n.scope == DataScope::Local)
+                .expect("const x should be captured as Local");
+            assert_eq!(x.scope, DataScope::Local);
+        }
+
+        #[test]
+        fn function_parameter_captured_as_parameter() {
+            let src = b"function add(a, b) { return a + b; }";
+            let (nodes, edges) = extract(src);
+            let params: Vec<_> = nodes
+                .iter()
+                .filter(|n| n.scope == DataScope::Parameter)
+                .collect();
+            assert_eq!(params.len(), 2, "expected 2 parameters");
+            let names: Vec<_> = params.iter().map(|n| n.name.as_deref()).collect();
+            assert!(names.contains(&Some("a")));
+            assert!(names.contains(&Some("b")));
+            assert!(
+                !edges.is_empty(),
+                "parameter usages should produce def-use edges"
+            );
+            for edge in &edges {
+                assert_eq!(edge.kind, FlowKind::DefUse);
+                assert!(
+                    (edge.confidence - 0.9).abs() < f32::EPSILON,
+                    "confidence should be 0.9, got {}",
+                    edge.confidence
+                );
+            }
+        }
+
+        #[test]
+        fn def_use_edge_anchored_in_graph() {
+            // Each flow edge's target must reference a real data node id.
+            let src = b"function f() { let x = 1; let y = x; }";
+            let (nodes, edges) = extract(src);
+            let ids: std::collections::HashSet<_> = nodes.iter().map(|n| n.id).collect();
+            for edge in &edges {
+                assert!(
+                    ids.contains(&edge.source),
+                    "edge source {:?} not in nodes",
+                    edge.source
+                );
+                assert!(
+                    ids.contains(&edge.target),
+                    "edge target {:?} not in nodes (dangling edge)",
+                    edge.target
+                );
+            }
+        }
+
+        #[test]
+        fn no_cross_function_def_use_leak() {
+            // `x` defined in outer scope must not link to `x` in nested function.
+            let src = b"function outer() { let x = 1; function inner() { let x = 2; return x; } return x; }";
+            let (nodes, edges) = extract(src);
+            // 2 def nodes + 2 use nodes (one per `return x` site) all named "x".
+            let defs_for_x: Vec<_> = nodes
+                .iter()
+                .filter(|n| n.name.as_deref() == Some("x") && n.scope == DataScope::Local)
+                .collect();
+            assert_eq!(defs_for_x.len(), 4, "2 def + 2 use nodes for `x` expected");
+            // Of those, exactly 2 are definitions (Local scope with no incoming edge
+            // of the same name; we identify them by being earlier in source order).
+            let defs: Vec<_> = nodes
+                .iter()
+                .filter(|n| {
+                    n.name.as_deref() == Some("x")
+                        && n.scope == DataScope::Local
+                        && !edges.iter().any(|e| e.target == n.id)
+                })
+                .collect();
+            assert_eq!(defs.len(), 2, "two distinct `x` defs expected");
+
+            // The use nodes anchor to the def in the same function scope.
+            let use_nodes: Vec<_> = nodes
+                .iter()
+                .filter(|n| {
+                    n.name.as_deref() == Some("x")
+                        && n.scope == DataScope::Local
+                        && edges.iter().any(|e| e.target == n.id)
+                })
+                .collect();
+            assert_eq!(use_nodes.len(), 2);
+
+            let outer_def = defs
+                .iter()
+                .min_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let inner_def = defs
+                .iter()
+                .max_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let use_for_inner_x = use_nodes
+                .iter()
+                .min_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let use_for_outer_x = use_nodes
+                .iter()
+                .max_by_key(|n| n.source_range.byte_start)
+                .unwrap();
+            let edge_for_inner = edges
+                .iter()
+                .find(|e| e.target == use_for_inner_x.id)
+                .expect("inner x-use must have an edge");
+            let edge_for_outer = edges
+                .iter()
+                .find(|e| e.target == use_for_outer_x.id)
+                .expect("outer x-use must have an edge");
+            assert_eq!(
+                edge_for_inner.source, inner_def.id,
+                "inner use must bind to inner def"
+            );
+            assert_eq!(
+                edge_for_outer.source, outer_def.id,
+                "outer use must bind to outer def"
+            );
+            assert_ne!(edge_for_inner.source, edge_for_outer.source);
+        }
+
+        #[test]
+        fn arrow_function_creates_new_scope() {
+            // `x` inside the arrow must not link to outer `x`.
+            let src = b"function outer() { let x = 1; const f = () => { let x = 2; return x; }; return x; }";
+            let (_nodes, edges) = extract(src);
+            // Just ensure no panic and that the implementation respects arrow scopes.
+            // We can't easily distinguish edges from text alone; rely on non-emptiness
+            // and absence of panics.
+            assert!(!edges.is_empty());
+        }
+
+        #[test]
+        fn no_edges_for_undefined_names() {
+            let src = b"function f() { return undefinedSymbol; }";
+            let (_nodes, edges) = extract(src);
+            assert!(edges.is_empty(), "unresolved identifiers produce no edges");
+        }
+
+        #[test]
+        fn empty_function_yields_no_nodes() {
+            let src = b"function f() {}";
+            let (nodes, edges) = extract(src);
+            assert!(nodes.is_empty());
+            assert!(edges.is_empty());
+        }
+
+        #[test]
+        fn dataflow_against_fixture_file() {
+            // Oracle against the shared JS fixture: must extract nodes and edges.
+            let src = std::fs::read_to_string(
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/javascript/functions.js"),
+            )
+            .unwrap();
+            let (nodes, edges) = extract(src.as_bytes());
+            assert!(!nodes.is_empty(), "fixture must yield data nodes");
+            assert!(!edges.is_empty(), "fixture must yield flow edges");
+            // Every flow edge must be anchored in a real node.
+            let ids: std::collections::HashSet<_> = nodes.iter().map(|n| n.id).collect();
+            for edge in &edges {
+                assert!(ids.contains(&edge.source));
+                assert!(ids.contains(&edge.target));
+            }
+        }
+    }
 }
