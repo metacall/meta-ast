@@ -628,6 +628,8 @@ mod tests {
         assert_eq!(output.edges.len(), 1); // ownership
         let sym_node = output.nodes.iter().find(|n| n.kind == "symbol").unwrap();
         assert_eq!(sym_node.name.as_deref(), Some("main_fn"));
+        assert_eq!(sym_node.file_path.as_deref(), Some("main.rs"));
+        assert_eq!(sym_node.source_range.as_ref(), Some(&sample_source_range()));
     }
 
     #[test]
