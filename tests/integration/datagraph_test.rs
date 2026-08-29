@@ -183,6 +183,72 @@ fn dataflow_pipeline_extracts_on_python_fixtures() {
 
 #[cfg(feature = "dataflow")]
 #[test]
+fn dataflow_pipeline_extracts_on_javascript_fixtures() {
+    let root = Path::new("tests/fixtures/javascript");
+    let files = meta_ast::input::discover_files(root, None).unwrap();
+    assert!(!files.is_empty());
+
+    let result = meta_ast::extractor::extract(&files);
+    let mut total_nodes = 0usize;
+    let mut total_edges = 0usize;
+    for file in &result.files {
+        total_nodes += file.data_nodes.len();
+        total_edges += file.flow_edges.len();
+    }
+    assert!(
+        total_nodes > 0,
+        "JavaScript fixtures should extract DataNodes"
+    );
+    assert!(
+        total_edges > 0,
+        "JavaScript fixtures should extract FlowEdges"
+    );
+}
+
+#[cfg(feature = "dataflow")]
+#[test]
+fn dataflow_pipeline_extracts_on_typescript_fixtures() {
+    let root = Path::new("tests/fixtures/typescript");
+    let files = meta_ast::input::discover_files(root, None).unwrap();
+    assert!(!files.is_empty());
+
+    let result = meta_ast::extractor::extract(&files);
+    let mut total_nodes = 0usize;
+    let mut total_edges = 0usize;
+    for file in &result.files {
+        total_nodes += file.data_nodes.len();
+        total_edges += file.flow_edges.len();
+    }
+    assert!(
+        total_nodes > 0,
+        "TypeScript fixtures should extract DataNodes"
+    );
+    assert!(
+        total_edges > 0,
+        "TypeScript fixtures should extract FlowEdges"
+    );
+}
+
+#[cfg(feature = "dataflow")]
+#[test]
+fn dataflow_pipeline_extracts_on_tsx_fixtures() {
+    let root = Path::new("tests/fixtures/tsx");
+    let files = meta_ast::input::discover_files(root, None).unwrap();
+    assert!(!files.is_empty());
+
+    let result = meta_ast::extractor::extract(&files);
+    let mut total_nodes = 0usize;
+    let mut total_edges = 0usize;
+    for file in &result.files {
+        total_nodes += file.data_nodes.len();
+        total_edges += file.flow_edges.len();
+    }
+    assert!(total_nodes > 0, "TSX fixtures should extract DataNodes");
+    assert!(total_edges > 0, "TSX fixtures should extract FlowEdges");
+}
+
+#[cfg(feature = "dataflow")]
+#[test]
 fn sink_json_writes_datagraph_to_file() {
     use meta_ast::sink::GraphSink;
     let root = Path::new("tests/fixtures/python");
