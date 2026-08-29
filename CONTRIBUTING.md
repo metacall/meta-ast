@@ -49,8 +49,10 @@ The binary lands in `target/release/meta-ast`. Try it on the fixture corpus:
 ```
 
 ### Where to start
-
-`TODO.md` lists open engineering tasks. `docs/ROADMAP.md` shows the phase plan. The language modules under `src/language/` are a good first change: each is one self-contained `LanguageSpec` const.
+ 
+Check out issues tagged with [`good first issue`](https://github.com/metacall/meta-ast/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22) for newcomer-friendly tasks across cross-platform scripts, snapshot testing, property-based tests, and CLI error formatting.
+ 
+For broader architectural work, consult the active post-v1 phase plan in [`docs/src/ROADMAP.md`](docs/src/ROADMAP.md). The language modules under `src/language/` are also a great place to start: each is one self-contained `LanguageSpec` const.
 
 ## Development loop
 

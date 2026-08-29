@@ -50,6 +50,7 @@ back to requirements and forward to tests.
 - `rfcs/0009-cross-file-dependency-mapping.md` - Cross-file dependency mapping
 - `rfcs/0010-deploy-manifests.md` - MetaCall deploy manifests (superseded by the pod model)
 - `rfcs/0011-metacall-client-api-support.md` - MetaCall client call support: `metacall()` and the full invocation surface
+- `rfcs/0012-polyglot-lsp-server.md` - Polyglot LSP Server proposal: architecture, protocol, and deployment
 
 ## Scope policy
 
