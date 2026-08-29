@@ -10,7 +10,7 @@
 [![docs](https://img.shields.io/badge/docs-metacall.github.io%2Fmeta--ast-4d76ae)](https://metacall.github.io/meta-ast/)
 [![CI](https://github.com/metacall/meta-ast/actions/workflows/ci.yml/badge.svg)](https://github.com/metacall/meta-ast/actions/workflows/ci.yml)
 
-`meta-ast` is a fast, standalone static analysis engine that parses multi-language projects, builds symbol-level dependency graphs, detects cyclic imports, and generates MetaCall deployment manifests. Written in Rust, powered by tree-sitter, with no runtime execution of user code.
+`meta-ast` is a fast, standalone, general-purpose static analysis engine that parses multi-language projects, builds symbol-level dependency graphs, detects cyclic imports, and serves as the semantic foundation for polyglot developer tooling (LSP servers, security analyzers, and deployment orchestration). Written in Rust, powered by tree-sitter, with zero runtime execution of user code.
 
 Built as part of **Google Summer of Code 2026** for the **MetaCall** organization by **[Khaled Alam](https://github.com/k5602)**. Project status: complete. See the [Final Report](docs/src/FINAL_REPORT.md).
 
@@ -215,17 +215,17 @@ All docs are also published as an [mdbook site](https://metacall.github.io/meta-
 
 ## Roadmap
 
-All phases complete. Full details in [docs/src/ROADMAP.md](docs/src/ROADMAP.md).
+The core GSoC 2026 milestones (Phases 1-7) are complete with release `v0.5.0`. Full details and post-v1 initiatives are tracked in [docs/src/ROADMAP.md](docs/src/ROADMAP.md).
 
-- **Phase 1-2 (Complete)**: Core symbol extraction, dependency graph, SCC.
-- **Phase 3 (Complete)**: Datagraph and optional sink.
-- **Phase 4 (Complete)**: CLI polish, output formats, HTML dashboard, watch mode.
-- **Phase 5 (Complete)**: `metacall-deploy` - call-site scanning, pod partitioning, dependency resolution, pod manifests, Function Mesh annotation, fairness checking.
-- **Phase 6 (Complete)**: Language expansion - Ruby added (nine languages total).
-- **Phase 7 (Complete)**: Validation and delivery - CI/CD hardening, docs, benchmarks, releases, announcement.
 
-Future work (post-GSoC): deeper dataflow, C ABI, more languages. See the
-[Final Report](docs/src/FINAL_REPORT.md).
+### Post-v1 Active Roadmap
+
+- **Phase 8 (In Progress)**: Polyglot LSP Server & Shard Indexing (`metacall/lsp`) - RFC 0012 seams, in-memory buffers, and `.metast` v2 persistence.
+- **Phase 9 (Planned)**: Engine Refactoring & Graph Reuse - zero-allocation resolver dispatch, language pack macros, and modular `DeployOrchestrator`.
+- **Phase 10 (Planned)**: Polyglot Security & Taint Flow Analysis (SAST) - cross-language vulnerability detection, CWE mapping, and SARIF output.
+- **Phase 11 (In Progress)**: Developer Ecosystem & Community Tooling - cross-platform installers, property-based test suites (`proptest`), and curated contributor issues.
+- **Phase 12 (Strategic)**: Deep Expression AST & Control-Flow Representation - statement nodes, operator trees, and intra-procedural CFGs.
+- **Phase 13 (Strategic)**: Polyglot Code Transformation & Refactoring Engine - lossless CST rewriting, cross-language atomic symbol renaming, and automated codegen.
 
 ---
 

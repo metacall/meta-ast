@@ -65,7 +65,7 @@ Exit gates:
 4. ~~Incremental performance target evidence captured.~~ DONE
 5. C ABI smoke tests. DROPPED - issue #21 closed NOT_PLANNED; the C ABI
    interface was proposed in RFC 0011 but not implemented. The exit gate is
-   removed from scope and tracked as post-GSoC future work.
+   removed from scope and tracked as post-GSoC future work in issue #63.
 
 ## Phase 5 - MetaCall Deploy Manifests [COMPLETE]
 
@@ -141,10 +141,135 @@ Exit gates:
 5. Release announcement drafted and scheduled. DONE - v0.5.0 release notes and
    the [Final Report](FINAL_REPORT.md).
 
+## Phase 8 - Polyglot LSP Server & Shard Indexing (`metacall/lsp`) [IN PROGRESS]
+
+Goals:
+
+- Implement Phase 0 engine prerequisites: symbol coordinates (`source_range`, `file_path`),
+  in-memory buffer extraction seam (`extract_text_with_id_gen`), and modular `.metast` v2
+  shard and index persistence (`ShardFile`, `ShardEdge`, `ShardManifestRecord`, `ShardHeader`).
+- Implement dynamic cache invalidation across all import resolvers (`clear_cache`).
+- Enable downstream `metacall/lsp` development for single-language and polyglot navigation:
+  - Phase 8a: Synchronous language server (goto-definition, hover, diagnostics).
+  - Phase 8b: Cross-language jump-to-definition and reference resolution over `metacall()` boundaries.
+  - Phase 8c: Signature enrichment and cross-language stub generation.
+
+Exit gates:
+
+1. Phase 0 engine seams implemented, tested, and schema version bumped to 2. DONE
+2. `.metast` v2 modular shards, headers, and manifest files persist and restore graph topology. DONE
+3. Resolver cache invalidation handles dynamic configuration updates. DONE
+4. `metacall/lsp` language server crate operational against `meta-ast` core library.
+
+## Phase 9 - Engine Refactoring & Graph Reuse [PLANNED]
+
+Goals:
+
+- Zero-allocation resolver dispatch: replace `Box<dyn ImportResolver>` trait objects with
+  an enum dispatch model (`Resolver`) to eliminate heap allocation during pipeline runs (issue #41).
+- Language module deduplication: introduce declarative macros (`define_language_pack!`) to
+  eliminate repetitive spec and query boilerplate across language packs (issue #39).
+- Deploy pipeline modularization: extract `DeployOrchestrator` struct from `run_deploy`
+  for single-responsibility and independent step reuse by downstream tools (issue #40).
+- Reusable graph visitor interfaces over `CodeGraph` for custom static analysis passes.
+
+Exit gates:
+
+1. Zero heap allocations during per-file import resolution dispatch.
+2. Language pack boilerplate reduced across Python, Ruby, C, C++, Rust, Go, JS, TS, and TSX.
+3. `DeployOrchestrator` exposes individual pipeline stages (scan, partition, cuts, manifests, mesh).
+
+## Phase 10 - Polyglot Security & Taint Flow Analysis (SAST) [PLANNED]
+
+Goals:
+
+- Deliver cross-language taint-flow analysis across MetaCall FFI boundaries (issue #29,
+  `metacall/polyglot-sast`).
+- Detect untrusted inputs in one language reaching dangerous execution sinks in another language.
+- Classify findings into Common Weakness Enumeration (CWE) categories.
+- Output native SARIF (v2.1.0) reports for GitHub/GitLab Security tab integration.
+- Integrate with MetaSSR as deployment-blocking middleware and dashboard visualization.
+
+Exit gates:
+
+1. Cross-language taint flow correctly traces from Python/JS inputs into C/Rust sinks.
+2. Deterministic rule-based engine emits valid SARIF v2.1.0 reports.
+3. MetaSSR deploy middleware blocks deployments with critical security findings.
+
+## Phase 11 - Developer Ecosystem & Community Tooling [IN PROGRESS]
+
+Goals:
+
+- Cross-platform distribution scripts: Unix `scripts/install.sh` (issue #46) and Windows
+  `scripts/install.ps1`.
+- Property-based testing with `proptest` for Tarjan SCC, cycle detection, and edge normalization
+  invariants (issue #48).
+- Streamline contributor experience: curated "Good First Issues" with detailed task guides.
+- CLI output ergonomics: JSON error reporting and enhanced diagnostic formatting (issue #47).
+
+Exit gates:
+
+1. Verified curl/PowerShell installation scripts published for all release artifacts.
+2. `proptest` suites validating graph normalization and SCC determinism.
+3. Active contributor onboarding through structured issue templates.
+
+## Phase 12 - Deep Expression AST & Full Syntax Trees [PLANNED]
+
+Goals:
+
+- Extend `meta-ast` beyond coarse symbol-level IR into fine-grained expression syntax trees
+  and intra-procedural Control Flow Graphs (CFG).
+- Extract statement nodes, binary operations, control flow branches, and expression terms across
+  all 9 supported languages.
+- Maintain a layered representation:
+  - *Layer 1 (Default)*: Fast, lightweight symbol & reference graph.
+  - *Layer 2 (Opt-in)*: Full expression-level AST with lexical scopes and operator nodes.
+- Generate intra-procedural CFGs for abstract interpretation, dead branch elimination, and
+  fine-grained taint propagation.
+
+Exit gates:
+
+1. Full expression AST extractable via `--depth full` or `extract_full_ast`.
+2. Control Flow Graph (CFG) generated with branch conditions and join nodes.
+3. Zero performance regression on default symbol-only extraction passes.
+
+## Phase 13 - Polyglot Code Transformation & Refactoring Engine [PLANNED]
+
+Goals:
+
+- Evolve `meta-ast` from a read-only static analyzer into a bidirectional polyglot code
+  transformation and refactoring engine.
+- Implement lossless Concrete Syntax Tree (CST) rewriting, preserving whitespace, formatting,
+  and comments.
+- Deliver cross-language atomic symbol renaming:
+  - Renaming a function or method in C, C++, or Rust automatically rewrites and updates all
+    cross-language caller sites in Python, JavaScript, and Ruby.
+- Implement automated polyglot code migrations, AST rewrite recipes, and FFI/RPC stub generation
+  (`meta-ast refactor`, `meta-ast codegen`).
+- Provide programmatic transformation APIs for language migration tools and automated refactorings.
+
+Exit gates:
+
+1. Lossless round-trip source rewriting verified across all 9 languages without formatting loss.
+2. Cross-language atomic symbol renaming verified on mixed Python/JS/Rust/C fixture codebases.
+3. Automated refactoring CLI (`meta-ast refactor`) and FFI stub generator (`meta-ast codegen`).
+
+## Strategic Architecture Evolution
+
+`meta-ast` follows a phased strategic evolution from lightweight symbol graph to a full polyglot
+transformation engine:
+
+1. **Current Foundation (Phases 1-11)**:
+   - High-speed, read-only static analysis and symbol-level IR.
+   - Cross-language dependency graph, import resolution, and Tarjan SCC cycle detection.
+   - Language Server (LSP) seams, shard index persistence (`.metast` v2), and security analysis (SAST).
+2. **Deep Syntax Expansion (Phase 12)**:
+   - Full expression-level syntax trees and Control Flow Graphs (CFG) layered over the symbol graph.
+3. **Bidirectional Transformation (Phase 13)**:
+   - Lossless CST source rewriting, cross-language atomic refactoring, and automated code generation.
+
 ## Scope boundaries
 
-- MVP priority: correctness, symbol extraction, graph/SCC, portability.
-- `metacall-deploy` priority: Cross-Language Call Site detection, Deploy Manifest
-  generation, Mesh Annotation from SCC analysis.
-- Stretch priority: more languages, deeper dataflow, live sink integration, advanced
-  resolution heuristics.
+- Core priority: general-purpose symbol extraction, cross-language dependency graph, cycle detection, shard persistence, zero-cost abstractions.
+- Tooling priority: Polyglot LSP server (`metacall/lsp`), IDE integration, general-purpose CI gates.
+- Evolution priority: Full expression AST (Phase 12), Polyglot code transformation & refactoring (Phase 13), SAST security analysis (`metacall/polyglot-sast`).
