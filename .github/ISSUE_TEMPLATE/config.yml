@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: RFC - design proposals
+    url: https://github.com/metacall/meta-ast/tree/main/docs/rfcs
+    about: >
+      Feature ideas that change the analysis pipeline or output contract go
+      through the RFC process in docs/rfcs/. Open a normal issue for
+      everything else.
+  - name: Security and code of conduct
+    url: https://github.com/metacall/meta-ast/issues
+    about: >
+      Flag conduct problems or sensitive issues to the maintainers directly
+      instead of a public issue.

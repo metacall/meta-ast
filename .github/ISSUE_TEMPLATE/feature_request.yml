@@ -1,0 +1,72 @@
+name: Feature request
+description: Propose a new capability, language, or behavior change for meta-ast.
+title: "[feat]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For changes to the analysis pipeline or output contract, please follow
+        the RFC process in docs/rfcs/ instead of (or in addition to) this issue.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What gap or limitation motivates this request?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you want, with examples if possible.
+    validations:
+      required: true
+  - type: dropdown
+    id: contract
+    attributes:
+      label: Does this change a public contract?
+      description: >
+        Public contract means the CLI interface, JSON/YAML output schema,
+        graph semantics, or manifest format. These need docs and possibly an ADR.
+      options:
+        - "No - internal only"
+        - "Yes - output schema or graph semantics"
+        - "Yes - CLI interface"
+        - "Yes - deploy manifest format"
+        - "Unsure"
+    validations:
+      required: true
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language scope
+      options:
+        - Not language-specific
+        - Python
+        - JavaScript
+        - TypeScript
+        - TSX
+        - C
+        - C++
+        - Rust
+        - Go
+        - Ruby
+        - New language support
+        - Multiple / cross-language
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about, and why they fall short.
+    validations:
+      required: false
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Checklist
+      options:
+        - label: I checked open issues for duplicates.
+          required: true

@@ -1,0 +1,92 @@
+name: Bug report
+description: Report a crash, wrong extraction, or incorrect graph for meta-ast.
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. meta-ast is fixture-driven: a small reproducer
+        lets us add a regression test, so please attach one when you can.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the wrong or unexpected behavior.
+      placeholder: meta-ast reports a missing edge / panics on parse / ...
+    validations:
+      required: true
+  - type: dropdown
+    id: language
+    attributes:
+      label: Affected language
+      options:
+        - Python
+        - JavaScript
+        - TypeScript
+        - TSX
+        - C
+        - C++
+        - Rust
+        - Go
+        - Ruby
+        - Multiple / cross-language
+        - CLI / other (not language-specific)
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command you ran
+      description: The exact meta-ast invocation, including features and flags.
+      render: shell
+      placeholder: |
+        cargo run --features watch -- graph tests/fixtures/mixed
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Actual output
+      description: The output or error you got. Use code blocks.
+      render: shell
+      placeholder: |
+        thread 'main' panicked at ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected output
+      description: What you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: meta-ast version
+      description: Output of `meta-ast --version`, or the git commit/branch.
+      placeholder: 0.5.0 / main @ 8feba97
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS (x64)
+        - macOS (arm64)
+        - Windows (x64)
+        - Windows (arm64)
+    validations:
+      required: true
+  - type: textarea
+    id: fixture
+    attributes:
+      label: Minimal reproducer
+      description: >
+        Paste the smallest source files that reproduce the problem, or a link
+        to a branch/fixture. If too large, point us at a path under
+        tests/fixtures/.
+      render: rust
+    validations:
+      required: false
