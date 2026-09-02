@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 
 use crate::graph::CodeGraph;
@@ -45,8 +45,8 @@ pub struct GraphBuilder {
     /// Snapshot ID for this analysis
     snapshot_id: SnapshotId,
 
-    /// Counter for edge deduplication
-    edge_normalizer: EdgeNormalizer,
+    /// O(1) dedup index mirroring `CodeGraph::edge_index`.
+    edge_index: HashMap<(NodeIndex, NodeIndex, EdgeKind), EdgeIndex>,
 
     /// Map from external raw path to graph node index
     external_index: HashMap<String, NodeIndex>,
@@ -54,18 +54,6 @@ pub struct GraphBuilder {
     /// Map from DataNodeId to graph node index
     #[cfg(feature = "dataflow")]
     data_to_index: HashMap<DataNodeId, NodeIndex>,
-}
-
-/// Tracks seen edges to prevent duplicates.
-#[derive(Debug, Default)]
-struct EdgeNormalizer {
-    seen: std::collections::HashSet<(NodeIndex, NodeIndex, EdgeKind)>,
-}
-
-impl EdgeNormalizer {
-    fn is_new(&mut self, source: NodeIndex, target: NodeIndex, kind: EdgeKind) -> bool {
-        self.seen.insert((source, target, kind))
-    }
 }
 
 impl GraphBuilder {
@@ -78,7 +66,7 @@ impl GraphBuilder {
             path_to_file: HashMap::new(),
             file_id_gen: IdGenerator::new(),
             snapshot_id,
-            edge_normalizer: EdgeNormalizer::default(),
+            edge_index: HashMap::new(),
             external_index: HashMap::new(),
             #[cfg(feature = "dataflow")]
             data_to_index: HashMap::new(),
@@ -259,22 +247,26 @@ impl GraphBuilder {
         confidence: f32,
         flow_kind: Option<crate::model::FlowKind>,
     ) {
-        if !self.edge_normalizer.is_new(source, target, kind) {
-            if let Some(edge_idx) = self.graph.find_edge(source, target) {
-                let edge = &mut self.graph[edge_idx];
-                edge.confidence = edge.confidence.max(confidence);
-                if edge.flow_kind.is_none() {
-                    edge.flow_kind = flow_kind;
-                }
+        let confidence = confidence.clamp(0.0, 1.0);
+        let key = (source, target, kind);
+        if let Some(&edge_idx) = self.edge_index.get(&key) {
+            let edge = &mut self.graph[edge_idx];
+            edge.confidence = edge.confidence.max(confidence);
+            if edge.flow_kind.is_none() {
+                edge.flow_kind = flow_kind;
             }
             return;
         }
-        let edge_data = EdgeData {
-            kind,
-            confidence,
-            flow_kind,
-        };
-        self.graph.add_edge(source, target, edge_data);
+        let edge_idx = self.graph.add_edge(
+            source,
+            target,
+            EdgeData {
+                kind,
+                confidence,
+                flow_kind,
+            },
+        );
+        self.edge_index.insert(key, edge_idx);
     }
 
     /// Adds a reference edge between two symbols with a confidence score.
@@ -304,20 +296,18 @@ impl GraphBuilder {
         kind: EdgeKind,
         confidence: f32,
     ) {
-        if !self.edge_normalizer.is_new(source, target, kind) {
-            // Duplicate edge: max-merge confidence on the existing edge.
-            if let Some(edge_idx) = self.graph.find_edge(source, target) {
-                let existing = &mut self.graph[edge_idx];
-                if existing.kind == kind {
-                    existing.confidence = existing.confidence.max(confidence);
-                }
-            }
+        let confidence = confidence.clamp(0.0, 1.0);
+        let key = (source, target, kind);
+        if let Some(&edge_idx) = self.edge_index.get(&key) {
+            let existing = &mut self.graph[edge_idx];
+            existing.confidence = existing.confidence.max(confidence);
             return;
         }
 
         let edge_data = EdgeData::with_confidence(kind, confidence);
 
-        self.graph.add_edge(source, target, edge_data);
+        let edge_idx = self.graph.add_edge(source, target, edge_data);
+        self.edge_index.insert(key, edge_idx);
     }
 
     /// Returns the FileId for a given file path, if registered.
@@ -349,22 +339,14 @@ impl GraphBuilder {
 
     /// Finalizes the graph and returns the constructed CodeGraph.
     pub fn build(self) -> CodeGraph {
-        let edge_index = self
-            .graph
-            .edge_indices()
-            .map(|e| {
-                let (s, t) = self.graph.edge_endpoints(e).expect("edge endpoints exist");
-                ((s, t, self.graph[e].kind), e)
-            })
-            .collect();
-        CodeGraph {
-            graph: self.graph,
-            edge_index,
-            file_to_index: self.file_to_index,
-            symbol_to_index: self.symbol_to_index,
-            external_index: self.external_index,
-            snapshot_id: self.snapshot_id,
-        }
+        CodeGraph::from_parts(
+            self.graph,
+            self.edge_index,
+            self.file_to_index,
+            self.symbol_to_index,
+            self.external_index,
+            self.snapshot_id,
+        )
     }
 
     /// Returns the number of nodes in the graph so far.
@@ -581,6 +563,28 @@ mod tests {
             1,
             "duplicate edges should be deduplicated"
         );
+    }
+
+    #[test]
+    fn builder_reference_max_merges_confidence() {
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        builder.add_file(PathBuf::from("test.py"), LangId::Python);
+        let low = test_symbol(10, "low_fn", 0);
+        let high = test_symbol(11, "high_fn", 0);
+        builder.add_symbol(&low).unwrap();
+        builder.add_symbol(&high).unwrap();
+
+        builder.add_reference(low.id, high.id, 0.5);
+        builder.add_reference(low.id, high.id, 0.9);
+        assert_eq!(builder.edge_count(), 3);
+
+        let graph = builder.build();
+        assert_eq!(graph.edge_count(), 3);
+        let refs: Vec<_> = graph.edges_of_kind(EdgeKind::Reference).collect();
+        assert_eq!(refs.len(), 1);
+        let (src, dst) = refs[0];
+        let edge = graph.graph().edges_connecting(src, dst).next().unwrap();
+        assert_eq!(edge.weight().confidence, 0.9);
     }
 
     #[test]

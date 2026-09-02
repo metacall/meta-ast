@@ -85,6 +85,28 @@ impl CodeGraph {
             snapshot_id,
         }
     }
+
+    /// Assemble a graph from builder parts without reindexing edges.
+    ///
+    /// The builder maintains the same `(source, target, kind)` dedup index
+    /// during construction, so `build()` moves it directly.
+    pub(crate) fn from_parts(
+        graph: DiGraph<NodeData, EdgeData>,
+        edge_index: HashMap<(NodeIndex, NodeIndex, EdgeKind), EdgeIndex>,
+        file_to_index: HashMap<FileId, NodeIndex>,
+        symbol_to_index: HashMap<SymbolId, NodeIndex>,
+        external_index: HashMap<String, NodeIndex>,
+        snapshot_id: SnapshotId,
+    ) -> Self {
+        Self {
+            graph,
+            edge_index,
+            file_to_index,
+            symbol_to_index,
+            external_index,
+            snapshot_id,
+        }
+    }
     /// Immutable access to the underlying petgraph graph for SCC analysis,
     /// serialization, and deploy algorithms.
     pub fn graph(&self) -> &DiGraph<NodeData, EdgeData> {
@@ -158,6 +180,7 @@ impl CodeGraph {
         kind: EdgeKind,
         confidence: f32,
     ) {
+        let confidence = confidence.clamp(0.0, 1.0);
         let key = (source, target, kind);
         if let Some(&edge_idx) = self.edge_index.get(&key) {
             let edge = &mut self.graph[edge_idx];
@@ -188,6 +211,7 @@ impl CodeGraph {
         confidence: f32,
         flow_kind: Option<crate::model::FlowKind>,
     ) {
+        let confidence = confidence.clamp(0.0, 1.0);
         let key = (source, target, kind);
         if let Some(&edge_idx) = self.edge_index.get(&key) {
             let edge = &mut self.graph[edge_idx];

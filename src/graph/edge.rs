@@ -32,6 +32,34 @@ pub enum EdgeKind {
     Flow,
 }
 
+/// Confidence ladder for scope-resolved edges.
+///
+/// Own file and direct same-language imports score 1.0. Transitive
+/// same-language imports decay to 0.8. Cross-language imports score 0.6.
+pub const CONFIDENCE_OWN_OR_DIRECT: f32 = 1.0;
+/// Transitive same-language import.
+pub const CONFIDENCE_TRANSITIVE: f32 = 0.8;
+/// Cross-language import.
+pub const CONFIDENCE_CROSS_LANGUAGE: f32 = 0.6;
+
+/// Confidence ladder for MetaCall client-call edges.
+///
+/// Unique load-confirmed calls score 1.0. Multiple load-confirmed calls
+/// score 0.8. Unique global matches score 0.6. Multiple global matches
+/// score 0.5. Computed names cap at 0.4.
+pub const CONFIDENCE_CLIENT_UNIQUE_LOAD: f32 = 1.0;
+/// Multiple load-confirmed candidates.
+pub const CONFIDENCE_CLIENT_MULTI_LOAD: f32 = 0.8;
+/// Unique global fallback match.
+pub const CONFIDENCE_CLIENT_UNIQUE_GLOBAL: f32 = 0.6;
+/// Multiple global fallback matches.
+pub const CONFIDENCE_CLIENT_MULTI_GLOBAL: f32 = 0.5;
+/// Computed function, tag, or script name.
+pub const CONFIDENCE_COMPUTED: f32 = 0.4;
+
+/// Dataflow def-use edge confidence.
+pub const CONFIDENCE_DEF_USE: f32 = 0.9;
+
 impl EdgeKind {
     /// Returns true if this edge kind participates in SCC computation.
     pub fn participates_in_scc(self) -> bool {

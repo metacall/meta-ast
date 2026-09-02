@@ -10,6 +10,9 @@ use std::path::PathBuf;
 use rayon::prelude::*;
 
 use crate::error::{Diagnostic, Severity};
+use crate::graph::edge::{
+    CONFIDENCE_CROSS_LANGUAGE, CONFIDENCE_OWN_OR_DIRECT, CONFIDENCE_TRANSITIVE,
+};
 use crate::language::LangId;
 use crate::model::{FileExtraction, FileId, SymbolId, Visibility};
 
@@ -133,11 +136,11 @@ impl FlattenedScopeCache {
                     let diff_lang = source_lang.is_some() && source_lang != Some(*sym_lang);
 
                     let confidence = if distance == 0 || (distance == 1 && same_lang) {
-                        1.0
+                        CONFIDENCE_OWN_OR_DIRECT
                     } else if diff_lang {
-                        0.6
+                        CONFIDENCE_CROSS_LANGUAGE
                     } else {
-                        0.8
+                        CONFIDENCE_TRANSITIVE
                     };
 
                     if let Some(entries) = scope.get_mut(name) {

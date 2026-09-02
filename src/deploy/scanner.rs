@@ -2,6 +2,7 @@
 //!
 //! Emits one `CallSite` per MetaCall load or client call detected by tree-sitter queries.
 
+use crate::graph::edge::CONFIDENCE_COMPUTED;
 use crate::language::LangId;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -34,7 +35,7 @@ pub struct CallSite {
     pub is_async: bool,
     /// Argument range of the call, for diagnostics.
     pub source_range: Option<crate::model::SourceRange>,
-    pub confidence: f64,
+    pub confidence: f32,
 }
 
 impl CallSiteVariant {
@@ -318,14 +319,14 @@ pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<Cal
 
             if variant == CallSiteVariant::ClientCall {
                 // First argument is the target function name; computed names
-                // keep the source text at 0.4 (existing convention).
+                // keep the source text at computed confidence.
                 if let Some(fn_node) = named_children.first() {
                     let text = get_node_text(*fn_node, source);
                     if is_plain_string(*fn_node) {
                         function_name = Some(strip_quotes(text));
                     } else {
                         function_name = Some(text.to_string());
-                        confidence = 0.4;
+                        confidence = CONFIDENCE_COMPUTED;
                     }
                 }
             } else {
@@ -336,7 +337,7 @@ pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<Cal
                         target_lang = Some(strip_quotes(text));
                     } else {
                         target_lang = Some(text.to_string());
-                        confidence = 0.4;
+                        confidence = CONFIDENCE_COMPUTED;
                     }
                 }
 
@@ -355,7 +356,7 @@ pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<Cal
                             scripts.push(strip_quotes(text));
                         } else {
                             scripts.push(text.to_string());
-                            confidence = 0.4;
+                            confidence = CONFIDENCE_COMPUTED;
                         }
                     }
                 }

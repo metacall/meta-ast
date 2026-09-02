@@ -148,7 +148,7 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
 
     // Collect inter-pod edges. Deduplicate by (from_pod, to_pod).
     // When both Import and Reference edges exist for the same pod pair,
-    // fuse their confidences via multiplication (combined structural + deploy weight).
+    // keep the stronger signal via max. Confidence never reduces on merge.
     #[derive(Default)]
     struct FusedConfidence {
         import: Option<f32>,
@@ -240,10 +240,7 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
     let mut inter_pod_edges: Vec<InterPodEdge> = Vec::with_capacity(dedup.len());
     for ((from_pod, to_pod), (fused, is_cross_lang, src_fid, dst_fid)) in dedup {
         let (kind, confidence) = match (fused.import, fused.reference) {
-            (Some(imp), Some(rf)) => {
-                // Multiply structural confidence (scope resolution) by deploy confidence (scanner).
-                (EdgeKind::Import, (imp * rf).clamp(0.0, 1.0))
-            }
+            (Some(imp), Some(rf)) => (EdgeKind::Import, imp.max(rf)),
             (Some(imp), None) => (EdgeKind::Import, imp),
             (None, Some(rf)) => (EdgeKind::Reference, rf),
             (None, None) => continue,
@@ -286,9 +283,19 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::node::FileNode;
+    use crate::graph::node::{FileNode, SymbolNode};
     use crate::model::ids::SnapshotId;
+    use crate::model::{LineColumn, SourceRange, SymbolId, SymbolKind};
     use std::path::PathBuf;
+
+    fn test_range() -> SourceRange {
+        SourceRange {
+            byte_start: 0,
+            byte_end: 4,
+            start: LineColumn { line: 0, column: 0 },
+            end: LineColumn { line: 0, column: 4 },
+        }
+    }
 
     #[test]
     fn partition_orders_pods_by_path() {
@@ -342,5 +349,51 @@ mod tests {
         assert_eq!(edge.from_pod, 2, "c.py must be pod 2");
         assert_eq!(edge.to_pod, 0, "a.js must be pod 0");
         assert!(edge.is_cross_language);
+    }
+
+    #[test]
+    fn pod_fusion_keeps_max_confidence() {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let py = FileId::new(10).unwrap();
+        let js = FileId::new(11).unwrap();
+        for (fid, path, lang) in [
+            (py, "a.py", LangId::Python),
+            (js, "b.js", LangId::JavaScript),
+        ] {
+            let idx = graph.add_node(NodeData::File(FileNode::new(
+                fid,
+                PathBuf::from(path),
+                lang,
+                SnapshotId::new(1).unwrap(),
+            )));
+            graph.file_to_index.insert(fid, idx);
+        }
+        let sym_py = graph.add_node(NodeData::Symbol(SymbolNode {
+            id: SymbolId::new(101).unwrap(),
+            name: "fn_py".to_string(),
+            kind: SymbolKind::Function,
+            file_id: py,
+            visibility: None,
+            source_range: test_range(),
+        }));
+        let sym_js = graph.add_node(NodeData::Symbol(SymbolNode {
+            id: SymbolId::new(102).unwrap(),
+            name: "fn_js".to_string(),
+            kind: SymbolKind::Function,
+            file_id: js,
+            visibility: None,
+            source_range: test_range(),
+        }));
+        graph.add_edge_normalized(
+            graph.file_to_index[&py],
+            graph.file_to_index[&js],
+            EdgeKind::Import,
+            1.0,
+        );
+        graph.add_edge_normalized(sym_py, sym_js, EdgeKind::Reference, 0.6);
+
+        let partition = partition_into_pods(&graph);
+        assert_eq!(partition.inter_pod_edges.len(), 1);
+        assert_eq!(partition.inter_pod_edges[0].confidence, 1.0);
     }
 }

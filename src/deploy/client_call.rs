@@ -6,6 +6,10 @@ use std::sync::Arc;
 
 use crate::deploy::scanner::{CallSite, CallSiteVariant};
 use crate::error::{Diagnostic, Severity};
+use crate::graph::edge::{
+    CONFIDENCE_CLIENT_MULTI_GLOBAL, CONFIDENCE_CLIENT_MULTI_LOAD, CONFIDENCE_CLIENT_UNIQUE_GLOBAL,
+    CONFIDENCE_CLIENT_UNIQUE_LOAD,
+};
 use crate::graph::{CodeGraph, NodeData};
 use crate::language::LangId;
 use crate::model::{FileExtraction, FileId, SymbolId};
@@ -228,13 +232,17 @@ pub(crate) fn resolve_client_calls(
         }
 
         let base: f32 = if global {
-            if candidates.len() == 1 { 0.6 } else { 0.5 }
+            if candidates.len() == 1 {
+                CONFIDENCE_CLIENT_UNIQUE_GLOBAL
+            } else {
+                CONFIDENCE_CLIENT_MULTI_GLOBAL
+            }
         } else if candidates.len() == 1 {
-            1.0
+            CONFIDENCE_CLIENT_UNIQUE_LOAD
         } else {
-            0.8
+            CONFIDENCE_CLIENT_MULTI_LOAD
         };
-        let confidence = base.min(site.confidence as f32);
+        let confidence = base.min(site.confidence);
 
         let mut emitted = 0;
         for sid in candidates {
@@ -329,7 +337,7 @@ mod tests {
         }
     }
 
-    fn client_call(source: &str, fn_name: &str, confidence: f64) -> CallSite {
+    fn client_call(source: &str, fn_name: &str, confidence: f32) -> CallSite {
         CallSite {
             source_file: PathBuf::from(source),
             caller_lang: LangId::Python,

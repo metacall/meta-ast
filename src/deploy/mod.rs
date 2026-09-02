@@ -93,7 +93,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
                 from_idx,
                 target_lang,
                 script_str,
-                site.confidence as f32,
+                site.confidence,
                 &path_to_idx,
                 &mut analysis,
             );
@@ -120,7 +120,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
                 from_idx,
                 target_lang,
                 script,
-                site.confidence as f32,
+                site.confidence,
                 &path_to_idx,
                 &mut analysis,
             );

@@ -1,5 +1,4 @@
 use crate::deploy::scanner::{CallSite, CallSiteVariant};
-use crate::graph::edge::EdgeKind;
 use crate::graph::node::NodeData;
 use crate::pipeline::GraphAnalysis;
 use serde::Serialize;
@@ -204,7 +203,7 @@ pub fn generate_mesh_annotation(
     let mut seen_edges: HashSet<(usize, usize, &str, &str)> = HashSet::new();
     for edge_idx in g.edge_indices() {
         let weight = &g[edge_idx];
-        if weight.kind == EdgeKind::Ownership {
+        if !weight.participates_in_scc() {
             continue;
         }
 
