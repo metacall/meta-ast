@@ -119,8 +119,8 @@ pub fn restore_shard_edges(graph: &mut CodeGraph, edges: &[ShardEdge]) -> Result
         .map(|index| stable_node_name(graph, index).map(|name| (name, index)))
         .collect::<Result<HashMap<_, _>, ShardError>>()?;
 
-    for edge in edges {
-        validate_edge(edge, 0, 0)?;
+    for (edge_index, edge) in edges.iter().enumerate() {
+        validate_edge(edge, 0, edge_index)?;
         let source = endpoint_index
             .get(&edge.source_name)
             .copied()

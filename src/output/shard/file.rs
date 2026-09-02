@@ -184,6 +184,9 @@ impl ShardSymbol {
     }
 }
 
+/// Write shard records to a writer in JSONL format.
+///
+/// Use `std::io::BufWriter` when writing to a file to prevent frequent write system calls.
 pub fn write_shard<W: Write>(mut writer: W, files: &[ShardFile]) -> Result<(), ShardError> {
     for (line_index, file) in files.iter().enumerate() {
         validate_file(file, line_index + 1)?;

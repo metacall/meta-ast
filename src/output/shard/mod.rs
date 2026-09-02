@@ -296,4 +296,83 @@ mod tests {
         assert_eq!(decoded.len(), 1);
         assert_eq!(decoded[0], record);
     }
+
+    #[test]
+    fn duplicate_symbol_names_receive_deterministic_ordinals() {
+        let path = PathBuf::from("src/overload.py");
+        let sym1 = Symbol {
+            id: SymbolId::new(1).unwrap(),
+            name: "process".to_string(),
+            kind: SymbolKind::Function,
+            language: LangId::Python,
+            file_path: path.clone(),
+            source_range: SourceRange {
+                byte_start: 10,
+                byte_end: 30,
+                start: LineColumn { line: 1, column: 0 },
+                end: LineColumn {
+                    line: 2,
+                    column: 10,
+                },
+            },
+            visibility: Some(Visibility::Public),
+            signature: Some("def process(a: int)".to_string()),
+            docstring: None,
+            is_async: false,
+        };
+        let sym2 = Symbol {
+            id: SymbolId::new(2).unwrap(),
+            name: "process".to_string(),
+            kind: SymbolKind::Function,
+            language: LangId::Python,
+            file_path: path.clone(),
+            source_range: SourceRange {
+                byte_start: 40,
+                byte_end: 60,
+                start: LineColumn { line: 3, column: 0 },
+                end: LineColumn {
+                    line: 4,
+                    column: 10,
+                },
+            },
+            visibility: Some(Visibility::Public),
+            signature: Some("def process(a: str)".to_string()),
+            docstring: None,
+            is_async: false,
+        };
+        let extraction = FileExtraction {
+            path,
+            lang: LangId::Python,
+            symbols: vec![sym1, sym2],
+            imports: Vec::new(),
+            references: Vec::new(),
+            diagnostics: Vec::new(),
+            ast_node_count: 5,
+            #[cfg(feature = "metacall-deploy")]
+            call_sites: Vec::new(),
+            #[cfg(feature = "dataflow")]
+            data_nodes: Vec::new(),
+            #[cfg(feature = "dataflow")]
+            flow_edges: Vec::new(),
+        };
+        let mut diagnostics = Vec::new();
+        let (graph, _) = GraphBuilder::from_extractions(
+            std::slice::from_ref(&extraction),
+            Path::new("."),
+            SnapshotId::new(1).unwrap(),
+            &mut diagnostics,
+        );
+        let shard = ShardFile::from_extraction(&extraction, &graph).unwrap();
+        let edge_targets: Vec<_> = shard.edges.iter().map(|e| &e.target_name).collect();
+        assert!(
+            edge_targets
+                .iter()
+                .any(|name| name.contains("process#function!0"))
+        );
+        assert!(
+            edge_targets
+                .iter()
+                .any(|name| name.contains("process#function!1"))
+        );
+    }
 }

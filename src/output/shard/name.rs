@@ -90,18 +90,26 @@ pub(crate) fn symbol_descriptor(graph: &CodeGraph, node_index: NodeIndex) -> Str
         .graph()
         .node_indices()
         .filter(|candidate_index| {
-            if *candidate_index == node_index || parent_symbol(graph, *candidate_index) != parent {
+            if *candidate_index == node_index {
                 return false;
             }
             let NodeData::Symbol(candidate) = &graph.graph()[*candidate_index] else {
                 return false;
             };
-            candidate.file_id == symbol.file_id
-                && candidate.name == symbol.name
-                && candidate.kind == symbol.kind
-                && (candidate.source_range.byte_start < symbol.source_range.byte_start
-                    || (candidate.source_range.byte_start == symbol.source_range.byte_start
-                        && candidate_index.index() < node_index.index()))
+            if candidate.file_id != symbol.file_id
+                || candidate.name != symbol.name
+                || candidate.kind != symbol.kind
+            {
+                return false;
+            }
+            if parent_symbol(graph, *candidate_index) != parent {
+                return false;
+            }
+            candidate.source_range.byte_start < symbol.source_range.byte_start
+                || (candidate.source_range.byte_start == symbol.source_range.byte_start
+                    && (candidate.source_range.byte_end < symbol.source_range.byte_end
+                        || (candidate.source_range.byte_end == symbol.source_range.byte_end
+                            && candidate.id < symbol.id)))
         })
         .count();
     format!(
@@ -130,11 +138,13 @@ pub(crate) fn parent_symbol(graph: &CodeGraph, node_index: NodeIndex) -> Option<
                     || candidate.source_range.byte_end > symbol.source_range.byte_end);
             contains.then_some((
                 candidate.source_range.byte_end - candidate.source_range.byte_start,
+                candidate.source_range.byte_start,
+                candidate.source_range.byte_end,
                 candidate_index,
             ))
         })
-        .min_by_key(|(span, index)| (*span, index.index()))
-        .map(|(_, index)| index)
+        .min_by_key(|(span, start, end, _)| (*span, *start, *end))
+        .map(|(_, _, _, index)| index)
 }
 
 pub(crate) fn normalized_path(path: &Path) -> Result<String, ShardError> {

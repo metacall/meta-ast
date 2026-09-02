@@ -57,6 +57,8 @@ impl ShardManifestRecord {
 }
 
 /// Write manifest records to a writer in JSONL format.
+///
+/// Use `std::io::BufWriter` when writing to a file to prevent frequent write system calls.
 pub fn write_manifest<W: Write>(
     mut writer: W,
     records: &[ShardManifestRecord],
