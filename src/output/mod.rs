@@ -2,6 +2,7 @@ pub mod dashboard;
 pub mod emitter;
 pub mod graph;
 pub mod inspect;
+pub mod shard;
 
 use serde::Serialize;
 

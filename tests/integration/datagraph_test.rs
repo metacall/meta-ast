@@ -87,6 +87,11 @@ fn datagraph_export_symbol_node_fields() {
             node.symbol_kind.is_some(),
             "symbol node must have symbol_kind"
         );
+        assert!(node.file_path.is_some(), "symbol node must have file_path");
+        assert!(
+            node.source_range.is_some(),
+            "symbol node must have source_range"
+        );
         assert!(
             node.data_scope.is_none(),
             "symbol node should not have data_scope"
@@ -142,7 +147,7 @@ fn datagraph_export_json_roundtrip() {
     let json = serde_json::to_string_pretty(&export).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
-    assert_eq!(parsed["schema_version"], 1);
+    assert_eq!(parsed["schema_version"], 2);
     assert_eq!(parsed["metadata"]["snapshot_id"], 1);
     assert!(parsed["nodes"].is_array());
     assert!(parsed["edges"].is_array());
@@ -269,7 +274,7 @@ fn sink_json_writes_datagraph_to_file() {
 
     let content = std::fs::read_to_string(&temp).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-    assert_eq!(parsed["schema_version"], 1);
+    assert_eq!(parsed["schema_version"], 2);
     assert!(parsed["nodes"].is_array());
     assert!(parsed["edges"].is_array());
 

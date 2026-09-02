@@ -13,7 +13,7 @@ use crate::graph::scc::{DeployabilityHint, SccAnalysis};
 
 /// Version of the graph export schema.
 /// Incremented on breaking changes to the serialized structure.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Complete graph analysis output for serialization.
 ///
@@ -61,9 +61,15 @@ pub struct SerializedNode {
     pub id: usize,
     /// Node kind: "file", "symbol", "external", or "data"
     pub kind: String,
-    /// File path (for file/external nodes)
+    /// File or external path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// Defining file path for symbol nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    /// Source range for symbol nodes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_range: Option<crate::model::SourceRange>,
     /// Language identifier (for file/external nodes)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
@@ -201,19 +207,21 @@ impl GraphOutput {
         g.node_indices()
             .map(|idx| {
                 let node_data = &g[idx];
-                Self::serialize_node(idx.index(), node_data)
+                Self::serialize_node(graph, idx.index(), node_data)
             })
             .collect()
     }
 
-    fn serialize_node(id: usize, node_data: &NodeData) -> SerializedNode {
+    fn serialize_node(graph: &CodeGraph, id: usize, node_data: &NodeData) -> SerializedNode {
         match node_data {
             NodeData::File(f) => Self::serialize_file_node(id, f),
-            NodeData::Symbol(s) => Self::serialize_symbol_node(id, s),
+            NodeData::Symbol(s) => Self::serialize_symbol_node(graph, id, s),
             NodeData::External(e) => SerializedNode {
                 id,
                 kind: "external".to_string(),
                 path: Some(e.raw_path.clone()),
+                file_path: None,
+                source_range: None,
                 language: Some(e.language.as_ref().to_string()),
                 name: None,
                 symbol_kind: None,
@@ -225,6 +233,8 @@ impl GraphOutput {
                 id,
                 kind: "data".to_string(),
                 path: None,
+                file_path: None,
+                source_range: None,
                 language: None,
                 name: d.name.clone(),
                 symbol_kind: None,
@@ -240,6 +250,8 @@ impl GraphOutput {
             id,
             kind: "file".to_string(),
             path: Some(file_node.path.to_string_lossy().to_string()),
+            file_path: None,
+            source_range: None,
             language: Some(file_node.language.as_ref().to_string()),
             name: None,
             symbol_kind: None,
@@ -249,11 +261,20 @@ impl GraphOutput {
         }
     }
 
-    fn serialize_symbol_node(id: usize, symbol_node: &SymbolNode) -> SerializedNode {
+    fn serialize_symbol_node(
+        graph: &CodeGraph,
+        id: usize,
+        symbol_node: &SymbolNode,
+    ) -> SerializedNode {
+        let file_path = graph
+            .file_node(symbol_node.file_id)
+            .map(|file| file.path.to_string_lossy().to_string());
         SerializedNode {
             id,
             kind: "symbol".to_string(),
             path: None,
+            file_path,
+            source_range: Some(symbol_node.source_range.clone()),
             language: None,
             name: Some(symbol_node.name.clone()),
             symbol_kind: Some(format!("{:?}", symbol_node.kind)),
@@ -432,7 +453,7 @@ mod tests {
         let json = serialize_graph(&graph, &scc, 1, &OutputFormat::Json).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(parsed["schema_version"], 1);
+        assert_eq!(parsed["schema_version"], 2);
         assert!(parsed["metadata"].is_object());
         assert!(parsed["nodes"].is_array());
         assert!(parsed["edges"].is_array());
@@ -453,7 +474,7 @@ mod tests {
 
         assert!(json.contains("\"node_count\":0"));
         assert!(json.contains("\"edge_count\":0"));
-        assert!(json.contains("\"schema_version\":1"));
+        assert!(json.contains("\"schema_version\":2"));
     }
 
     #[test]
@@ -607,6 +628,8 @@ mod tests {
         assert_eq!(output.edges.len(), 1); // ownership
         let sym_node = output.nodes.iter().find(|n| n.kind == "symbol").unwrap();
         assert_eq!(sym_node.name.as_deref(), Some("main_fn"));
+        assert_eq!(sym_node.file_path.as_deref(), Some("main.rs"));
+        assert_eq!(sym_node.source_range.as_ref(), Some(&sample_source_range()));
     }
 
     #[test]

@@ -8,6 +8,8 @@
 //! symbol listing is needed (e.g. inspect mode); skips the import and
 //! reference query passes, roughly halving per-file extraction time.
 
+use std::path::{Path, PathBuf};
+
 use rayon::prelude::*;
 
 use crate::error::{Diagnostic, Severity};
@@ -30,6 +32,62 @@ pub struct ExtractionResult {
     pub files: Vec<FileExtraction>,
 }
 
+/// ID allocation state shared by disk and in-memory extraction.
+#[derive(Debug, Default)]
+pub struct ExtractionIdGenerators {
+    symbols: IdGenerator<SymbolId>,
+    #[cfg(feature = "dataflow")]
+    data_nodes: IdGenerator<crate::model::DataNodeId>,
+}
+
+impl ExtractionIdGenerators {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_symbol_start(symbol_start: u32) -> Self {
+        Self {
+            symbols: IdGenerator::with_start(symbol_start),
+            #[cfg(feature = "dataflow")]
+            data_nodes: IdGenerator::new(),
+        }
+    }
+
+    #[cfg(feature = "dataflow")]
+    pub fn with_starts(symbol_start: u32, data_node_start: u32) -> Self {
+        Self {
+            symbols: IdGenerator::with_start(symbol_start),
+            data_nodes: IdGenerator::with_start(data_node_start),
+        }
+    }
+
+    pub fn symbols(&self) -> &IdGenerator<SymbolId> {
+        &self.symbols
+    }
+
+    #[cfg(feature = "dataflow")]
+    pub fn data_nodes(&self) -> &IdGenerator<crate::model::DataNodeId> {
+        &self.data_nodes
+    }
+}
+
+/// Source text supplied by an editor buffer.
+#[derive(Debug, Clone, Copy)]
+pub struct InMemorySource<'a> {
+    pub uri: &'a str,
+    pub text: &'a str,
+    pub version: i32,
+    pub language: LangId,
+}
+
+/// Extraction result tied to the editor document version that produced it.
+#[derive(Debug, Clone)]
+pub struct VersionedExtraction {
+    pub uri: String,
+    pub version: i32,
+    pub file: FileExtraction,
+}
+
 pub fn extract(files: &[(std::path::PathBuf, LangId)]) -> ExtractionResult {
     extract_with_options(files, &ExtractOptions::default())
 }
@@ -38,36 +96,18 @@ pub fn extract_with_options(
     files: &[(std::path::PathBuf, LangId)],
     opts: &ExtractOptions,
 ) -> ExtractionResult {
-    let id_gen = IdGenerator::<SymbolId>::new();
-    #[cfg(feature = "dataflow")]
-    let data_id_gen = IdGenerator::<crate::model::DataNodeId>::new();
-    extract_with_id_gen(
-        files,
-        opts,
-        id_gen,
-        #[cfg(feature = "dataflow")]
-        data_id_gen,
-    )
+    let id_generators = ExtractionIdGenerators::new();
+    extract_with_id_gen(files, opts, &id_generators)
 }
 
-pub(crate) fn extract_with_id_gen(
-    files: &[(std::path::PathBuf, LangId)],
+pub fn extract_with_id_gen(
+    files: &[(PathBuf, LangId)],
     opts: &ExtractOptions,
-    id_gen: IdGenerator<SymbolId>,
-    #[cfg(feature = "dataflow")] data_id_gen: IdGenerator<crate::model::DataNodeId>,
+    id_generators: &ExtractionIdGenerators,
 ) -> ExtractionResult {
     let mut file_extractions: Vec<_> = files
         .par_iter()
-        .map(|(path, lang)| {
-            extract_single_file(
-                path,
-                lang,
-                &id_gen,
-                #[cfg(feature = "dataflow")]
-                &data_id_gen,
-                opts,
-            )
-        })
+        .map(|(path, lang)| extract_single_file(path, lang, id_generators, opts))
         .collect();
 
     file_extractions.sort_by(|a, b| a.path.cmp(&b.path));
@@ -78,65 +118,69 @@ pub(crate) fn extract_with_id_gen(
 }
 
 fn extract_single_file(
-    path: &std::path::Path,
+    path: &Path,
     lang: &LangId,
-    id_gen: &IdGenerator<SymbolId>,
-    #[cfg(feature = "dataflow")] data_id_gen: &IdGenerator<crate::model::DataNodeId>,
+    id_generators: &ExtractionIdGenerators,
     opts: &ExtractOptions,
 ) -> FileExtraction {
     let source = match std::fs::read(path) {
-        Ok(s) => s,
-        Err(e) => {
-            return FileExtraction {
-                path: path.to_path_buf(),
-                lang: *lang,
-                symbols: Vec::new(),
-                imports: Vec::new(),
-                references: Vec::new(),
-                diagnostics: vec![Diagnostic {
-                    path: path.to_path_buf(),
-                    severity: Severity::Error,
-                    message: format!("failed to read file: {e}"),
-                    source_range: None,
-                }],
-                ast_node_count: 0,
-                #[cfg(feature = "metacall-deploy")]
-                call_sites: Vec::new(),
-                #[cfg(feature = "dataflow")]
-                data_nodes: Vec::new(),
-                #[cfg(feature = "dataflow")]
-                flow_edges: Vec::new(),
-            };
+        Ok(source) => source,
+        Err(error) => {
+            return failed_extraction(path, *lang, format!("failed to read file: {error}"));
         }
     };
 
-    let tree = match crate::parser::parse_tree(*lang, &source) {
+    extract_source(path, *lang, &source, id_generators, opts)
+}
+
+/// Extract an open editor buffer without reading its backing file.
+pub fn extract_text_with_id_gen(
+    source: InMemorySource<'_>,
+    opts: &ExtractOptions,
+    id_generators: &ExtractionIdGenerators,
+) -> Result<VersionedExtraction, crate::Error> {
+    let parsed_uri =
+        url::Url::parse(source.uri).map_err(|error| crate::Error::InvalidSourceUri {
+            uri: source.uri.to_string(),
+            message: error.to_string(),
+        })?;
+    let path = parsed_uri
+        .to_file_path()
+        .map_err(|()| crate::Error::InvalidSourceUri {
+            uri: source.uri.to_string(),
+            message: "URI must use the file scheme and contain an absolute path".to_string(),
+        })?;
+    let path = dunce::simplified(&path).to_path_buf();
+    let file = extract_source(
+        &path,
+        source.language,
+        source.text.as_bytes(),
+        id_generators,
+        opts,
+    );
+
+    Ok(VersionedExtraction {
+        uri: source.uri.to_string(),
+        version: source.version,
+        file,
+    })
+}
+
+fn extract_source(
+    path: &Path,
+    lang: LangId,
+    source: &[u8],
+    id_generators: &ExtractionIdGenerators,
+    opts: &ExtractOptions,
+) -> FileExtraction {
+    let tree = match crate::parser::parse_tree(lang, source) {
         Ok(t) => t,
         Err(e) => {
-            return FileExtraction {
-                path: path.to_path_buf(),
-                lang: *lang,
-                symbols: Vec::new(),
-                imports: Vec::new(),
-                references: Vec::new(),
-                diagnostics: vec![Diagnostic {
-                    path: path.to_path_buf(),
-                    severity: Severity::Error,
-                    message: e.to_string(),
-                    source_range: None,
-                }],
-                ast_node_count: 0,
-                #[cfg(feature = "metacall-deploy")]
-                call_sites: Vec::new(),
-                #[cfg(feature = "dataflow")]
-                data_nodes: Vec::new(),
-                #[cfg(feature = "dataflow")]
-                flow_edges: Vec::new(),
-            };
+            return failed_extraction(path, lang, e.to_string());
         }
     };
 
-    let metrics = parser::tree_metrics(&tree, &source);
+    let metrics = parser::tree_metrics(&tree, source);
     let mut diags = Vec::new();
 
     if metrics.error_ratio > 0.5 {
@@ -151,14 +195,14 @@ fn extract_single_file(
         });
     }
 
-    let raw_symbols = crate::language::extract_symbols_for(*lang, &tree, &source);
+    let raw_symbols = crate::language::extract_symbols_for(lang, &tree, source);
     let symbols = raw_symbols
         .into_iter()
         .map(|raw| Symbol {
-            id: id_gen.next(),
+            id: id_generators.symbols.next(),
             name: raw.name.into_owned(),
             kind: raw.kind,
-            language: *lang,
+            language: lang,
             file_path: path.to_path_buf(),
             source_range: raw.source_range,
             visibility: raw.visibility,
@@ -171,19 +215,19 @@ fn extract_single_file(
     let (imports, references) = if opts.skip_imports_and_refs {
         (Vec::new(), Vec::new())
     } else {
-        crate::language::extract_imports_and_references_for(*lang, &tree, &source, path)
+        crate::language::extract_imports_and_references_for(lang, &tree, source, path)
     };
 
     #[cfg(feature = "metacall-deploy")]
-    let call_sites = crate::deploy::scanner::scan_file(*lang, &tree, &source, path);
+    let call_sites = crate::deploy::scanner::scan_file(lang, &tree, source, path);
 
     #[cfg(feature = "dataflow")]
     let (data_nodes, flow_edges) =
-        crate::language::dataflow::extract_dataflow(*lang, &tree, &source, data_id_gen);
+        crate::language::dataflow::extract_dataflow(lang, &tree, source, &id_generators.data_nodes);
 
     FileExtraction {
         path: path.to_path_buf(),
-        lang: *lang,
+        lang,
         symbols,
         imports,
         references,
@@ -195,6 +239,29 @@ fn extract_single_file(
         data_nodes,
         #[cfg(feature = "dataflow")]
         flow_edges,
+    }
+}
+
+fn failed_extraction(path: &Path, lang: LangId, message: String) -> FileExtraction {
+    FileExtraction {
+        path: path.to_path_buf(),
+        lang,
+        symbols: Vec::new(),
+        imports: Vec::new(),
+        references: Vec::new(),
+        diagnostics: vec![Diagnostic {
+            path: path.to_path_buf(),
+            severity: Severity::Error,
+            message,
+            source_range: None,
+        }],
+        ast_node_count: 0,
+        #[cfg(feature = "metacall-deploy")]
+        call_sites: Vec::new(),
+        #[cfg(feature = "dataflow")]
+        data_nodes: Vec::new(),
+        #[cfg(feature = "dataflow")]
+        flow_edges: Vec::new(),
     }
 }
 
@@ -299,6 +366,65 @@ mod tests {
             .flat_map(|f| f.symbols.iter().map(|s| s.name.clone()))
             .collect();
         assert_eq!(names1, names2);
+    }
+
+    #[test]
+    fn in_memory_extraction_uses_unsaved_text_and_preserves_version() {
+        let path = test_dir().join("buffer.py");
+        let _ = std::fs::remove_file(&path);
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        let id_generators = ExtractionIdGenerators::with_symbol_start(40);
+
+        let result = extract_text_with_id_gen(
+            InMemorySource {
+                uri: &uri,
+                text: "def unsaved(): pass\n",
+                version: 7,
+                language: LangId::Python,
+            },
+            &ExtractOptions::default(),
+            &id_generators,
+        )
+        .unwrap();
+
+        assert_eq!(result.version, 7);
+        assert_eq!(result.uri, uri);
+        assert_eq!(result.file.path, path);
+        assert_eq!(result.file.symbols[0].name, "unsaved");
+        assert_eq!(result.file.symbols[0].id, SymbolId::new(40).unwrap());
+    }
+
+    #[test]
+    fn in_memory_extraction_rejects_non_file_uri() {
+        let id_generators = ExtractionIdGenerators::new();
+        let error = extract_text_with_id_gen(
+            InMemorySource {
+                uri: "untitled:buffer.py",
+                text: "def value(): pass\n",
+                version: 1,
+                language: LangId::Python,
+            },
+            &ExtractOptions::default(),
+            &id_generators,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, crate::Error::InvalidSourceUri { .. }));
+    }
+
+    #[test]
+    fn extraction_id_generators_accessors() {
+        let id_generators = ExtractionIdGenerators::with_symbol_start(100);
+        assert_eq!(id_generators.symbols().next(), SymbolId::new(100).unwrap());
+        #[cfg(feature = "dataflow")]
+        {
+            let dual = ExtractionIdGenerators::with_starts(200, 300);
+            assert_eq!(dual.symbols().next(), SymbolId::new(200).unwrap());
+            assert_eq!(
+                dual.data_nodes().next(),
+                crate::model::DataNodeId::new(300).unwrap()
+            );
+        }
     }
 
     #[test]

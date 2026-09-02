@@ -14,9 +14,9 @@ pub use ids::{DataNodeId, FileId, IdGenerator, SnapshotId, SymbolId};
 pub use output::{ClassEntry, FuncEntry, InspectOutput, ObjectEntry};
 
 use crate::language::LangId;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnresolvedImport {
     pub import_specifier: String,
     pub alias: Option<String>,
@@ -25,7 +25,7 @@ pub struct UnresolvedImport {
     pub range: SourceRange,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnresolvedReference {
     pub name: String,
     pub range: SourceRange,
@@ -49,13 +49,13 @@ pub struct FileExtraction {
     pub flow_edges: Vec<FlowEdge>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineColumn {
     pub line: usize,
     pub column: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceRange {
     pub byte_start: usize,
     pub byte_end: usize,
@@ -63,7 +63,7 @@ pub struct SourceRange {
     pub end: LineColumn,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum SymbolKind {
     Function,
@@ -81,7 +81,7 @@ pub enum SymbolKind {
     TypeAlias,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Visibility {
     Public,

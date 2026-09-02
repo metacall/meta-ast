@@ -15,7 +15,7 @@ use crate::extractor;
 use crate::graph::GraphBuilder;
 use crate::input;
 use crate::language::LangId;
-use crate::model::{FileExtraction, IdGenerator, SymbolId};
+use crate::model::FileExtraction;
 use crate::pipeline::GraphAnalysis;
 use crate::watch::cache::{Fingerprint, compute_fingerprint};
 use crate::watch::state::{ChangeSet, WatchState};
@@ -109,12 +109,12 @@ pub fn incremental_reanalyze(
     }
 
     let max_id = state.cache.max_symbol_id();
-    let id_gen = IdGenerator::<SymbolId>::with_start(max_id + 1);
-
     #[cfg(feature = "dataflow")]
     let max_data_id = state.cache.max_data_node_id();
     #[cfg(feature = "dataflow")]
-    let data_id_gen = IdGenerator::<crate::model::DataNodeId>::with_start(max_data_id + 1);
+    let id_generators = extractor::ExtractionIdGenerators::with_starts(max_id + 1, max_data_id + 1);
+    #[cfg(not(feature = "dataflow"))]
+    let id_generators = extractor::ExtractionIdGenerators::with_symbol_start(max_id + 1);
 
     let new_extractions = if changed.is_empty() {
         Vec::new()
@@ -124,9 +124,7 @@ pub fn incremental_reanalyze(
             &extractor::ExtractOptions {
                 skip_imports_and_refs: false,
             },
-            id_gen,
-            #[cfg(feature = "dataflow")]
-            data_id_gen,
+            &id_generators,
         )
         .files
     };

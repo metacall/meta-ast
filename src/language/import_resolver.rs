@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{OnceLock, RwLock};
+use std::sync::RwLock;
 
 /// Stateful import path resolution seam.
 ///
@@ -15,6 +15,9 @@ use std::sync::{OnceLock, RwLock};
 /// config file reads (tsconfig.json, go.mod, sys.path) on first use.
 pub trait ImportResolver: Send + Sync {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf>;
+
+    /// Invalidate any memoized filesystem state or configuration caches.
+    fn clear_cache(&self) {}
 }
 
 /// Zero-cost adapter wrapping a stateless function pointer.
@@ -49,6 +52,14 @@ impl PythonResolver {
             f,
             exists_cache: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub fn clear_cache(&self) {
+        let mut cache = self
+            .exists_cache
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        cache.clear();
     }
 }
 
@@ -95,20 +106,32 @@ impl ImportResolver for PythonResolver {
 
         (self.f)(raw, source_dir, project_root)
     }
+
+    fn clear_cache(&self) {
+        PythonResolver::clear_cache(self);
+    }
 }
 
 /// Stateful resolver for Go module import paths.
 pub struct GoModResolver {
     f: fn(&str, &Path, &Path) -> Option<PathBuf>,
-    cached_module: OnceLock<Option<(PathBuf, String)>>,
+    cached_module: RwLock<Option<Option<(PathBuf, String)>>>,
 }
 
 impl GoModResolver {
     pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
         Self {
             f,
-            cached_module: OnceLock::new(),
+            cached_module: RwLock::new(None),
         }
+    }
+
+    pub fn clear_cache(&self) {
+        let mut guard = self
+            .cached_module
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        *guard = None;
     }
 }
 
@@ -124,25 +147,42 @@ impl ImportResolver for GoModResolver {
             return Some(path.with_extension("go"));
         }
 
-        let module_info = self.cached_module.get_or_init(|| {
-            let mut current = Some(project_root);
-            while let Some(dir) = current {
-                let go_mod = dir.join("go.mod");
-                if go_mod.is_file() {
-                    if let Ok(content) = std::fs::read_to_string(&go_mod) {
-                        for line in content.lines() {
-                            let line = line.trim();
-                            if let Some(module) = line.strip_prefix("module ") {
-                                return Some((dir.to_path_buf(), module.trim().to_string()));
+        let cached = self
+            .cached_module
+            .read()
+            .ok()
+            .and_then(|guard| guard.clone());
+        let module_info = match cached {
+            Some(info) => info,
+            None => {
+                let computed = {
+                    let mut current = Some(project_root);
+                    let mut found = None;
+                    while let Some(dir) = current {
+                        let go_mod = dir.join("go.mod");
+                        if go_mod.is_file() {
+                            if let Ok(content) = std::fs::read_to_string(&go_mod) {
+                                for line in content.lines() {
+                                    let line = line.trim();
+                                    if let Some(module) = line.strip_prefix("module ") {
+                                        found =
+                                            Some((dir.to_path_buf(), module.trim().to_string()));
+                                        break;
+                                    }
+                                }
                             }
+                            break;
                         }
+                        current = dir.parent();
                     }
-                    break;
+                    found
+                };
+                if let Ok(mut guard) = self.cached_module.write() {
+                    *guard = Some(computed.clone());
                 }
-                current = dir.parent();
+                computed
             }
-            None
-        });
+        };
 
         let matched_module = module_info.as_ref().and_then(|(dir, name)| {
             if raw.starts_with(name) {
@@ -158,6 +198,10 @@ impl ImportResolver for GoModResolver {
 
         (self.f)(raw, source_dir, project_root)
     }
+
+    fn clear_cache(&self) {
+        GoModResolver::clear_cache(self);
+    }
 }
 
 /// Stateful resolver for JavaScript import paths.
@@ -172,6 +216,14 @@ impl JsResolver {
             f,
             is_file_cache: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub fn clear_cache(&self) {
+        let mut cache = self
+            .is_file_cache
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        cache.clear();
     }
 }
 
@@ -224,6 +276,10 @@ impl ImportResolver for JsResolver {
 
         (self.f)(raw, source_dir, project_root)
     }
+
+    fn clear_cache(&self) {
+        JsResolver::clear_cache(self);
+    }
 }
 
 /// Stateful resolver for TypeScript import paths using `tsconfig.json`.
@@ -238,6 +294,14 @@ impl TsConfigResolver {
             f,
             is_file_cache: RwLock::new(HashMap::new()),
         }
+    }
+
+    pub fn clear_cache(&self) {
+        let mut cache = self
+            .is_file_cache
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        cache.clear();
     }
 }
 
@@ -289,6 +353,10 @@ impl ImportResolver for TsConfigResolver {
         }
 
         (self.f)(raw, source_dir, project_root)
+    }
+
+    fn clear_cache(&self) {
+        TsConfigResolver::clear_cache(self);
     }
 }
 
@@ -464,6 +532,86 @@ mod tests {
         // Second resolve: should STILL return my_file.ts because it memoized the is_file() result!
         let res2 = resolver.resolve("./my_file", &temp_dir, &temp_dir);
         assert_eq!(res2, Some(ts_file));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn resolver_clear_cache_invalidates_memoized_state() {
+        let temp_dir = std::env::temp_dir().join("resolver_clear_cache_invalidates_memoized_state");
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // 1. Python resolver cache invalidation
+        let pkg_dir = temp_dir.join("py_pkg");
+        std::fs::create_dir_all(&pkg_dir).unwrap();
+        let init_py = pkg_dir.join("__init__.py");
+        std::fs::write(&init_py, "").unwrap();
+        let py_resolver = make_resolver(crate::language::LangId::Python);
+        assert_eq!(
+            py_resolver.resolve("py_pkg", &temp_dir, &temp_dir),
+            Some(init_py.clone())
+        );
+        std::fs::remove_file(&init_py).unwrap();
+        // Still cached:
+        assert_eq!(
+            py_resolver.resolve("py_pkg", &temp_dir, &temp_dir),
+            Some(init_py.clone())
+        );
+        // Invalidate:
+        py_resolver.clear_cache();
+        assert_eq!(
+            py_resolver.resolve("py_pkg", &temp_dir, &temp_dir),
+            Some(temp_dir.join("py_pkg.py"))
+        );
+
+        // 2. Go resolver cache invalidation
+        let go_mod_path = temp_dir.join("go.mod");
+        std::fs::write(&go_mod_path, "module oldmod\n").unwrap();
+        let go_resolver = make_resolver(crate::language::LangId::Go);
+        assert_eq!(
+            go_resolver.resolve("oldmod/sub", &temp_dir, &temp_dir),
+            Some(temp_dir.join("sub.go"))
+        );
+        std::fs::write(&go_mod_path, "module newmod\n").unwrap();
+        // Still cached to oldmod:
+        assert_eq!(
+            go_resolver.resolve("oldmod/sub", &temp_dir, &temp_dir),
+            Some(temp_dir.join("sub.go"))
+        );
+        // Invalidate:
+        go_resolver.clear_cache();
+        assert_eq!(
+            go_resolver.resolve("oldmod/sub", &temp_dir, &temp_dir),
+            None
+        );
+        assert_eq!(
+            go_resolver.resolve("newmod/sub", &temp_dir, &temp_dir),
+            Some(temp_dir.join("sub.go"))
+        );
+
+        // 3. TypeScript resolver cache invalidation
+        let ts_file = temp_dir.join("ts_file.ts");
+        std::fs::write(&ts_file, "").unwrap();
+        let ts_resolver = make_resolver(crate::language::LangId::TypeScript);
+        assert_eq!(
+            ts_resolver.resolve("./ts_file", &temp_dir, &temp_dir),
+            Some(ts_file.clone())
+        );
+        std::fs::remove_file(&ts_file).unwrap();
+        // Still cached:
+        assert_eq!(
+            ts_resolver.resolve("./ts_file", &temp_dir, &temp_dir),
+            Some(ts_file)
+        );
+        // Invalidate:
+        ts_resolver.clear_cache();
+        assert_eq!(
+            ts_resolver.resolve("./ts_file", &temp_dir, &temp_dir),
+            Some(temp_dir.join("./ts_file"))
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

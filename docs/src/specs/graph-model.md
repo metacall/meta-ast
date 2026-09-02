@@ -72,9 +72,9 @@ Deployability hint policy:
 
 Graph serialization for external consumers shall preserve:
 
-- stable IDs
+- snapshot-local node IDs
 - edge kinds
-- source ranges for symbol nodes
+- defining file paths and source ranges for symbol nodes
 
 Sink adapters (e.g., Dgraph) that must preserve semantic equivalence.
 
@@ -85,6 +85,10 @@ lowercase language names, in enum declaration order:
 
 These values also parse back through the CLI `--language` flag. The same names
 apply to the strum `Display`/`AsRefStr` and serde representations of `LangId`.
+
+Graph output schema version 2 adds `file_path` and `source_range` to serialized
+symbol nodes. `.metast` v2 shards do not persist numeric IDs. They store stable
+language-scoped endpoint names and regenerate symbol IDs when loaded.
 
 ## 7. Known limitations
 

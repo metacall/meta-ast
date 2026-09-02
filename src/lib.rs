@@ -19,6 +19,10 @@ pub mod deploy;
 pub mod sink;
 
 pub use error::{Diagnostic, Error, Severity};
+pub use extractor::{
+    ExtractOptions, ExtractionIdGenerators, ExtractionResult, InMemorySource, VersionedExtraction,
+    extract_text_with_id_gen, extract_with_id_gen,
+};
 pub use input::detect_language;
 pub use language::{LangId, LanguageSpec};
 pub use model::{
@@ -36,7 +40,12 @@ pub use graph::{
     scc::{DeployabilityHint, Scc, SccAnalysis},
 };
 
-// Pipeline re-exports
+// Shard and index re-exports
+pub use output::shard::{
+    LoadedShard, SHARD_SCHEMA_VERSION, ShardEdge, ShardEdgeKind, ShardError, ShardFile,
+    ShardFlowKind, ShardHeader, ShardManifestRecord, ShardSymbol, read_header, read_manifest,
+    read_shard, restore_shard_edges, write_header, write_manifest, write_shard,
+};
 pub use pipeline::{GraphAnalysis, SnapshotMeta, snapshot_meta};
 
 // Watch-mode re-exports

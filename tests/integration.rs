@@ -13,6 +13,7 @@ mod integration {
     mod inspect_output_test;
     mod output_format_test;
     mod pipeline_test;
+    mod shard_test;
     #[cfg(feature = "watch")]
     mod watch_test;
 }
