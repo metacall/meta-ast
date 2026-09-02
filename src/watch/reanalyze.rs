@@ -150,14 +150,19 @@ pub fn incremental_reanalyze(
         merged.push(arc_ext);
     }
 
+    merged.sort_by(|a, b| a.path.cmp(&b.path));
+
     let snapshot_id = state.next_snapshot_id();
     let mut diagnostics: Vec<Diagnostic> = merged
         .iter()
         .flat_map(|f| f.diagnostics.iter().cloned())
         .collect();
+    let mut read_diagnostics = read_diagnostics;
+    read_diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
     diagnostics.extend(read_diagnostics);
 
     let (graph, scc) = GraphBuilder::from_extractions(&merged, root, snapshot_id, &mut diagnostics);
+    diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
 
     let elapsed = started.elapsed();
     tracing::info!(
@@ -233,6 +238,24 @@ mod tests {
         assert_eq!(cs2.files_added, 0);
         assert_eq!(cs2.files_removed, 0);
         assert_eq!(analysis2.graph.symbol_count(), 2);
+    }
+
+    #[test]
+    fn merged_extractions_stay_path_sorted() {
+        let root = temp_dir("sorted");
+        write_file(&root, "b.py", "def bar(): pass\n");
+        write_file(&root, "a.py", "def foo(): pass\n");
+
+        let mut state = WatchState::new();
+        let (analysis, _, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
+        let paths: Vec<_> = analysis
+            .extractions
+            .iter()
+            .map(|f| f.path.clone())
+            .collect();
+        let mut sorted = paths.clone();
+        sorted.sort();
+        assert_eq!(paths, sorted);
     }
 
     #[test]

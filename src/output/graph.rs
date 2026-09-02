@@ -286,7 +286,8 @@ impl GraphOutput {
 
     fn serialize_edges(graph: &CodeGraph) -> Vec<SerializedEdge> {
         let g = graph.graph();
-        g.edge_indices()
+        let mut edges: Vec<SerializedEdge> = g
+            .edge_indices()
             .filter_map(|edge_idx| {
                 let (source, target) = g.edge_endpoints(edge_idx)?;
                 let edge_data = g.edge_weight(edge_idx)?;
@@ -310,7 +311,9 @@ impl GraphOutput {
                     flow_kind,
                 })
             })
-            .collect()
+            .collect();
+        edges.sort_by(|a, b| (a.source, a.target, &a.kind).cmp(&(b.source, b.target, &b.kind)));
+        edges
     }
 
     fn serialize_sccs(scc_analysis: &SccAnalysis) -> Vec<SerializedScc> {
@@ -666,5 +669,28 @@ mod tests {
                 edge.kind
             );
         }
+    }
+
+    #[test]
+    fn serialized_edges_stay_sorted() {
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        builder.add_file(PathBuf::from("b.py"), LangId::Python);
+        builder.add_file(PathBuf::from("a.py"), LangId::Python);
+        let graph = builder.build();
+        let scc = sample_scc_analysis();
+
+        let output = GraphOutput::from_graph(&graph, Some(&scc), 1);
+        let mut sorted = output.edges.clone();
+        sorted.sort_by(|a, b| (a.source, a.target, &a.kind).cmp(&(b.source, b.target, &b.kind)));
+        let order: Vec<_> = output
+            .edges
+            .iter()
+            .map(|e| (e.source, e.target, e.kind.clone()))
+            .collect();
+        let expected: Vec<_> = sorted
+            .iter()
+            .map(|e| (e.source, e.target, e.kind.clone()))
+            .collect();
+        assert_eq!(order, expected);
     }
 }

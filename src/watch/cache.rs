@@ -28,6 +28,14 @@ pub(crate) struct IncrementalCache {
     pub(crate) fingerprints: HashMap<PathBuf, Fingerprint>,
 }
 
+/// Maximum raw ID in an iterator, or 0 when empty.
+///
+/// Shared by symbol and data-node scans so both stay in sync.
+/// IDs grow monotonically and are never reused after deletion.
+fn max_raw(ids: impl Iterator<Item = u32>) -> u32 {
+    ids.max().unwrap_or(0)
+}
+
 impl IncrementalCache {
     pub(crate) fn new() -> Self {
         Self {
@@ -38,21 +46,21 @@ impl IncrementalCache {
 
     /// Find the highest raw symbol ID allocated across all cached files.
     pub(crate) fn max_symbol_id(&self) -> u32 {
-        self.extractions
-            .values()
-            .flat_map(|ext| ext.symbols.iter().map(|s| s.id.to_raw()))
-            .max()
-            .unwrap_or(0)
+        max_raw(
+            self.extractions
+                .values()
+                .flat_map(|ext| ext.symbols.iter().map(|s| s.id.to_raw())),
+        )
     }
 
     /// Find the highest raw data node ID allocated across all cached files.
     #[cfg(feature = "dataflow")]
     pub(crate) fn max_data_node_id(&self) -> u32 {
-        self.extractions
-            .values()
-            .flat_map(|ext| ext.data_nodes.iter().map(|d| d.id.to_raw()))
-            .max()
-            .unwrap_or(0)
+        max_raw(
+            self.extractions
+                .values()
+                .flat_map(|ext| ext.data_nodes.iter().map(|d| d.id.to_raw())),
+        )
     }
 
     /// Update or insert a file's fingerprint and shared extraction.

@@ -44,6 +44,7 @@ pub fn analyze_graph(
 
     let (graph, scc) =
         GraphBuilder::from_extractions(&arc_extractions, root, snapshot_id, &mut diagnostics);
+    diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
 
     Ok((
         GraphAnalysis {
