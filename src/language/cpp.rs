@@ -1,19 +1,10 @@
-use crate::language::{DefaultVisibility, DocCommentConfig, LanguageSpec};
+use crate::language::c::{C_FAMILY_IMPORT_QUERY_STR, C_FAMILY_REFERENCE_QUERY_STR};
+use crate::language::{DefaultVisibility, LanguageSpec};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 fn resolve_cpp_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
-    let raw = raw.trim_matches(|c| c == '<' || c == '>' || c == '"' || c == '\'');
-    if raw.is_empty() {
-        return None;
-    }
-
-    let path = source_dir.join(raw);
-    if path.extension().is_none() {
-        Some(path.with_extension("h"))
-    } else {
-        Some(path)
-    }
+    crate::language::import_resolver::resolve_c_family_import(raw, source_dir)
 }
 
 static CPP_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
@@ -50,28 +41,13 @@ fn cpp_query() -> &'static tree_sitter::Query {
     &CPP_QUERY
 }
 
-const CPP_IMPORT_QUERY_STR: &str = r#"
-(preproc_include
-  path: (string_literal) @import.path)
-(preproc_include
-  path: (system_lib_string) @import.path)
-"#;
-
-const CPP_REFERENCE_QUERY_STR: &str = r#"
-(call_expression
-  function: (identifier) @reference.name)
-(call_expression
-  function: (field_expression
-    field: (field_identifier) @reference.name))
-(call_expression
-  function: (field_expression
-    argument: (identifier) @reference.name))
-"#;
-
 static CPP_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
         &tree_sitter_cpp::LANGUAGE.into(),
-        &format!("{}\n{}", CPP_IMPORT_QUERY_STR, CPP_REFERENCE_QUERY_STR),
+        &format!(
+            "{}\n{}",
+            C_FAMILY_IMPORT_QUERY_STR, C_FAMILY_REFERENCE_QUERY_STR
+        ),
         "C++ combined import+ref",
     )
 });
@@ -91,12 +67,7 @@ pub(crate) const CPP_SPEC: LanguageSpec = LanguageSpec {
     visibility_from_name: None,
     import_statement_kinds: &["preproc_include"],
     default_visibility: DefaultVisibility::PrivateByDefault,
-    doc_comment_config: Some(DocCommentConfig {
-        line_prefixes: &["//"],
-        block_open: Some("/**"),
-        block_close: "*/",
-        strip_continuation_marker: true,
-    }),
+    doc_comment_config: Some(crate::language::C_LIKE_DOC_COMMENT),
 };
 
 #[cfg(test)]

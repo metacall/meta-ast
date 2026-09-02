@@ -1,42 +1,16 @@
 use crate::language::typescript::{
     TS_FAMILY_IMPORT_QUERY, TS_FAMILY_QUERY, TS_FAMILY_REFERENCE_QUERY,
 };
-use crate::language::{DefaultVisibility, DocCommentConfig, LanguageSpec};
+use crate::language::{DefaultVisibility, LanguageSpec};
 use crate::model::Visibility;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 fn resolve_tsx_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
-    let raw = raw.trim_matches(|c| c == '"' || c == '\'');
-    if raw.is_empty() {
-        return None;
-    }
-
-    if !raw.starts_with('.') && !raw.starts_with('/') {
-        return None;
-    }
-
-    let base = if raw.starts_with('/') {
-        PathBuf::from("/")
-    } else {
-        source_dir.to_path_buf()
-    };
-
-    let path = base.join(raw);
-
-    let extensions = ["", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"];
-    for ext in &extensions {
-        let candidate = if ext.is_empty() {
-            path.clone()
-        } else {
-            path.with_extension(ext.trim_start_matches('.'))
-        };
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-
-    Some(path)
+    use crate::language::import_resolver::{TS_EXTS, resolve_js_family_import};
+    // Bare specifiers (react, @angular/core) resolve to external nodes,
+    // matching the JS/TS behavior.
+    resolve_js_family_import(raw, source_dir, TS_EXTS, &|p| p.is_file())
 }
 
 static TSX_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
@@ -74,12 +48,7 @@ pub(crate) const TSX_SPEC: LanguageSpec = LanguageSpec {
     visibility_from_name: None,
     import_statement_kinds: &["import_statement"],
     default_visibility: DefaultVisibility::PrivateByDefault,
-    doc_comment_config: Some(DocCommentConfig {
-        line_prefixes: &["//"],
-        block_open: Some("/**"),
-        block_close: "*/",
-        strip_continuation_marker: true,
-    }),
+    doc_comment_config: Some(crate::language::C_LIKE_DOC_COMMENT),
 };
 
 // ── Dataflow extraction ─────────────────────────────────────────────
@@ -95,14 +64,7 @@ static TSX_DATAFLOW_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
 
 /// TSX AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]
-pub(crate) const TSX_FUNCTION_KINDS: &[&str] = &[
-    "function_declaration",
-    "generator_function_declaration",
-    "function_expression",
-    "generator_function",
-    "arrow_function",
-    "method_definition",
-];
+pub(crate) const TSX_FUNCTION_KINDS: &[&str] = crate::language::common::JS_FAMILY_FUNCTION_KINDS;
 
 /// Extract data nodes and flow edges from a TSX parse tree.
 #[cfg(feature = "dataflow")]
@@ -171,6 +133,18 @@ mod tests {
         let tree = parse(src.as_bytes());
         let symbols = extract_symbols_for(LangId::Tsx, &tree, src.as_bytes());
         insta::assert_json_snapshot!(symbols);
+    }
+
+    #[test]
+    fn tsx_bare_import_resolves_to_external() {
+        use crate::language::LangId;
+        let spec = crate::language::spec_for(LangId::Tsx);
+        let out = (spec.import_path_resolver)(
+            "react",
+            std::path::Path::new("/proj/src"),
+            std::path::Path::new("/proj"),
+        );
+        assert_eq!(out, Some(std::path::PathBuf::from("react")));
     }
 
     #[cfg(feature = "dataflow")]

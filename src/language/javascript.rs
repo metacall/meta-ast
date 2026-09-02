@@ -1,42 +1,11 @@
-use crate::language::{DefaultVisibility, DocCommentConfig, LanguageSpec};
+use crate::language::{DefaultVisibility, LanguageSpec};
 use crate::model::Visibility;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 fn resolve_js_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
-    let raw = raw.trim_matches(|c| c == '"' || c == '\'');
-    if raw.is_empty() {
-        return None;
-    }
-
-    if !raw.starts_with('.') && !raw.starts_with('/') {
-        // Bare module name (e.g. 'jsonwebtoken', 'react'): return as-is
-        // so the graph builder creates an ExternalNode for it.
-        // Node.js resolution (node_modules) is not walked here.
-        return Some(PathBuf::from(raw));
-    }
-
-    let base = if raw.starts_with('/') {
-        PathBuf::from("/")
-    } else {
-        source_dir.to_path_buf()
-    };
-
-    let path = base.join(raw);
-
-    let extensions = ["", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"];
-    for ext in &extensions {
-        let candidate = if ext.is_empty() {
-            path.clone()
-        } else {
-            path.with_extension(ext.trim_start_matches('.'))
-        };
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-
-    Some(path)
+    use crate::language::import_resolver::{JS_EXTS, resolve_js_family_import};
+    resolve_js_family_import(raw, source_dir, JS_EXTS, &|p| p.is_file())
 }
 
 static JS_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
@@ -111,16 +80,7 @@ const JS_IMPORT_QUERY_STR: &str = r#"
   (#eq? @call.name "require"))
 "#;
 
-const JS_REFERENCE_QUERY_STR: &str = r#"
-(call_expression
-  function: (identifier) @reference.name)
-(call_expression
-  function: (member_expression
-    property: (property_identifier) @reference.name))
-(call_expression
-  function: (member_expression
-    object: (identifier) @reference.name))
-"#;
+const JS_REFERENCE_QUERY_STR: &str = crate::language::typescript::TS_FAMILY_REFERENCE_QUERY;
 
 static JS_IMPORT_REF_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
@@ -145,12 +105,7 @@ pub(crate) const JS_SPEC: LanguageSpec = LanguageSpec {
     visibility_from_name: None,
     import_statement_kinds: &["import_statement"],
     default_visibility: DefaultVisibility::PrivateByDefault,
-    doc_comment_config: Some(DocCommentConfig {
-        line_prefixes: &["//"],
-        block_open: Some("/**"),
-        block_close: "*/",
-        strip_continuation_marker: true,
-    }),
+    doc_comment_config: Some(crate::language::C_LIKE_DOC_COMMENT),
 };
 
 // ── Dataflow extraction ─────────────────────────────────────────────
@@ -235,11 +190,8 @@ pub(crate) const TS_FAMILY_DATAFLOW_QUERY: &str = r#"
 
 /// Extract data nodes and flow edges from a JavaScript-family parse tree.
 ///
-/// `function_kinds` lists the AST node kinds that introduce a new scope
-/// (e.g. `function_declaration`, `arrow_function`, `function_expression`).
-/// Including computed functions in this list ensures intra-procedural
-/// scoping is enforced: variables in nested functions do not link back to
-/// outer-scope definitions of the same name.
+/// `function_kinds` lists the AST node kinds that introduce a new scope.
+/// Delegates to the shared def-use engine in `common`.
 #[cfg(feature = "dataflow")]
 pub(crate) fn extract_js_family_dataflow_with_query(
     tree: &tree_sitter::Tree,
@@ -248,169 +200,7 @@ pub(crate) fn extract_js_family_dataflow_with_query(
     function_kinds: &[&str],
     id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
 ) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
-    use crate::model::{DataNode, DataNodeId, DataScope, FlowEdge, FlowKind};
-    use tree_sitter::StreamingIterator;
-
-    let mut cursor = tree_sitter::QueryCursor::new();
-
-    // (name, byte_pos, node, is_param)
-    let mut defs: Vec<(String, usize, tree_sitter::Node, bool)> = Vec::new();
-    // (name, byte_pos, node, enclosing_function_start)
-    let mut uses: Vec<(String, usize, tree_sitter::Node, usize)> = Vec::new();
-
-    let mut matches = cursor.matches(query, tree.root_node(), source);
-    while let Some(m) = matches.next() {
-        for capture in m.captures {
-            let capture_name = query.capture_names()[capture.index as usize];
-            let node = capture.node;
-            let byte_pos = node.start_byte();
-            let name = match node.utf8_text(source) {
-                Ok(t) => t.to_string(),
-                Err(_) => continue,
-            };
-
-            match capture_name {
-                "def.var" => defs.push((name, byte_pos, node, false)),
-                "def.param" => defs.push((name, byte_pos, node, true)),
-                "use.var" => {
-                    let func_start = enclosing_function_start(node, function_kinds);
-                    uses.push((name, byte_pos, node, func_start));
-                }
-                _ => {}
-            }
-        }
-    }
-
-    let mut nodes: Vec<DataNode> = Vec::new();
-    let mut def_ids: Vec<(String, usize, DataNodeId, bool)> = Vec::new();
-
-    for (name, byte_pos, node, is_param) in &defs {
-        let scope = if *is_param {
-            DataScope::Parameter
-        } else {
-            DataScope::Local
-        };
-        let dn = DataNode {
-            id: id_gen.next(),
-            symbol_id: None,
-            name: Some(name.clone()),
-            scope,
-            type_hint: None,
-            source_range: source_range_from_node(node),
-        };
-        def_ids.push((name.clone(), *byte_pos, dn.id, *is_param));
-        nodes.push(dn);
-    }
-
-    let mut edges: Vec<FlowEdge> = Vec::new();
-
-    for (use_name, use_pos, use_node, use_func_start) in &uses {
-        let mut best_def: Option<&(String, usize, DataNodeId, bool)> = None;
-
-        for def in &def_ids {
-            if def.0 == *use_name
-                && def.1 < *use_pos
-                && enclosing_function_start_for_id(def.1, tree, function_kinds) == *use_func_start
-            {
-                match best_def {
-                    None => best_def = Some(def),
-                    Some(best) => {
-                        if def.1 > best.1 {
-                            best_def = Some(def);
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(def) = best_def {
-            // Register the usage as a data node so the flow edge has an
-            // anchor in the graph; the source/target IDs both refer to
-            // real, queryable nodes.
-            let use_dn = DataNode {
-                id: id_gen.next(),
-                symbol_id: None,
-                name: Some(use_name.clone()),
-                scope: DataScope::Local,
-                type_hint: None,
-                source_range: source_range_from_node(use_node),
-            };
-            let target_id = use_dn.id;
-            nodes.push(use_dn);
-
-            edges.push(FlowEdge {
-                source: def.2,
-                target: target_id,
-                kind: FlowKind::DefUse,
-                confidence: 0.9,
-            });
-        }
-    }
-
-    (nodes, edges)
-}
-
-#[cfg(feature = "dataflow")]
-fn source_range_from_node(node: &tree_sitter::Node) -> crate::model::SourceRange {
-    use crate::model::{LineColumn, SourceRange};
-    SourceRange {
-        byte_start: node.start_byte(),
-        byte_end: node.end_byte(),
-        start: LineColumn {
-            line: node.start_position().row,
-            column: node.start_position().column,
-        },
-        end: LineColumn {
-            line: node.end_position().row,
-            column: node.end_position().column,
-        },
-    }
-}
-
-#[cfg(feature = "dataflow")]
-fn enclosing_function_start(node: tree_sitter::Node, function_kinds: &[&str]) -> usize {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if function_kinds.contains(&parent.kind()) {
-            return parent.start_byte();
-        }
-        current = parent.parent();
-    }
-    0
-}
-
-#[cfg(feature = "dataflow")]
-fn enclosing_function_start_for_id(
-    byte_pos: usize,
-    tree: &tree_sitter::Tree,
-    function_kinds: &[&str],
-) -> usize {
-    find_enclosing_function(tree.root_node(), byte_pos, function_kinds)
-}
-
-#[cfg(feature = "dataflow")]
-fn find_enclosing_function(
-    node: tree_sitter::Node,
-    byte_pos: usize,
-    function_kinds: &[&str],
-) -> usize {
-    if node.start_byte() <= byte_pos && byte_pos < node.end_byte() {
-        // Recurse into children first so the innermost (deepest) function
-        // scope is found. Checking this node before its children would
-        // return an outer scope when an inner one is what we want.
-        for i in 0..node.named_child_count() {
-            if let Some(child) = node.named_child(i as u32) {
-                let result = find_enclosing_function(child, byte_pos, function_kinds);
-                if result != 0 {
-                    return result;
-                }
-            }
-        }
-        if function_kinds.contains(&node.kind()) {
-            return node.start_byte();
-        }
-    }
-    0
+    crate::language::common::extract_def_use_dataflow(tree, source, query, function_kinds, id_gen)
 }
 
 #[cfg(feature = "dataflow")]
@@ -424,14 +214,7 @@ static JS_DATAFLOW_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
 
 /// JavaScript AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]
-pub(crate) const JS_FUNCTION_KINDS: &[&str] = &[
-    "function_declaration",
-    "generator_function_declaration",
-    "function_expression",
-    "generator_function",
-    "arrow_function",
-    "method_definition",
-];
+pub(crate) const JS_FUNCTION_KINDS: &[&str] = crate::language::common::JS_FAMILY_FUNCTION_KINDS;
 
 /// Extract data nodes and flow edges from a JavaScript parse tree.
 #[cfg(feature = "dataflow")]

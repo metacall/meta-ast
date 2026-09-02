@@ -20,6 +20,77 @@ pub trait ImportResolver: Send + Sync {
     fn clear_cache(&self) {}
 }
 
+/// Strip quote chars that wrap an import specifier.
+pub(crate) fn strip_import_quotes(raw: &str) -> &str {
+    raw.trim_matches(|c| c == '"' || c == '\'')
+}
+
+/// Strip quote chars plus C/C++ bracket delimiters.
+pub(crate) fn strip_c_family_quotes(raw: &str) -> &str {
+    raw.trim_matches(|c| c == '<' || c == '>' || c == '"' || c == '\'')
+}
+
+/// Probe `base.join(raw)` with each extension in order.
+pub(crate) fn probe_relative(
+    raw: &str,
+    source_dir: &Path,
+    extensions: &[&str],
+    is_file: &dyn Fn(&Path) -> bool,
+    fallback: bool,
+) -> Option<PathBuf> {
+    let base = if raw.starts_with('/') {
+        PathBuf::from("/")
+    } else {
+        source_dir.to_path_buf()
+    };
+    let path = base.join(raw);
+    for ext in extensions {
+        let candidate = if ext.is_empty() {
+            path.clone()
+        } else {
+            path.with_extension(ext.trim_start_matches('.'))
+        };
+        if is_file(&candidate) {
+            return Some(candidate);
+        }
+    }
+    fallback.then(|| path.clone())
+}
+
+/// Shared stateless core for JS-family imports.
+///
+/// Bare specifiers return as external paths. Relative paths probe
+/// `base.join(raw)` with each extension in order.
+pub(crate) fn resolve_js_family_import(
+    raw: &str,
+    source_dir: &Path,
+    extensions: &[&str],
+    is_file: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let raw = strip_import_quotes(raw);
+    if raw.is_empty() {
+        return None;
+    }
+    if !raw.starts_with('.') && !raw.starts_with('/') {
+        return Some(PathBuf::from(raw));
+    }
+    probe_relative(raw, source_dir, extensions, is_file, true)
+}
+
+/// Shared stateless core for C-family imports.
+pub(crate) fn resolve_c_family_import(raw: &str, source_dir: &Path) -> Option<PathBuf> {
+    let raw = strip_c_family_quotes(raw);
+    if raw.is_empty() {
+        return None;
+    }
+    let path = source_dir.join(raw);
+    if path.extension().is_none() {
+        Some(path.with_extension("h"))
+    } else {
+        Some(path)
+    }
+}
+
 /// Zero-cost adapter wrapping a stateless function pointer.
 ///
 /// Bridges the existing `LanguageSpec.import_path_resolver` fn pointers
@@ -204,16 +275,29 @@ impl ImportResolver for GoModResolver {
     }
 }
 
-/// Stateful resolver for JavaScript import paths.
-pub struct JsResolver {
+/// Stateful resolver for JavaScript-family import paths.
+///
+/// Parameterized by extension list so JS and TS/TSX share one core.
+/// JS probes Node-style extensions, TS probes TS-family extensions.
+pub struct NodeResolver {
     f: fn(&str, &Path, &Path) -> Option<PathBuf>,
+    extensions: &'static [&'static str],
     is_file_cache: RwLock<HashMap<PathBuf, bool>>,
 }
 
-impl JsResolver {
-    pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
+/// Node-style extensions probed by the JS resolver.
+pub(crate) const JS_EXTS: &[&str] = &["", ".js", ".json", ".node", ".mjs", ".cjs"];
+/// TS-family extensions probed by the TS/TSX resolver.
+pub(crate) const TS_EXTS: &[&str] = &["", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"];
+
+impl NodeResolver {
+    pub fn new(
+        f: fn(&str, &Path, &Path) -> Option<PathBuf>,
+        extensions: &'static [&'static str],
+    ) -> Self {
         Self {
             f,
+            extensions,
             is_file_cache: RwLock::new(HashMap::new()),
         }
     }
@@ -227,9 +311,9 @@ impl JsResolver {
     }
 }
 
-impl ImportResolver for JsResolver {
+impl ImportResolver for NodeResolver {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
-        let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+        let raw = strip_import_quotes(raw);
         if raw.is_empty() {
             return None;
         }
@@ -254,16 +338,13 @@ impl ImportResolver for JsResolver {
             return (self.f)(raw, source_dir, project_root);
         }
 
-        let base = if raw.starts_with('/') {
-            PathBuf::from("/")
+        let path = if raw.starts_with('/') {
+            PathBuf::from("/").join(raw)
         } else {
-            source_dir.to_path_buf()
+            source_dir.join(raw)
         };
 
-        let path = base.join(raw);
-
-        let extensions = ["", ".js", ".json", ".node", ".mjs", ".cjs"];
-        for ext in &extensions {
+        for ext in self.extensions {
             let candidate = if ext.is_empty() {
                 path.clone()
             } else {
@@ -278,85 +359,7 @@ impl ImportResolver for JsResolver {
     }
 
     fn clear_cache(&self) {
-        JsResolver::clear_cache(self);
-    }
-}
-
-/// Stateful resolver for TypeScript import paths using `tsconfig.json`.
-pub struct TsConfigResolver {
-    f: fn(&str, &Path, &Path) -> Option<PathBuf>,
-    is_file_cache: RwLock<HashMap<PathBuf, bool>>,
-}
-
-impl TsConfigResolver {
-    pub fn new(f: fn(&str, &Path, &Path) -> Option<PathBuf>) -> Self {
-        Self {
-            f,
-            is_file_cache: RwLock::new(HashMap::new()),
-        }
-    }
-
-    pub fn clear_cache(&self) {
-        let mut cache = self
-            .is_file_cache
-            .write()
-            .unwrap_or_else(|poison| poison.into_inner());
-        cache.clear();
-    }
-}
-
-impl ImportResolver for TsConfigResolver {
-    fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
-        let raw = raw.trim_matches(|c| c == '"' || c == '\'');
-        if raw.is_empty() {
-            return None;
-        }
-
-        let check_is_file = |path: &Path| -> bool {
-            let cache_val = self
-                .is_file_cache
-                .read()
-                .ok()
-                .and_then(|cache| cache.get(path).copied());
-            if let Some(res) = cache_val {
-                return res;
-            }
-            let res = path.is_file();
-            if let Ok(mut cache) = self.is_file_cache.write() {
-                cache.insert(path.to_path_buf(), res);
-            }
-            res
-        };
-
-        if !raw.starts_with('.') && !raw.starts_with('/') {
-            return (self.f)(raw, source_dir, project_root);
-        }
-
-        let base = if raw.starts_with('/') {
-            PathBuf::from("/")
-        } else {
-            source_dir.to_path_buf()
-        };
-
-        let path = base.join(raw);
-
-        let extensions = ["", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"];
-        for ext in &extensions {
-            let candidate = if ext.is_empty() {
-                path.clone()
-            } else {
-                path.with_extension(ext.trim_start_matches('.'))
-            };
-            if check_is_file(&candidate) {
-                return Some(candidate);
-            }
-        }
-
-        (self.f)(raw, source_dir, project_root)
-    }
-
-    fn clear_cache(&self) {
-        TsConfigResolver::clear_cache(self);
+        NodeResolver::clear_cache(self);
     }
 }
 
@@ -370,9 +373,9 @@ pub fn make_resolver(lang: crate::language::LangId) -> Box<dyn ImportResolver> {
     match lang {
         crate::language::LangId::Python => Box::new(PythonResolver::new(f)),
         crate::language::LangId::Go => Box::new(GoModResolver::new(f)),
-        crate::language::LangId::JavaScript => Box::new(JsResolver::new(f)),
+        crate::language::LangId::JavaScript => Box::new(NodeResolver::new(f, JS_EXTS)),
         crate::language::LangId::TypeScript | crate::language::LangId::Tsx => {
-            Box::new(TsConfigResolver::new(f))
+            Box::new(NodeResolver::new(f, TS_EXTS))
         }
         _ => Box::new(StatelessResolver::new(f)),
     }
@@ -441,9 +444,44 @@ mod tests {
         fn dummy_ts_resolver(raw: &str, _source: &Path, root: &Path) -> Option<PathBuf> {
             Some(root.join(format!("{raw}.ts")))
         }
-        let resolver = TsConfigResolver::new(dummy_ts_resolver);
+        let resolver = NodeResolver::new(dummy_ts_resolver, TS_EXTS);
         let result = resolver.resolve("test", Path::new("/src"), Path::new("/proj"));
         assert_eq!(result, Some(PathBuf::from("/proj/test.ts")));
+    }
+
+    #[test]
+    fn node_resolver_uses_configured_extensions() {
+        fn fallback(raw: &str, _source: &Path, _root: &Path) -> Option<PathBuf> {
+            Some(PathBuf::from(raw))
+        }
+        let temp = std::env::temp_dir().join("node_resolver_uses_configured_extensions");
+        if temp.exists() {
+            let _ = std::fs::remove_dir_all(&temp);
+        }
+        std::fs::create_dir_all(&temp).unwrap();
+        let target = temp.join("mod.json");
+        std::fs::write(&target, "{}").unwrap();
+
+        let js = NodeResolver::new(fallback, JS_EXTS);
+        assert_eq!(js.resolve("./mod", &temp, &temp), Some(target.clone()));
+
+        let ts = NodeResolver::new(fallback, TS_EXTS);
+        assert_eq!(
+            ts.resolve("./mod", &temp, &temp),
+            Some(PathBuf::from("./mod"))
+        );
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn shared_quote_strip_helpers() {
+        assert_eq!(strip_import_quotes("\"react\""), "react");
+        assert_eq!(strip_c_family_quotes("<stdio.h>"), "stdio.h");
+        assert_eq!(
+            resolve_c_family_import("<stdio.h>", Path::new("/src")),
+            Some(PathBuf::from("/src/stdio.h"))
+        );
     }
 
     #[test]

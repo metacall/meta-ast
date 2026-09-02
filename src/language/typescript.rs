@@ -1,40 +1,11 @@
-use crate::language::{DefaultVisibility, DocCommentConfig, LanguageSpec};
+use crate::language::{DefaultVisibility, LanguageSpec};
 use crate::model::Visibility;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 fn resolve_ts_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
-    let raw = raw.trim_matches(|c| c == '"' || c == '\'');
-    if raw.is_empty() {
-        return None;
-    }
-
-    if !raw.starts_with('.') && !raw.starts_with('/') {
-        // Bare module name -- returns as-is so graph builder creates ExternalNode.
-        return Some(PathBuf::from(raw));
-    }
-
-    let base = if raw.starts_with('/') {
-        PathBuf::from("/")
-    } else {
-        source_dir.to_path_buf()
-    };
-
-    let path = base.join(raw);
-
-    let extensions = ["", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"];
-    for ext in &extensions {
-        let candidate = if ext.is_empty() {
-            path.clone()
-        } else {
-            path.with_extension(ext.trim_start_matches('.'))
-        };
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-
-    Some(path)
+    use crate::language::import_resolver::{TS_EXTS, resolve_js_family_import};
+    resolve_js_family_import(raw, source_dir, TS_EXTS, &|p| p.is_file())
 }
 
 pub(crate) const TS_FAMILY_QUERY: &str = r#"
@@ -170,12 +141,7 @@ pub(crate) const TS_SPEC: LanguageSpec = LanguageSpec {
     visibility_from_name: None,
     import_statement_kinds: &["import_statement"],
     default_visibility: DefaultVisibility::PrivateByDefault,
-    doc_comment_config: Some(DocCommentConfig {
-        line_prefixes: &["//"],
-        block_open: Some("/**"),
-        block_close: "*/",
-        strip_continuation_marker: true,
-    }),
+    doc_comment_config: Some(crate::language::C_LIKE_DOC_COMMENT),
 };
 
 // ── Dataflow extraction ─────────────────────────────────────────────
@@ -191,14 +157,7 @@ static TS_DATAFLOW_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
 
 /// TypeScript AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]
-pub(crate) const TS_FUNCTION_KINDS: &[&str] = &[
-    "function_declaration",
-    "generator_function_declaration",
-    "function_expression",
-    "generator_function",
-    "arrow_function",
-    "method_definition",
-];
+pub(crate) const TS_FUNCTION_KINDS: &[&str] = crate::language::common::JS_FAMILY_FUNCTION_KINDS;
 
 /// Extract data nodes and flow edges from a TypeScript parse tree.
 #[cfg(feature = "dataflow")]

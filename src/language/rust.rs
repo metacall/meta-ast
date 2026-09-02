@@ -197,6 +197,10 @@ static RUST_DATAFLOW_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
 /// Extract data nodes (definitions) and flow edges (def-use) from a Rust parse tree.
 ///
 /// Phase 3 MVP: intra-procedural def-use analysis.
+/// Rust AST node kinds that introduce a new intra-procedural scope.
+#[cfg(feature = "dataflow")]
+pub(crate) const RUST_FUNCTION_KINDS: &[&str] = &["function_item"];
+
 /// - Captures `let` binding targets as `DataScope::Local`
 /// - Captures function parameters as `DataScope::Parameter`
 /// - Creates `DefUse` flow edges from each definition to each subsequent
@@ -207,168 +211,13 @@ pub fn extract_rust_dataflow(
     source: &[u8],
     id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
 ) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
-    use crate::model::{DataNode, DataNodeId, DataScope, FlowEdge, FlowKind};
-    use tree_sitter::StreamingIterator;
-
-    let query = &*RUST_DATAFLOW_QUERY;
-    let mut cursor = tree_sitter::QueryCursor::new();
-
-    // Collect definitions and usages with their byte positions and function scope
-    // Each entry: (name, byte_pos, node, is_param)
-    let mut defs: Vec<(String, usize, tree_sitter::Node, bool)> = Vec::new();
-    let mut uses: Vec<(String, usize, tree_sitter::Node, usize)> = Vec::new();
-
-    let mut matches = cursor.matches(query, tree.root_node(), source);
-    while let Some(m) = matches.next() {
-        for capture in m.captures {
-            let capture_name = query.capture_names()[capture.index as usize];
-            let node = capture.node;
-            let byte_pos = node.start_byte();
-            let name = match node.utf8_text(source) {
-                Ok(t) => t.to_string(),
-                Err(_) => continue,
-            };
-
-            match capture_name {
-                "def.var" => {
-                    defs.push((name, byte_pos, node, false));
-                }
-                "def.param" => {
-                    defs.push((name, byte_pos, node, true));
-                }
-                "use.var" => {
-                    let func_start = enclosing_function_start(node);
-                    uses.push((name, byte_pos, node, func_start));
-                }
-                _ => {}
-            }
-        }
-    }
-
-    // Build DataNodes from definitions
-    let mut nodes = Vec::new();
-    let mut def_ids: Vec<(String, usize, DataNodeId, bool)> = Vec::new();
-
-    for (name, byte_pos, node, is_param) in &defs {
-        let scope = if *is_param {
-            DataScope::Parameter
-        } else {
-            DataScope::Local
-        };
-        let dn = DataNode {
-            id: id_gen.next(),
-            symbol_id: None,
-            name: Some(name.clone()),
-            scope,
-            type_hint: None,
-            source_range: source_range_from_node(node),
-        };
-        def_ids.push((name.clone(), *byte_pos, dn.id, *is_param));
-        nodes.push(dn);
-    }
-
-    // Build FlowEdges: for each usage, find the nearest preceding definition
-    // of the same name within the same function scope. Register a usage DataNode
-    // so both source and target exist in the graph.
-    let mut edges = Vec::new();
-
-    for (use_name, use_pos, use_node, use_func_start) in &uses {
-        let mut best_def: Option<&(String, usize, DataNodeId, bool)> = None;
-
-        for def in &def_ids {
-            if def.0 == *use_name && def.1 < *use_pos {
-                let def_func_start = enclosing_function_start_for_id(def.1, tree);
-                if def_func_start == *use_func_start {
-                    match best_def {
-                        None => best_def = Some(def),
-                        Some(best) => {
-                            if def.1 > best.1 {
-                                best_def = Some(def);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(def) = best_def {
-            let use_dn = DataNode {
-                id: id_gen.next(),
-                symbol_id: None,
-                name: Some(use_name.clone()),
-                scope: DataScope::Local,
-                type_hint: None,
-                source_range: source_range_from_node(use_node),
-            };
-            let target_id = use_dn.id;
-            nodes.push(use_dn);
-
-            edges.push(FlowEdge {
-                source: def.2,
-                target: target_id,
-                kind: FlowKind::DefUse,
-                confidence: 0.9,
-            });
-        }
-    }
-
-    (nodes, edges)
-}
-
-/// Find the start byte of the enclosing function_item for a node.
-#[cfg(feature = "dataflow")]
-fn enclosing_function_start(node: tree_sitter::Node) -> usize {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if parent.kind() == "function_item" {
-            return parent.start_byte();
-        }
-        current = parent.parent();
-    }
-    // Top-level code (not in any function)
-    0
-}
-
-/// Find the enclosing function start for a given byte position.
-#[cfg(feature = "dataflow")]
-fn enclosing_function_start_for_id(byte_pos: usize, tree: &tree_sitter::Tree) -> usize {
-    let node = tree.root_node();
-    find_enclosing_function(node, byte_pos)
-}
-
-#[cfg(feature = "dataflow")]
-fn find_enclosing_function(node: tree_sitter::Node, byte_pos: usize) -> usize {
-    if node.start_byte() <= byte_pos && byte_pos < node.end_byte() {
-        if node.kind() == "function_item" {
-            return node.start_byte();
-        }
-        for i in 0..node.named_child_count() {
-            if let Some(child) = node.named_child(i as u32) {
-                let result = find_enclosing_function(child, byte_pos);
-                if result != 0 {
-                    return result;
-                }
-            }
-        }
-    }
-    0
-}
-
-#[cfg(feature = "dataflow")]
-fn source_range_from_node(node: &tree_sitter::Node) -> crate::model::SourceRange {
-    use crate::model::{LineColumn, SourceRange};
-    SourceRange {
-        byte_start: node.start_byte(),
-        byte_end: node.end_byte(),
-        start: LineColumn {
-            line: node.start_position().row,
-            column: node.start_position().column,
-        },
-        end: LineColumn {
-            line: node.end_position().row,
-            column: node.end_position().column,
-        },
-    }
+    crate::language::common::extract_def_use_dataflow(
+        tree,
+        source,
+        &RUST_DATAFLOW_QUERY,
+        RUST_FUNCTION_KINDS,
+        id_gen,
+    )
 }
 
 #[cfg(feature = "dataflow")]

@@ -51,6 +51,16 @@ pub enum DefaultVisibility {
     PrivateByDefault,
 }
 
+/// Shared JSDoc/C-style doc comment config.
+///
+/// Used by JS, TS, TSX, C, C++ specs. Only Rust, Go, Ruby, Python differ.
+pub const C_LIKE_DOC_COMMENT: DocCommentConfig = DocCommentConfig {
+    line_prefixes: &["//"],
+    block_open: Some("/**"),
+    block_close: "*/",
+    strip_continuation_marker: true,
+};
+
 #[derive(
     Debug,
     Clone,

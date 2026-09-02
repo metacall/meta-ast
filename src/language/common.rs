@@ -22,7 +22,7 @@ pub(crate) fn compile_query(
 }
 
 #[inline]
-pub(super) fn source_range_from_node(node: &tree_sitter::Node) -> SourceRange {
+pub(crate) fn source_range_from_node(node: &tree_sitter::Node) -> SourceRange {
     SourceRange {
         byte_start: node.start_byte(),
         byte_end: node.end_byte(),
@@ -492,6 +492,164 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     references.sort_by_key(|r| r.range.byte_start);
 
     (imports, references)
+}
+
+/// JS-family AST node kinds that introduce a new intra-procedural scope.
+///
+/// Shared by JavaScript, TypeScript, and TSX dataflow extraction.
+#[cfg(feature = "dataflow")]
+pub(crate) const JS_FAMILY_FUNCTION_KINDS: &[&str] = &[
+    "function_declaration",
+    "generator_function_declaration",
+    "function_expression",
+    "generator_function",
+    "arrow_function",
+    "method_definition",
+];
+
+/// Return the start byte of the enclosing scope node for a syntax node.
+///
+/// Walks parents until a node kind in `function_kinds` matches.
+/// Returns 0 for top-level code outside any scope.
+#[cfg(feature = "dataflow")]
+pub(crate) fn enclosing_scope_start(node: tree_sitter::Node, function_kinds: &[&str]) -> usize {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if function_kinds.contains(&parent.kind()) {
+            return parent.start_byte();
+        }
+        current = parent.parent();
+    }
+    0
+}
+
+/// Return the start byte of the innermost scope node containing `byte_pos`.
+///
+/// Recurses into children first so nested scopes win over outer scopes.
+#[cfg(feature = "dataflow")]
+pub(crate) fn find_enclosing_scope(
+    node: tree_sitter::Node,
+    byte_pos: usize,
+    function_kinds: &[&str],
+) -> usize {
+    if node.start_byte() <= byte_pos && byte_pos < node.end_byte() {
+        for i in 0..node.named_child_count() {
+            if let Some(child) = node.named_child(i as u32) {
+                let result = find_enclosing_scope(child, byte_pos, function_kinds);
+                if result != 0 {
+                    return result;
+                }
+            }
+        }
+        if function_kinds.contains(&node.kind()) {
+            return node.start_byte();
+        }
+    }
+    0
+}
+
+/// Shared def-use extraction engine.
+///
+/// Captures `@def.var`, `@def.param`, and `@use.var` sites with `query`,
+/// assigns data nodes via `id_gen`, and links each use to the nearest
+/// preceding def of the same name in the same scope from `function_kinds`.
+#[cfg(feature = "dataflow")]
+pub(crate) fn extract_def_use_dataflow(
+    tree: &tree_sitter::Tree,
+    source: &[u8],
+    query: &tree_sitter::Query,
+    function_kinds: &[&str],
+    id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
+) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+    use crate::graph::edge::CONFIDENCE_DEF_USE;
+    use crate::model::{DataNode, DataNodeId, DataScope, FlowEdge, FlowKind};
+    use tree_sitter::StreamingIterator;
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut defs: Vec<(String, usize, tree_sitter::Node, bool)> = Vec::new();
+    let mut uses: Vec<(String, usize, tree_sitter::Node, usize)> = Vec::new();
+
+    let mut matches = cursor.matches(query, tree.root_node(), source);
+    while let Some(m) = matches.next() {
+        for capture in m.captures {
+            let capture_name = query.capture_names()[capture.index as usize];
+            let node = capture.node;
+            let byte_pos = node.start_byte();
+            let name = match node.utf8_text(source) {
+                Ok(t) => t.to_string(),
+                Err(_) => continue,
+            };
+            match capture_name {
+                "def.var" => defs.push((name, byte_pos, node, false)),
+                "def.param" => defs.push((name, byte_pos, node, true)),
+                "use.var" => {
+                    let func_start = enclosing_scope_start(node, function_kinds);
+                    uses.push((name, byte_pos, node, func_start));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut nodes: Vec<DataNode> = Vec::new();
+    let mut def_ids: Vec<(String, usize, DataNodeId, bool)> = Vec::new();
+    for (name, byte_pos, node, is_param) in &defs {
+        let scope = if *is_param {
+            DataScope::Parameter
+        } else {
+            DataScope::Local
+        };
+        let dn = DataNode {
+            id: id_gen.next(),
+            symbol_id: None,
+            name: Some(name.clone()),
+            scope,
+            type_hint: None,
+            source_range: source_range_from_node(node),
+        };
+        def_ids.push((name.clone(), *byte_pos, dn.id, *is_param));
+        nodes.push(dn);
+    }
+
+    let mut edges: Vec<FlowEdge> = Vec::new();
+    for (use_name, use_pos, use_node, use_func_start) in &uses {
+        let mut best_def: Option<&(String, usize, DataNodeId, bool)> = None;
+        for def in &def_ids {
+            if def.0 == *use_name
+                && def.1 < *use_pos
+                && find_enclosing_scope(tree.root_node(), def.1, function_kinds) == *use_func_start
+            {
+                match best_def {
+                    None => best_def = Some(def),
+                    Some(best) => {
+                        if def.1 > best.1 {
+                            best_def = Some(def);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(def) = best_def {
+            let use_dn = DataNode {
+                id: id_gen.next(),
+                symbol_id: None,
+                name: Some(use_name.clone()),
+                scope: DataScope::Local,
+                type_hint: None,
+                source_range: source_range_from_node(use_node),
+            };
+            let target_id = use_dn.id;
+            nodes.push(use_dn);
+            edges.push(FlowEdge {
+                source: def.2,
+                target: target_id,
+                kind: FlowKind::DefUse,
+                confidence: CONFIDENCE_DEF_USE,
+            });
+        }
+    }
+
+    (nodes, edges)
 }
 
 #[cfg(test)]
