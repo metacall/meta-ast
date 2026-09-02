@@ -4,35 +4,20 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 fn resolve_go_import(raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
-    let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+    use crate::language::import_resolver::{find_go_module, go_relative_path, strip_import_quotes};
+    let raw = strip_import_quotes(raw);
     if raw.is_empty() {
         return None;
     }
 
-    if let Some(relative) = raw.strip_prefix('.') {
-        let path = source_dir.join(relative);
-        return Some(path.with_extension("go"));
+    if let Some(path) = go_relative_path(raw, source_dir) {
+        return Some(path);
     }
 
-    let mut current = Some(project_root);
-    while let Some(dir) = current {
-        let go_mod = dir.join("go.mod");
-        if go_mod.is_file() {
-            if let Ok(content) = std::fs::read_to_string(&go_mod) {
-                for line in content.lines() {
-                    let line = line.trim();
-                    if let Some(module) = line.strip_prefix("module ") {
-                        let module_name = module.trim().to_string();
-                        if raw.starts_with(&module_name) {
-                            let relative = raw[module_name.len()..].trim_start_matches('/');
-                            return Some(dir.join(relative).with_extension("go"));
-                        }
-                    }
-                }
-            }
-            break;
-        }
-        current = dir.parent();
+    let (dir, module_name) = find_go_module(project_root)?;
+    if raw.starts_with(&module_name) {
+        let relative = raw[module_name.len()..].trim_start_matches('/');
+        return Some(dir.join(relative).with_extension("go"));
     }
 
     None

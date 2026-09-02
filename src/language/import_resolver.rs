@@ -91,6 +91,61 @@ pub(crate) fn resolve_c_family_import(raw: &str, source_dir: &Path) -> Option<Pa
     }
 }
 
+/// Candidate paths for a Python import.
+pub(crate) fn python_candidate_paths(
+    raw: &str,
+    source_dir: &Path,
+    project_root: &Path,
+) -> Option<(PathBuf, PathBuf)> {
+    let raw = strip_import_quotes(raw);
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.starts_with('.') {
+        let relative = raw.trim_start_matches('.');
+        if relative.is_empty() {
+            let init = source_dir.join("__init__.py");
+            return Some((init.clone(), init));
+        }
+        let path = source_dir.join(relative.replace('.', std::path::MAIN_SEPARATOR_STR));
+        let init = path.join("__init__.py");
+        let module = path.with_extension("py");
+        Some((init, module))
+    } else {
+        let path = project_root.join(raw.replace('.', std::path::MAIN_SEPARATOR_STR));
+        let init = path.join("__init__.py");
+        let module = path.with_extension("py");
+        Some((init, module))
+    }
+}
+
+/// Relative Go import fast path: `.` prefix strips one dot.
+pub(crate) fn go_relative_path(raw: &str, source_dir: &Path) -> Option<PathBuf> {
+    raw.strip_prefix('.')
+        .map(|relative| source_dir.join(relative).with_extension("go"))
+}
+
+/// Walk `project_root` parents for `go.mod` and parse the module name.
+pub(crate) fn find_go_module(project_root: &Path) -> Option<(PathBuf, String)> {
+    let mut current = Some(project_root);
+    while let Some(dir) = current {
+        let go_mod = dir.join("go.mod");
+        if go_mod.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&go_mod) {
+                for line in content.lines() {
+                    let line = line.trim();
+                    if let Some(module) = line.strip_prefix("module ") {
+                        return Some((dir.to_path_buf(), module.trim().to_string()));
+                    }
+                }
+            }
+            return None;
+        }
+        current = dir.parent();
+    }
+    None
+}
+
 /// Zero-cost adapter wrapping a stateless function pointer.
 ///
 /// Bridges the existing `LanguageSpec.import_path_resolver` fn pointers
@@ -136,11 +191,6 @@ impl PythonResolver {
 
 impl ImportResolver for PythonResolver {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
-        let raw = raw.trim_matches(|c| c == '"' || c == '\'');
-        if raw.is_empty() {
-            return None;
-        }
-
         let check_exists = |path: &Path| -> bool {
             let cache_val = self
                 .exists_cache
@@ -157,22 +207,16 @@ impl ImportResolver for PythonResolver {
             res
         };
 
-        if raw.starts_with('.') {
-            let relative = raw.trim_start_matches('.');
-            if relative.is_empty() {
-                return Some(source_dir.join("__init__.py"));
+        if let Some((init_path, _)) = python_candidate_paths(raw, source_dir, project_root) {
+            let stripped = strip_import_quotes(raw);
+            if stripped.trim_start_matches('.').is_empty() && stripped.starts_with('.') {
+                return Some(init_path);
             }
-            let path = source_dir.join(relative.replace('.', std::path::MAIN_SEPARATOR_STR));
-            let init_path = path.join("__init__.py");
             if check_exists(&init_path) {
                 return Some(init_path);
             }
         } else {
-            let path = project_root.join(raw.replace('.', std::path::MAIN_SEPARATOR_STR));
-            let init_path = path.join("__init__.py");
-            if check_exists(&init_path) {
-                return Some(init_path);
-            }
+            return None;
         }
 
         (self.f)(raw, source_dir, project_root)
@@ -208,14 +252,13 @@ impl GoModResolver {
 
 impl ImportResolver for GoModResolver {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
-        let raw = raw.trim_matches(|c| c == '"' || c == '\'');
+        let raw = strip_import_quotes(raw);
         if raw.is_empty() {
             return None;
         }
 
-        if let Some(relative) = raw.strip_prefix('.') {
-            let path = source_dir.join(relative);
-            return Some(path.with_extension("go"));
+        if let Some(path) = go_relative_path(raw, source_dir) {
+            return Some(path);
         }
 
         let cached = self
@@ -226,28 +269,7 @@ impl ImportResolver for GoModResolver {
         let module_info = match cached {
             Some(info) => info,
             None => {
-                let computed = {
-                    let mut current = Some(project_root);
-                    let mut found = None;
-                    while let Some(dir) = current {
-                        let go_mod = dir.join("go.mod");
-                        if go_mod.is_file() {
-                            if let Ok(content) = std::fs::read_to_string(&go_mod) {
-                                for line in content.lines() {
-                                    let line = line.trim();
-                                    if let Some(module) = line.strip_prefix("module ") {
-                                        found =
-                                            Some((dir.to_path_buf(), module.trim().to_string()));
-                                        break;
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                        current = dir.parent();
-                    }
-                    found
-                };
+                let computed = find_go_module(project_root);
                 if let Ok(mut guard) = self.cached_module.write() {
                     *guard = Some(computed.clone());
                 }
