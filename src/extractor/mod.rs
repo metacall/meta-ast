@@ -60,6 +60,15 @@ impl ExtractionIdGenerators {
             data_nodes: IdGenerator::with_start(data_node_start),
         }
     }
+
+    pub fn symbols(&self) -> &IdGenerator<SymbolId> {
+        &self.symbols
+    }
+
+    #[cfg(feature = "dataflow")]
+    pub fn data_nodes(&self) -> &IdGenerator<crate::model::DataNodeId> {
+        &self.data_nodes
+    }
 }
 
 /// Source text supplied by an editor buffer.
@@ -141,6 +150,7 @@ pub fn extract_text_with_id_gen(
             uri: source.uri.to_string(),
             message: "URI must use the file scheme and contain an absolute path".to_string(),
         })?;
+    let path = dunce::simplified(&path).to_path_buf();
     let file = extract_source(
         &path,
         source.language,
@@ -400,6 +410,21 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(error, crate::Error::InvalidSourceUri { .. }));
+    }
+
+    #[test]
+    fn extraction_id_generators_accessors() {
+        let id_generators = ExtractionIdGenerators::with_symbol_start(100);
+        assert_eq!(id_generators.symbols().next(), SymbolId::new(100).unwrap());
+        #[cfg(feature = "dataflow")]
+        {
+            let dual = ExtractionIdGenerators::with_starts(200, 300);
+            assert_eq!(dual.symbols().next(), SymbolId::new(200).unwrap());
+            assert_eq!(
+                dual.data_nodes().next(),
+                crate::model::DataNodeId::new(300).unwrap()
+            );
+        }
     }
 
     #[test]

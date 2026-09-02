@@ -55,9 +55,11 @@ impl PythonResolver {
     }
 
     pub fn clear_cache(&self) {
-        if let Ok(mut cache) = self.exists_cache.write() {
-            cache.clear();
-        }
+        let mut cache = self
+            .exists_cache
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        cache.clear();
     }
 }
 
@@ -125,9 +127,11 @@ impl GoModResolver {
     }
 
     pub fn clear_cache(&self) {
-        if let Ok(mut guard) = self.cached_module.write() {
-            *guard = None;
-        }
+        let mut guard = self
+            .cached_module
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        *guard = None;
     }
 }
 
@@ -215,9 +219,11 @@ impl JsResolver {
     }
 
     pub fn clear_cache(&self) {
-        if let Ok(mut cache) = self.is_file_cache.write() {
-            cache.clear();
-        }
+        let mut cache = self
+            .is_file_cache
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        cache.clear();
     }
 }
 
@@ -291,9 +297,11 @@ impl TsConfigResolver {
     }
 
     pub fn clear_cache(&self) {
-        if let Ok(mut cache) = self.is_file_cache.write() {
-            cache.clear();
-        }
+        let mut cache = self
+            .is_file_cache
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        cache.clear();
     }
 }
 
