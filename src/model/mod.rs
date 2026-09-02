@@ -49,6 +49,42 @@ pub struct FileExtraction {
     pub flow_edges: Vec<FlowEdge>,
 }
 
+impl FileExtraction {
+    /// Empty extraction for a path. Use as base and assign fields.
+    ///
+    /// Adding a new gated field only updates this constructor.
+    /// Callers assign real values after construction.
+    pub fn empty(path: PathBuf, lang: LangId) -> Self {
+        Self {
+            path,
+            lang,
+            symbols: Vec::new(),
+            imports: Vec::new(),
+            references: Vec::new(),
+            diagnostics: Vec::new(),
+            ast_node_count: 0,
+            #[cfg(feature = "metacall-deploy")]
+            call_sites: Vec::new(),
+            #[cfg(feature = "dataflow")]
+            data_nodes: Vec::new(),
+            #[cfg(feature = "dataflow")]
+            flow_edges: Vec::new(),
+        }
+    }
+
+    /// Failed extraction with a single error diagnostic.
+    pub fn failed(path: PathBuf, lang: LangId, message: String) -> Self {
+        let mut out = Self::empty(path.clone(), lang);
+        out.diagnostics.push(crate::error::Diagnostic {
+            path,
+            severity: crate::error::Severity::Error,
+            message,
+            source_range: None,
+        });
+        out
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineColumn {
     pub line: usize,

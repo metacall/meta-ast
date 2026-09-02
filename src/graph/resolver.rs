@@ -525,32 +525,20 @@ mod tests {
             is_async: false,
         };
 
-        let file = FileExtraction {
-            path: PathBuf::from("/proj/a.py"),
-            lang: LangId::Python,
-            symbols: vec![sym_a],
-            imports: vec![],
-            references: vec![UnresolvedReference {
-                name: "helper".into(),
-                range: SourceRange {
-                    byte_start: 20,
-                    byte_end: 26,
-                    start: LineColumn { line: 1, column: 4 },
-                    end: LineColumn {
-                        line: 1,
-                        column: 10,
-                    },
+        let mut file = FileExtraction::empty(PathBuf::from("/proj/a.py"), LangId::Python);
+        file.symbols = vec![sym_a];
+        file.references = vec![UnresolvedReference {
+            name: "helper".into(),
+            range: SourceRange {
+                byte_start: 20,
+                byte_end: 26,
+                start: LineColumn { line: 1, column: 4 },
+                end: LineColumn {
+                    line: 1,
+                    column: 10,
                 },
-            }],
-            diagnostics: vec![],
-            ast_node_count: 0,
-            #[cfg(feature = "metacall-deploy")]
-            call_sites: vec![],
-            #[cfg(feature = "dataflow")]
-            data_nodes: vec![],
-            #[cfg(feature = "dataflow")]
-            flow_edges: vec![],
-        };
+            },
+        }];
 
         let mut path_to_file_id = HashMap::new();
         path_to_file_id.insert(PathBuf::from("/proj/a.py"), FileId::new(1).unwrap());
@@ -611,32 +599,20 @@ mod tests {
             is_async: false,
         };
 
-        let file = FileExtraction {
-            path: PathBuf::from("/proj/a.py"),
-            lang: LangId::Python,
-            symbols: vec![inner_method, outer_class], // Order: inner first, outer second
-            imports: vec![],
-            references: vec![UnresolvedReference {
-                name: "helper".into(),
-                range: SourceRange {
-                    byte_start: 20,
-                    byte_end: 26,
-                    start: LineColumn { line: 2, column: 4 },
-                    end: LineColumn {
-                        line: 2,
-                        column: 10,
-                    },
+        let mut file = FileExtraction::empty(PathBuf::from("/proj/a.py"), LangId::Python);
+        file.symbols = vec![inner_method, outer_class]; // Order: inner first, outer second
+        file.references = vec![UnresolvedReference {
+            name: "helper".into(),
+            range: SourceRange {
+                byte_start: 20,
+                byte_end: 26,
+                start: LineColumn { line: 2, column: 4 },
+                end: LineColumn {
+                    line: 2,
+                    column: 10,
                 },
-            }],
-            diagnostics: vec![],
-            ast_node_count: 0,
-            #[cfg(feature = "metacall-deploy")]
-            call_sites: vec![],
-            #[cfg(feature = "dataflow")]
-            data_nodes: vec![],
-            #[cfg(feature = "dataflow")]
-            flow_edges: vec![],
-        };
+            },
+        }];
 
         let mut path_to_file_id = HashMap::new();
         path_to_file_id.insert(PathBuf::from("/proj/a.py"), FileId::new(1).unwrap());

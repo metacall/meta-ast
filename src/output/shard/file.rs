@@ -130,21 +130,12 @@ impl ShardFile {
             .into_iter()
             .map(|symbol| symbol.into_symbol(&self.path, self.language, id_gen.next()))
             .collect();
-        let file = FileExtraction {
-            path: self.path,
-            lang: self.language,
-            symbols,
-            imports: self.imports,
-            references: self.references,
-            diagnostics: self.diagnostics,
-            ast_node_count: self.ast_node_count,
-            #[cfg(feature = "metacall-deploy")]
-            call_sites: Vec::new(),
-            #[cfg(feature = "dataflow")]
-            data_nodes: Vec::new(),
-            #[cfg(feature = "dataflow")]
-            flow_edges: Vec::new(),
-        };
+        let mut file = FileExtraction::empty(self.path, self.language);
+        file.symbols = symbols;
+        file.imports = self.imports;
+        file.references = self.references;
+        file.diagnostics = self.diagnostics;
+        file.ast_node_count = self.ast_node_count;
 
         Ok(LoadedShard {
             file,

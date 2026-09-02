@@ -96,21 +96,9 @@ mod tests {
         let path = PathBuf::from("foo.py");
         let bytes = b"def foo(): pass\n";
         let fp = compute_fingerprint(bytes);
-        let extraction = Arc::new(FileExtraction {
-            path: path.clone(),
-            lang: crate::language::LangId::Python,
-            ast_node_count: 5,
-            symbols: vec![],
-            imports: vec![],
-            references: vec![],
-            diagnostics: vec![],
-            #[cfg(feature = "metacall-deploy")]
-            call_sites: vec![],
-            #[cfg(feature = "dataflow")]
-            data_nodes: vec![],
-            #[cfg(feature = "dataflow")]
-            flow_edges: vec![],
-        });
+        let mut base = FileExtraction::empty(path.clone(), crate::language::LangId::Python);
+        base.ast_node_count = 5;
+        let extraction = Arc::new(base);
 
         cache.update(path.clone(), fp, Arc::clone(&extraction));
         assert_eq!(cache.extractions.len(), 1);

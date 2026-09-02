@@ -225,44 +225,26 @@ fn extract_source(
     let (data_nodes, flow_edges) =
         crate::language::dataflow::extract_dataflow(lang, &tree, source, &id_generators.data_nodes);
 
-    FileExtraction {
-        path: path.to_path_buf(),
-        lang,
-        symbols,
-        imports,
-        references,
-        diagnostics: diags,
-        ast_node_count: metrics.node_count,
-        #[cfg(feature = "metacall-deploy")]
-        call_sites,
-        #[cfg(feature = "dataflow")]
-        data_nodes,
-        #[cfg(feature = "dataflow")]
-        flow_edges,
+    let mut out = FileExtraction::empty(path.to_path_buf(), lang);
+    out.symbols = symbols;
+    out.imports = imports;
+    out.references = references;
+    out.diagnostics = diags;
+    out.ast_node_count = metrics.node_count;
+    #[cfg(feature = "metacall-deploy")]
+    {
+        out.call_sites = call_sites;
     }
+    #[cfg(feature = "dataflow")]
+    {
+        out.data_nodes = data_nodes;
+        out.flow_edges = flow_edges;
+    }
+    out
 }
 
 fn failed_extraction(path: &Path, lang: LangId, message: String) -> FileExtraction {
-    FileExtraction {
-        path: path.to_path_buf(),
-        lang,
-        symbols: Vec::new(),
-        imports: Vec::new(),
-        references: Vec::new(),
-        diagnostics: vec![Diagnostic {
-            path: path.to_path_buf(),
-            severity: Severity::Error,
-            message,
-            source_range: None,
-        }],
-        ast_node_count: 0,
-        #[cfg(feature = "metacall-deploy")]
-        call_sites: Vec::new(),
-        #[cfg(feature = "dataflow")]
-        data_nodes: Vec::new(),
-        #[cfg(feature = "dataflow")]
-        flow_edges: Vec::new(),
-    }
+    FileExtraction::failed(path.to_path_buf(), lang, message)
 }
 
 #[cfg(test)]

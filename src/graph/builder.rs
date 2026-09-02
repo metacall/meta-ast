@@ -649,21 +649,9 @@ mod tests {
             docstring: None,
             is_async: false,
         };
-        let extractions = vec![FileExtraction {
-            path: PathBuf::from("/proj/a.py"),
-            lang: LangId::Python,
-            symbols: vec![sym],
-            imports: vec![],
-            references: vec![],
-            diagnostics: vec![],
-            ast_node_count: 0,
-            #[cfg(feature = "metacall-deploy")]
-            call_sites: vec![],
-            #[cfg(feature = "dataflow")]
-            data_nodes: vec![],
-            #[cfg(feature = "dataflow")]
-            flow_edges: vec![],
-        }];
+        let mut base = FileExtraction::empty(PathBuf::from("/proj/a.py"), LangId::Python);
+        base.symbols = vec![sym];
+        let extractions = vec![base];
         let mut diags = Vec::new();
         let (graph, _scc) = GraphBuilder::from_extractions(
             &extractions,
@@ -712,21 +700,9 @@ mod tests {
             docstring: None,
             is_async: false,
         };
-        let extractions = vec![FileExtraction {
-            path: PathBuf::from("/proj/a.py"),
-            lang: LangId::Python,
-            symbols: vec![sym],
-            imports: vec![],
-            references: vec![],
-            diagnostics: vec![],
-            ast_node_count: 0,
-            #[cfg(feature = "metacall-deploy")]
-            call_sites: vec![],
-            #[cfg(feature = "dataflow")]
-            data_nodes: vec![],
-            #[cfg(feature = "dataflow")]
-            flow_edges: vec![],
-        }];
+        let mut base = FileExtraction::empty(PathBuf::from("/proj/a.py"), LangId::Python);
+        base.symbols = vec![sym];
+        let extractions = vec![base];
         let mut diags = Vec::new();
         let (_graph, _scc) = GraphBuilder::from_extractions(
             &extractions,
@@ -741,49 +717,21 @@ mod tests {
     fn from_extractions_resolves_cross_file_imports() {
         use crate::model::{FileExtraction, LineColumn, SourceRange, UnresolvedImport};
         use std::path::PathBuf;
-        let extractions = vec![
-            FileExtraction {
-                path: PathBuf::from("/proj/a.py"),
-                lang: LangId::Python,
-                symbols: vec![],
-                imports: vec![UnresolvedImport {
-                    import_specifier: "b".into(),
-                    alias: None,
-                    symbol: None,
-                    star: false,
-                    range: SourceRange {
-                        byte_start: 0,
-                        byte_end: 1,
-                        start: LineColumn { line: 0, column: 0 },
-                        end: LineColumn { line: 0, column: 1 },
-                    },
-                }],
-                references: vec![],
-                diagnostics: vec![],
-                ast_node_count: 0,
-                #[cfg(feature = "metacall-deploy")]
-                call_sites: vec![],
-                #[cfg(feature = "dataflow")]
-                data_nodes: vec![],
-                #[cfg(feature = "dataflow")]
-                flow_edges: vec![],
+        let mut first = FileExtraction::empty(PathBuf::from("/proj/a.py"), LangId::Python);
+        first.imports = vec![UnresolvedImport {
+            import_specifier: "b".into(),
+            alias: None,
+            symbol: None,
+            star: false,
+            range: SourceRange {
+                byte_start: 0,
+                byte_end: 1,
+                start: LineColumn { line: 0, column: 0 },
+                end: LineColumn { line: 0, column: 1 },
             },
-            FileExtraction {
-                path: PathBuf::from("/proj/b.py"),
-                lang: LangId::Python,
-                symbols: vec![],
-                imports: vec![],
-                references: vec![],
-                diagnostics: vec![],
-                ast_node_count: 0,
-                #[cfg(feature = "metacall-deploy")]
-                call_sites: vec![],
-                #[cfg(feature = "dataflow")]
-                data_nodes: vec![],
-                #[cfg(feature = "dataflow")]
-                flow_edges: vec![],
-            },
-        ];
+        }];
+        let second = FileExtraction::empty(PathBuf::from("/proj/b.py"), LangId::Python);
+        let extractions = vec![first, second];
         let mut diags = Vec::new();
         let (graph, _scc) = GraphBuilder::from_extractions(
             &extractions,

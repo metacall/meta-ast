@@ -306,21 +306,9 @@ mod tests {
     }
 
     fn extraction(path: &str, lang: LangId, symbols: Vec<Symbol>) -> Arc<FileExtraction> {
-        Arc::new(FileExtraction {
-            path: PathBuf::from(path),
-            lang,
-            symbols,
-            imports: vec![],
-            references: vec![],
-            diagnostics: vec![],
-            ast_node_count: 0,
-            #[cfg(feature = "metacall-deploy")]
-            call_sites: vec![],
-            #[cfg(feature = "dataflow")]
-            data_nodes: vec![],
-            #[cfg(feature = "dataflow")]
-            flow_edges: vec![],
-        })
+        let mut out = FileExtraction::empty(PathBuf::from(path), lang);
+        out.symbols = symbols;
+        Arc::new(out)
     }
 
     fn load_from_file(source: &str, scripts: Vec<&str>) -> CallSite {

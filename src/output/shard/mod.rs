@@ -50,32 +50,21 @@ mod tests {
 
     fn extraction() -> FileExtraction {
         let path = PathBuf::from("src/example.py");
-        FileExtraction {
-            path: path.clone(),
-            lang: LangId::Python,
-            symbols: vec![Symbol {
-                id: SymbolId::new(91).unwrap(),
-                name: "encrypt".to_string(),
-                kind: SymbolKind::Function,
-                language: LangId::Python,
-                file_path: path,
-                source_range: range(),
-                visibility: Some(Visibility::Public),
-                signature: Some("def encrypt(value: str)".to_string()),
-                docstring: Some("Encrypt a value.".to_string()),
-                is_async: false,
-            }],
-            imports: Vec::new(),
-            references: Vec::new(),
-            diagnostics: Vec::new(),
-            ast_node_count: 7,
-            #[cfg(feature = "metacall-deploy")]
-            call_sites: Vec::new(),
-            #[cfg(feature = "dataflow")]
-            data_nodes: Vec::new(),
-            #[cfg(feature = "dataflow")]
-            flow_edges: Vec::new(),
-        }
+        let mut out = FileExtraction::empty(path.clone(), LangId::Python);
+        out.symbols = vec![Symbol {
+            id: SymbolId::new(91).unwrap(),
+            name: "encrypt".to_string(),
+            kind: SymbolKind::Function,
+            language: LangId::Python,
+            file_path: path,
+            source_range: range(),
+            visibility: Some(Visibility::Public),
+            signature: Some("def encrypt(value: str)".to_string()),
+            docstring: Some("Encrypt a value.".to_string()),
+            is_async: false,
+        }];
+        out.ast_node_count = 7;
+        out
     }
 
     #[test]
@@ -340,21 +329,9 @@ mod tests {
             docstring: None,
             is_async: false,
         };
-        let extraction = FileExtraction {
-            path,
-            lang: LangId::Python,
-            symbols: vec![sym1, sym2],
-            imports: Vec::new(),
-            references: Vec::new(),
-            diagnostics: Vec::new(),
-            ast_node_count: 5,
-            #[cfg(feature = "metacall-deploy")]
-            call_sites: Vec::new(),
-            #[cfg(feature = "dataflow")]
-            data_nodes: Vec::new(),
-            #[cfg(feature = "dataflow")]
-            flow_edges: Vec::new(),
-        };
+        let mut extraction = FileExtraction::empty(path, LangId::Python);
+        extraction.symbols = vec![sym1, sym2];
+        extraction.ast_node_count = 5;
         let mut diagnostics = Vec::new();
         let (graph, _) = GraphBuilder::from_extractions(
             std::slice::from_ref(&extraction),
