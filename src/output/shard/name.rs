@@ -148,7 +148,8 @@ pub(crate) fn parent_symbol(graph: &CodeGraph, node_index: NodeIndex) -> Option<
 }
 
 pub(crate) fn normalized_path(path: &Path) -> Result<String, ShardError> {
-    let value = path.to_str().ok_or_else(|| ShardError::NonUtf8Path {
+    let simplified = dunce::simplified(path);
+    let value = simplified.to_str().ok_or_else(|| ShardError::NonUtf8Path {
         path: path.to_path_buf(),
     })?;
     #[cfg(windows)]

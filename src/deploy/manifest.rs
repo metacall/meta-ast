@@ -72,7 +72,7 @@ pub fn generate_pod_manifest(
             .filter_map(|fid| {
                 graph
                     .file_node(*fid)
-                    .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+                    .map(|f| crate::input::portable_path(&f.path))
             })
             .collect();
 

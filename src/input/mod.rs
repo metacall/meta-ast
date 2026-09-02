@@ -25,6 +25,32 @@ pub fn detect_language(path: &Path) -> Option<LangId> {
     EXT_MAP.get(ext.as_str()).copied()
 }
 
+/// Strip Windows verbatim prefix via `dunce` and return an owned path.
+///
+/// Use for filesystem walks and reads so downstream `std::fs` calls see a
+/// consistent path on all platforms.
+pub fn simplified_path(path: &Path) -> std::path::PathBuf {
+    dunce::simplified(path).to_path_buf()
+}
+
+/// Return a portable display string for a path.
+///
+/// Applies `dunce::simplified`, converts lossy to UTF-8, and normalizes
+/// backslashes to `/` on Windows only. On Unix a backslash stays a valid
+/// filename char, so `a\b.py` and `a/b.py` remain distinct.
+pub fn portable_path(path: &Path) -> String {
+    let simplified = dunce::simplified(path);
+    let value = simplified.to_string_lossy();
+    #[cfg(windows)]
+    {
+        value.replace('\\', "/")
+    }
+    #[cfg(not(windows))]
+    {
+        value.into_owned()
+    }
+}
+
 pub fn discover_files(
     root: &Path,
     languages: Option<&[LangId]>,
@@ -53,7 +79,7 @@ pub fn discover_files(
     {
         // Strip the verbatim `\\?\` prefix on Windows so downstream std::fs
         // reads and tree-sitter paths resolve consistently.
-        let path = dunce::simplified(&entry.into_path()).to_path_buf();
+        let path = simplified_path(&entry.into_path());
         if !path.is_file() {
             continue;
         }
@@ -255,5 +281,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn portable_path_uses_dunce_and_preserves_unix_backslash() {
+        use std::path::Path;
+        let slash = portable_path(Path::new("a/b.py"));
+        let backslash = portable_path(Path::new("a\\b.py"));
+        assert_eq!(slash, "a/b.py");
+        #[cfg(not(windows))]
+        assert_ne!(backslash, slash);
+        #[cfg(windows)]
+        assert_eq!(backslash, slash);
+    }
+
+    #[test]
+    fn simplified_path_returns_owned_path() {
+        use std::path::Path;
+        let out = simplified_path(Path::new("a/b.py"));
+        assert_eq!(out, PathBuf::from("a/b.py"));
     }
 }

@@ -100,7 +100,7 @@ pub fn generate_mesh_annotation(
                     symbols.push(UnitSymbol {
                         name: sym.name.clone(),
                         file: file_node
-                            .map(|f| f.path.to_string_lossy().replace('\\', "/"))
+                            .map(|f| crate::input::portable_path(&f.path))
                             .unwrap_or_default(),
                         language: lang_tag.to_string(),
                         kind: format!("{:?}", sym.kind).to_lowercase(),
@@ -113,8 +113,8 @@ pub fn generate_mesh_annotation(
                     unit_languages.insert(lang_tag.to_string());
 
                     symbols.push(UnitSymbol {
-                        name: f.path.to_string_lossy().replace('\\', "/"),
-                        file: f.path.to_string_lossy().replace('\\', "/"),
+                        name: crate::input::portable_path(&f.path),
+                        file: crate::input::portable_path(&f.path),
                         language: lang_tag.to_string(),
                         kind: "file".to_string(),
                     });
@@ -175,7 +175,7 @@ pub fn generate_mesh_annotation(
     for (idx, scc) in analysis.scc.components.iter().enumerate() {
         for &node_idx in &scc.nodes {
             if let NodeData::File(f) = &g[node_idx] {
-                let path_str = f.path.to_string_lossy().replace('\\', "/");
+                let path_str = crate::input::portable_path(&f.path);
                 file_to_component.insert(path_str, idx);
             }
         }
@@ -191,7 +191,7 @@ pub fn generate_mesh_annotation(
         }
         for &node_idx in &analysis.scc.components[comp].nodes {
             if let NodeData::File(f) = &g[node_idx] {
-                let path_str = f.path.to_string_lossy().replace('\\', "/");
+                let path_str = crate::input::portable_path(&f.path);
                 if let Some(&uid) = file_to_unit.get(&path_str) {
                     return Some(uid);
                 }
@@ -244,7 +244,7 @@ pub fn generate_mesh_annotation(
                 // attribution below.
                 let client_call_site = match &g[v] {
                     NodeData::Symbol(sym) => call_sites.iter().find_map(|site| {
-                        let site_path = site.source_file.to_string_lossy().replace('\\', "/");
+                        let site_path = crate::input::portable_path(&site.source_file);
                         if file_to_component.get(&site_path) != Some(&u_comp) {
                             return None;
                         }
@@ -260,7 +260,7 @@ pub fn generate_mesh_annotation(
                 };
                 let call_site_file = client_call_site.or_else(|| {
                     call_sites.iter().find_map(|site| {
-                        let site_path = site.source_file.to_string_lossy().replace('\\', "/");
+                        let site_path = crate::input::portable_path(&site.source_file);
                         if file_to_component.get(&site_path) != Some(&u_comp) {
                             return None;
                         }

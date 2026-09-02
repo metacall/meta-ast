@@ -244,7 +244,7 @@ fn orphaned_config_diagnostics(root: &Path, call_sites: &[CallSite]) -> Vec<Diag
         .build()
         .filter_map(|e| e.ok())
     {
-        let path = dunce::simplified(&entry.into_path()).to_path_buf();
+        let path = crate::input::simplified_path(&entry.into_path());
         if !path.is_file() {
             continue;
         }

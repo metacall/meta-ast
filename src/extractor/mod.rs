@@ -150,7 +150,7 @@ pub fn extract_text_with_id_gen(
             uri: source.uri.to_string(),
             message: "URI must use the file scheme and contain an absolute path".to_string(),
         })?;
-    let path = dunce::simplified(&path).to_path_buf();
+    let path = crate::input::simplified_path(&path).to_path_buf();
     let file = extract_source(
         &path,
         source.language,

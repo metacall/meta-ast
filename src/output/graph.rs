@@ -249,7 +249,7 @@ impl GraphOutput {
         SerializedNode {
             id,
             kind: "file".to_string(),
-            path: Some(file_node.path.to_string_lossy().to_string()),
+            path: Some(crate::input::portable_path(&file_node.path)),
             file_path: None,
             source_range: None,
             language: Some(file_node.language.as_ref().to_string()),
@@ -268,7 +268,7 @@ impl GraphOutput {
     ) -> SerializedNode {
         let file_path = graph
             .file_node(symbol_node.file_id)
-            .map(|file| file.path.to_string_lossy().to_string());
+            .map(|file| crate::input::portable_path(&file.path));
         SerializedNode {
             id,
             kind: "symbol".to_string(),
