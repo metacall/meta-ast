@@ -281,7 +281,7 @@ pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<Cal
 
         let mut args_node = None;
 
-        for capture in mat.captures {
+        for capture in mat.captures() {
             if capture.index == fn_name_idx {
                 name = get_node_text(capture.node, source);
                 variant = CallSiteVariant::from_str(name);

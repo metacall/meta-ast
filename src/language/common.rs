@@ -89,9 +89,9 @@ pub(crate) fn extract_with_spec<'a>(
         let mut visibility: Option<Visibility> = None;
         let mut primary_node: Option<tree_sitter::Node<'a>> = None;
 
-        let capture_count = m.captures.len();
+        let capture_count = m.captures().len();
 
-        for capture in m.captures {
+        for capture in m.captures() {
             let capture_name = query.capture_names()[capture.index as usize];
             match capture_name {
                 "name" => {
@@ -406,7 +406,7 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
         let mut star = false;
         let mut node: Option<tree_sitter::Node<'a>> = None;
 
-        for capture in m.captures {
+        for capture in m.captures() {
             let idx = capture.index;
             if idx == path_idx {
                 let rng = source_range_from_node(&capture.node);
@@ -571,7 +571,7 @@ pub(crate) fn extract_def_use_dataflow(
 
     let mut matches = cursor.matches(query, tree.root_node(), source);
     while let Some(m) = matches.next() {
-        for capture in m.captures {
+        for capture in m.captures() {
             let capture_name = query.capture_names()[capture.index as usize];
             let node = capture.node;
             let byte_pos = node.start_byte();
