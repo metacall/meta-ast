@@ -16,6 +16,36 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
+    // Extract the output format *before* dispatching so we can intercept
+    // errors with structured JSON output when `--format json` is active.
+    let format = extract_format(&cli);
+
+    let result = run(cli);
+
+    if let Err(ref err) = result
+        && format == meta_ast::output::OutputFormat::Json
+    {
+        let json = meta_ast::output::format_json_error(err);
+        eprintln!("{json}");
+        std::process::exit(1);
+    }
+
+    result
+}
+
+/// Extract the [`OutputFormat`] from the parsed CLI arguments.
+fn extract_format(cli: &Cli) -> meta_ast::output::OutputFormat {
+    match cli {
+        Cli::Inspect(args) => args.format,
+        Cli::Graph(args) => args.format,
+        #[cfg(feature = "metacall-deploy")]
+        Cli::Deploy(args) => args.format,
+    }
+}
+
+/// Run the dispatched subcommand, returning any errors for the caller
+/// to handle (potentially as structured JSON).
+fn run(cli: Cli) -> anyhow::Result<()> {
     match cli {
         Cli::Inspect(args) => {
             let languages = args.language.map(|l| [l]);

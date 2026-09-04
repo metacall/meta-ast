@@ -108,3 +108,94 @@ fn yaml_json_semantic_equivalence() {
     assert_eq!(json_parsed["funcs"][0]["name"], "func_a");
     assert_eq!(yaml_parsed["funcs"][0]["name"], "func_a");
 }
+
+// ---------------------------------------------------------------------------
+// Structured JSON error output tests (issue #62)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn json_error_output_nonexistent_path() {
+    let io_err = std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "path does not exist: /invalid/path",
+    );
+    let err: anyhow::Error = meta_ast::error::Error::Io(io_err).into();
+    let json_str = meta_ast::output::format_json_error(&err);
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("format_json_error should produce valid JSON");
+
+    assert_eq!(parsed["status"], "error");
+    assert_eq!(parsed["error"]["kind"], "IoError");
+    assert!(
+        parsed["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("path does not exist"),
+        "message should contain the IO error text"
+    );
+    assert!(
+        parsed["diagnostics"].is_array(),
+        "diagnostics must be an array"
+    );
+    let diags = parsed["diagnostics"].as_array().unwrap();
+    assert_eq!(diags.len(), 1);
+    assert_eq!(diags[0]["severity"], "Error");
+}
+
+#[test]
+fn json_error_output_parse_error() {
+    let err: anyhow::Error = meta_ast::error::Error::Parse {
+        path: PathBuf::from("broken.py"),
+        message: "unexpected token at line 42".into(),
+    }
+    .into();
+    let json_str = meta_ast::output::format_json_error(&err);
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("format_json_error should produce valid JSON");
+
+    assert_eq!(parsed["status"], "error");
+    assert_eq!(parsed["error"]["kind"], "ParseError");
+    assert!(
+        parsed["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("broken.py"),
+        "message should reference the file path"
+    );
+    let diags = parsed["diagnostics"].as_array().unwrap();
+    assert_eq!(diags.len(), 1);
+    assert_eq!(diags[0]["path"], "broken.py");
+    assert_eq!(diags[0]["severity"], "Error");
+    assert!(
+        diags[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unexpected token"),
+        "diagnostic message should contain parse error detail"
+    );
+}
+
+#[test]
+fn json_error_output_unknown_error() {
+    let err = anyhow::anyhow!("something completely unexpected");
+    let json_str = meta_ast::output::format_json_error(&err);
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("format_json_error should produce valid JSON");
+
+    assert_eq!(parsed["status"], "error");
+    assert_eq!(parsed["error"]["kind"], "UnknownError");
+    assert!(
+        parsed["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("something completely unexpected"),
+        "message should contain the original error text"
+    );
+    assert!(
+        parsed["diagnostics"].as_array().unwrap().is_empty(),
+        "unknown errors should have no diagnostics"
+    );
+}
