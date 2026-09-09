@@ -7,9 +7,8 @@ use std::path::PathBuf;
 
 use crate::input;
 use crate::pipeline::GraphAnalysis;
+use crate::reanalyze::{ChangeSet, WatchState, incremental_reanalyze};
 use crate::watch::config::WatchConfig;
-use crate::watch::reanalyze::incremental_reanalyze;
-use crate::watch::state::{ChangeSet, WatchState};
 
 /// Start a debounced file-system watcher on `root` and re-analyse on changes.
 ///

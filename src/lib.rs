@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod error;
 pub mod extractor;
 pub mod graph;
@@ -8,6 +9,7 @@ pub mod model;
 pub mod output;
 pub mod parser;
 pub mod pipeline;
+pub mod reanalyze;
 
 #[cfg(feature = "watch")]
 pub mod watch;
@@ -18,6 +20,7 @@ pub mod deploy;
 #[cfg(feature = "dataflow")]
 pub mod sink;
 
+pub use cache::{ExtractionCache, Fingerprint, fingerprint};
 pub use error::{Diagnostic, Error, Severity};
 pub use extractor::{
     ExtractOptions, ExtractionIdGenerators, ExtractionResult, InMemorySource, VersionedExtraction,
@@ -29,6 +32,7 @@ pub use model::{
     DataNode, DataNodeId, DataScope, FileExtraction, FlowEdge, FlowKind, Symbol, SymbolId,
     SymbolKind, UnresolvedImport, UnresolvedReference, Visibility,
 };
+pub use reanalyze::{ChangeSet, Overlay, WatchState, incremental_reanalyze, reanalyze_extractions};
 
 // Graph module re-exports
 pub use graph::{
@@ -50,4 +54,4 @@ pub use pipeline::{GraphAnalysis, SnapshotMeta, snapshot_meta};
 
 // Watch-mode re-exports
 #[cfg(feature = "watch")]
-pub use watch::{ChangeSet, WatchConfig, WatchState, incremental_reanalyze, run_watch};
+pub use watch::{WatchConfig, run_watch};

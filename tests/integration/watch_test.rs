@@ -42,9 +42,8 @@ fn cold_start_analyzes_all_files() {
     write_file(root, "a.py", "def alpha(): pass\n");
     write_file(root, "b.py", "def beta(): pass\n");
 
-    let mut state = meta_ast::watch::WatchState::new();
-    let (analysis, cs, diags) =
-        meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let mut state = meta_ast::WatchState::new();
+    let (analysis, cs, diags) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
     assert!(diags.is_empty());
     assert_eq!(cs.files_added, 2);
@@ -58,10 +57,10 @@ fn unchanged_files_produce_zero_changed() {
     write_file(root, "a.py", "def foo(): pass\n");
     write_file(root, "b.py", "class Bar: pass\n");
 
-    let mut state = meta_ast::watch::WatchState::new();
-    meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let mut state = meta_ast::WatchState::new();
+    meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
-    let (_, cs, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let (_, cs, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
     assert_eq!(cs.files_unchanged, 2);
     assert_eq!(cs.files_modified, 0);
     assert_eq!(cs.files_added, 0);
@@ -75,8 +74,8 @@ fn file_modification_detected_and_re_extracted() {
     let a = write_file(root, "a.py", "def original(): pass\n");
     write_file(root, "b.py", "class B: pass\n");
 
-    let mut state = meta_ast::watch::WatchState::new();
-    let (initial, _, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let mut state = meta_ast::WatchState::new();
+    let (initial, _, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
     let initial_names: Vec<String> = initial
         .graph
@@ -87,7 +86,7 @@ fn file_modification_detected_and_re_extracted() {
 
     std::fs::write(&a, "def modified(): pass\ndef also_new(): pass\n").unwrap();
 
-    let (updated, cs, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let (updated, cs, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
     assert_eq!(cs.files_modified, 1);
     assert_eq!(cs.files_unchanged, 1);
@@ -110,13 +109,13 @@ fn file_removal_cleans_up() {
     let a = write_file(root, "a.py", "def foo(): pass\n");
     write_file(root, "b.py", "def bar(): pass\n");
 
-    let mut state = meta_ast::watch::WatchState::new();
-    let (initial, _, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let mut state = meta_ast::WatchState::new();
+    let (initial, _, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
     assert_eq!(initial.graph.file_count(), 2);
 
     std::fs::remove_file(&a).unwrap();
 
-    let (updated, cs, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let (updated, cs, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
     assert_eq!(cs.files_removed, 1);
     assert_eq!(updated.graph.file_count(), 1);
@@ -128,13 +127,13 @@ fn file_addition_picked_up() {
     let root = tmp.path();
     write_file(root, "a.py", "def one(): pass\n");
 
-    let mut state = meta_ast::watch::WatchState::new();
-    let (initial, _, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let mut state = meta_ast::WatchState::new();
+    let (initial, _, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
     assert_eq!(initial.graph.file_count(), 1);
 
     write_file(root, "b.py", "def two(): pass\n");
 
-    let (updated, cs, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let (updated, cs, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
     assert_eq!(cs.files_added, 1);
     assert_eq!(updated.graph.file_count(), 2);
@@ -147,12 +146,12 @@ fn symbol_ids_unique_across_cold_and_warm_runs() {
     write_file(root, "a.py", "def a(): pass\nclass A: pass\n");
     write_file(root, "b.py", "class B: pass\n");
 
-    let mut state = meta_ast::watch::WatchState::new();
-    let (initial, _, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let mut state = meta_ast::WatchState::new();
+    let (initial, _, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
     write_file(root, "c.py", "def c(): pass\n");
 
-    let (updated, _, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let (updated, _, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
     let ids_initial: std::collections::HashSet<u32> =
         initial.graph.symbols().map(|(id, _)| id.to_raw()).collect();
@@ -173,9 +172,8 @@ fn mixed_language_project_handled() {
     write_file(root, "util.rs", "fn helper() {}\n");
     write_file(root, "index.js", "function handle() {}\n");
 
-    let mut state = meta_ast::watch::WatchState::new();
-    let (analysis, cs, diags) =
-        meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let mut state = meta_ast::WatchState::new();
+    let (analysis, cs, diags) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
     assert!(diags.is_empty());
     assert_eq!(cs.files_added, 3);
@@ -198,8 +196,8 @@ fn scc_analysis_recomputed_on_each_tick() {
     write_file(root, "a.py", "import b\ndef a(): pass\n");
     write_file(root, "b.py", "import a\ndef b(): pass\n");
 
-    let mut state = meta_ast::watch::WatchState::new();
-    let (initial, _, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let mut state = meta_ast::WatchState::new();
+    let (initial, _, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
     let has_cycle = initial
         .scc
@@ -213,7 +211,7 @@ fn scc_analysis_recomputed_on_each_tick() {
 
     let second_path = write_file(root, "c.py", "import b\ndef c(): pass\n");
 
-    let (updated, _, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let (updated, _, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
     assert_eq!(updated.graph.file_count(), 3);
 
     let _ = second_path;
@@ -225,9 +223,9 @@ fn snapshot_id_increments_across_ticks() {
     let root = tmp.path();
     write_file(root, "a.py", "def foo(): pass\n");
 
-    let mut state = meta_ast::watch::WatchState::new();
-    let (a1, _, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
-    let (a2, _, _) = meta_ast::watch::incremental_reanalyze(root, None, &mut state).unwrap();
+    let mut state = meta_ast::WatchState::new();
+    let (a1, _, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
+    let (a2, _, _) = meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
 
     assert_ne!(a1.snapshot_id, a2.snapshot_id);
     assert!(a2.snapshot_id.to_raw() > a1.snapshot_id.to_raw());
