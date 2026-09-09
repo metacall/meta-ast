@@ -13,7 +13,7 @@ use std::path::Path;
 use criterion::{Criterion, criterion_group, criterion_main};
 use meta_ast::model::SnapshotId;
 use meta_ast::pipeline::analyze_graph;
-use meta_ast::watch::{WatchState, incremental_reanalyze};
+use meta_ast::{WatchState, incremental_reanalyze};
 
 fn fixture_root() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join("meta_ast_bench_incremental");

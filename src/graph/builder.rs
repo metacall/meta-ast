@@ -382,6 +382,25 @@ impl GraphBuilder {
     where
         F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
     {
+        let (graph, scc, _) =
+            Self::from_extractions_with_scope(extractions, root, snapshot_id, diagnostics);
+        (graph, scc)
+    }
+
+    /// Build the graph, SCC, and the flattened scope cache.
+    pub fn from_extractions_with_scope<F>(
+        extractions: &[F],
+        root: &std::path::Path,
+        snapshot_id: crate::model::SnapshotId,
+        diagnostics: &mut Vec<crate::error::Diagnostic>,
+    ) -> (
+        CodeGraph,
+        crate::graph::SccAnalysis,
+        crate::graph::resolver::FlattenedScopeCache,
+    )
+    where
+        F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
+    {
         let mut builder = Self::new(snapshot_id);
 
         // Register all files
@@ -483,7 +502,7 @@ impl GraphBuilder {
         let graph = builder.build();
         let scc = crate::graph::SccAnalysis::analyze(graph.graph());
 
-        (graph, scc)
+        (graph, scc, scope_cache)
     }
 }
 
