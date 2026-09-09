@@ -101,3 +101,31 @@ fn graph_and_scope_cache_are_public() {
     assert!(scope.scope(file_id).is_some());
     assert_eq!(scope.iter_scopes().count(), 1);
 }
+
+#[cfg(feature = "metacall-deploy")]
+#[test]
+fn graph_includes_metacall_client_call_edges() {
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mixed/client_call_mesh");
+    let mut state = WatchState::new();
+    let (extractions, _, _) = reanalyze_extractions(&root, None, &[], &mut state).unwrap();
+
+    let mut diagnostics = Vec::new();
+    let (graph, _scc, _scope) = GraphBuilder::from_extractions_with_scope(
+        &extractions,
+        &root,
+        SnapshotId::new(1).unwrap(),
+        &mut diagnostics,
+    );
+
+    // The fixture has no imports or references. Every Reference edge comes
+    // from the `metacall("multiply", ...)` client call.
+    let references = graph.edges_of_kind(meta_ast::EdgeKind::Reference).count();
+    assert!(references > 0, "expected a metacall client-call edge");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("no_such_function")),
+        "expected an unresolved invocation diagnostic"
+    );
+}

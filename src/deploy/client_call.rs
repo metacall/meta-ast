@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use crate::deploy::scanner::{CallSite, CallSiteVariant};
 use crate::error::{Diagnostic, Severity};
@@ -79,12 +78,15 @@ pub(crate) fn resolve_script_to_file(
 /// Phase A (load-aware): resolves against symbols loaded by the source file (unique = 1.0, multiple = 0.8).
 /// Phase B (global fallback): searches all project symbols (unique = 0.6, multiple = 0.5).
 /// Computed function names cap confidence at 0.4. Unresolved names emit a Warning diagnostic.
-pub(crate) fn resolve_client_calls(
+fn resolve_sites<F>(
     graph: &CodeGraph,
-    extractions: &[Arc<FileExtraction>],
+    extractions: &[F],
     call_sites: &[CallSite],
     root: &Path,
-) -> ClientCallResolution {
+) -> (Vec<ResolvedCall>, Vec<Diagnostic>)
+where
+    F: std::borrow::Borrow<FileExtraction> + Sync,
+{
     // Path -> node index for file nodes (paths are project-root relative).
     let mut path_to_idx: HashMap<PathBuf, NodeIndex> = HashMap::new();
     // Path -> FileId, used to filter Phase A candidates by loaded file.
@@ -99,6 +101,7 @@ pub(crate) fn resolve_client_calls(
     // Name -> (symbol id, extraction path), pushed in extraction order.
     let mut name_index: HashMap<String, Vec<(SymbolId, PathBuf)>> = HashMap::new();
     for extraction in extractions {
+        let extraction = extraction.borrow();
         for symbol in &extraction.symbols {
             name_index
                 .entry(symbol.name.clone())
@@ -107,7 +110,7 @@ pub(crate) fn resolve_client_calls(
         }
     }
 
-    let mut edges: Vec<(NodeIndex, NodeIndex, f32)> = Vec::new();
+    let mut resolved: Vec<ResolvedCall> = Vec::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
     // Files each source file loads, in load-site order (deduplicated). The
@@ -186,9 +189,9 @@ pub(crate) fn resolve_client_calls(
         let Some(fn_name) = site.function_name.as_deref() else {
             continue;
         };
-        let Some(&caller_idx) = path_to_idx.get(&site.source_file) else {
+        if !path_to_idx.contains_key(&site.source_file) {
             continue;
-        };
+        }
 
         // Phase A: symbols in files this source file loads.
         let mut candidates: Vec<SymbolId> = Vec::new();
@@ -246,8 +249,13 @@ pub(crate) fn resolve_client_calls(
 
         let mut emitted = 0;
         for sid in candidates {
-            if let Some(sym_idx) = graph.symbol_node_index(sid) {
-                edges.push((caller_idx, sym_idx, confidence));
+            if graph.symbol_node_index(sid).is_some() {
+                resolved.push(ResolvedCall {
+                    source_file: site.source_file.clone(),
+                    source_range: site.source_range.clone(),
+                    target: sid,
+                    confidence,
+                });
                 emitted += 1;
             }
         }
@@ -256,7 +264,94 @@ pub(crate) fn resolve_client_calls(
         }
     }
 
+    (resolved, diagnostics)
+}
+
+/// One resolved invocation target.
+struct ResolvedCall {
+    source_file: PathBuf,
+    source_range: Option<crate::model::SourceRange>,
+    target: SymbolId,
+    confidence: f32,
+}
+
+/// Resolve ClientCall sites to file-to-symbol edges for the deploy mesh.
+pub(crate) fn resolve_client_calls<F>(
+    graph: &CodeGraph,
+    extractions: &[F],
+    call_sites: &[CallSite],
+    root: &Path,
+) -> ClientCallResolution
+where
+    F: std::borrow::Borrow<FileExtraction> + Sync,
+{
+    let (resolved, diagnostics) = resolve_sites(graph, extractions, call_sites, root);
+    let mut path_to_idx: HashMap<PathBuf, NodeIndex> = HashMap::new();
+    for &idx in graph.file_to_index.values() {
+        if let NodeData::File(file) = &graph.graph()[idx] {
+            path_to_idx.insert(file.path.clone(), idx);
+        }
+    }
+    let mut edges = Vec::with_capacity(resolved.len());
+    for call in resolved {
+        let (Some(&caller_idx), Some(target_idx)) = (
+            path_to_idx.get(&call.source_file),
+            graph.symbol_node_index(call.target),
+        ) else {
+            continue;
+        };
+        edges.push((caller_idx, target_idx, call.confidence));
+    }
     ClientCallResolution { edges, diagnostics }
+}
+
+/// Resolve ClientCall sites to symbol-to-symbol reference edges.
+///
+/// The caller is the smallest symbol in the call-site file that encloses the
+/// invocation. The graph builder applies these edges so navigation sees
+/// `metacall()` targets.
+pub(crate) fn resolve_client_call_edges<F>(
+    graph: &CodeGraph,
+    extractions: &[F],
+    call_sites: &[CallSite],
+    root: &Path,
+) -> (Vec<(SymbolId, SymbolId, f32)>, Vec<Diagnostic>)
+where
+    F: std::borrow::Borrow<FileExtraction> + Sync,
+{
+    let (resolved, diagnostics) = resolve_sites(graph, extractions, call_sites, root);
+    let edges = resolved
+        .into_iter()
+        .filter_map(|call| {
+            let caller =
+                enclosing_symbol(extractions, &call.source_file, call.source_range.as_ref())?;
+            Some((caller, call.target, call.confidence))
+        })
+        .collect();
+    (edges, diagnostics)
+}
+
+fn enclosing_symbol<F>(
+    extractions: &[F],
+    path: &Path,
+    range: Option<&crate::model::SourceRange>,
+) -> Option<SymbolId>
+where
+    F: std::borrow::Borrow<FileExtraction>,
+{
+    let range = range?;
+    let file = extractions
+        .iter()
+        .map(std::borrow::Borrow::borrow)
+        .find(|file| file.path == path)?;
+    file.symbols
+        .iter()
+        .filter(|symbol| {
+            symbol.source_range.byte_start <= range.byte_start
+                && range.byte_end <= symbol.source_range.byte_end
+        })
+        .min_by_key(|symbol| symbol.source_range.byte_end - symbol.source_range.byte_start)
+        .map(|symbol| symbol.id)
 }
 
 /// Build the Warning diagnostic for an invocation whose target could not be
@@ -277,6 +372,7 @@ mod tests {
     use crate::language::LangId;
     use crate::model::{LineColumn, SnapshotId, SourceRange, Symbol, SymbolKind, Visibility};
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn test_range() -> SourceRange {
         SourceRange {
