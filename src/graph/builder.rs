@@ -500,6 +500,42 @@ impl GraphBuilder {
 
         // Finalize and compute SCC
         let graph = builder.build();
+        #[cfg(feature = "metacall-deploy")]
+        let mut graph = graph;
+
+        // Client-call edges are resolved after the graph exists, because
+        // resolution needs file and symbol nodes. They are ordinary Reference
+        // edges, so navigation and SCC see them.
+        #[cfg(feature = "metacall-deploy")]
+        {
+            let call_sites: Vec<crate::deploy::scanner::CallSite> = extractions
+                .iter()
+                .flat_map(|file| file.borrow().call_sites.iter().cloned())
+                .collect();
+            if !call_sites.is_empty() {
+                let (call_edges, call_diagnostics) =
+                    crate::deploy::client_call::resolve_client_call_edges(
+                        &graph,
+                        extractions,
+                        &call_sites,
+                        root,
+                    );
+                diagnostics.extend(call_diagnostics);
+                for (from, to, confidence) in call_edges {
+                    if let (Some(from_idx), Some(to_idx)) =
+                        (graph.symbol_node_index(from), graph.symbol_node_index(to))
+                    {
+                        graph.add_edge_normalized(
+                            from_idx,
+                            to_idx,
+                            EdgeKind::Reference,
+                            confidence,
+                        );
+                    }
+                }
+            }
+        }
+
         let scc = crate::graph::SccAnalysis::analyze(graph.graph());
 
         (graph, scc, scope_cache)

@@ -261,6 +261,23 @@ impl CodeGraph {
             }
         })
     }
+
+    /// Reference edges as (source symbol, target symbol, confidence).
+    ///
+    /// Skips edges whose endpoints are not symbol nodes. Use for navigation
+    /// and confidence-ranked completion.
+    pub fn reference_edges(&self) -> impl Iterator<Item = (SymbolId, SymbolId, f32)> + '_ {
+        self.graph.edge_indices().filter_map(move |edge_idx| {
+            let weight = self.graph.edge_weight(edge_idx)?;
+            if weight.kind != EdgeKind::Reference {
+                return None;
+            }
+            let (source, target) = self.graph.edge_endpoints(edge_idx)?;
+            let source_id = self.graph.node_weight(source)?.as_symbol()?.id;
+            let target_id = self.graph.node_weight(target)?.as_symbol()?.id;
+            Some((source_id, target_id, weight.confidence))
+        })
+    }
 }
 
 #[cfg(test)]
