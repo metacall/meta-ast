@@ -40,7 +40,7 @@ pub use graph::{
     builder::GraphBuilder,
     edge::{EdgeData, EdgeKind},
     node::{ExternalNode, FileNode, NodeData, SymbolNode},
-    resolver::FlattenedScopeCache,
+    resolver::{FlattenedScopeCache, ScopeMap},
     scc::{DeployabilityHint, Scc, SccAnalysis},
 };
 

@@ -16,7 +16,7 @@ use crate::graph::edge::{
 use crate::language::LangId;
 use crate::model::{FileExtraction, FileId, SymbolId, Visibility};
 
-type ScopeMap = HashMap<String, Vec<(SymbolId, f32)>>;
+pub type ScopeMap = HashMap<String, Vec<(SymbolId, f32)>>;
 pub(crate) type SymbolIndexEntry = (SymbolId, String, LangId, Option<Visibility>);
 pub(crate) type SymbolIndex = HashMap<FileId, Vec<SymbolIndexEntry>>;
 
@@ -64,6 +64,7 @@ impl ResolutionContext {
 ///
 /// Scope = own symbols + public symbols from imported files transitively.
 /// Local symbols take priority over imported (shadowing).
+#[derive(Debug, Clone)]
 pub struct FlattenedScopeCache {
     scopes: HashMap<FileId, ScopeMap>,
 }
@@ -200,6 +201,16 @@ impl FlattenedScopeCache {
         self.scopes
             .get(&file_id)
             .and_then(|s| s.get(name).map(|v| v.as_slice()))
+    }
+
+    /// Full scope for a file: name to candidates with confidence.
+    pub fn scope(&self, file_id: FileId) -> Option<&ScopeMap> {
+        self.scopes.get(&file_id)
+    }
+
+    /// Iterate over every file scope.
+    pub fn iter_scopes(&self) -> impl Iterator<Item = (FileId, &ScopeMap)> {
+        self.scopes.iter().map(|(&file_id, scope)| (file_id, scope))
     }
 
     /// Returns the number of scopes in the cache.
