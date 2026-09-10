@@ -240,7 +240,17 @@ Architectural decisions go in `docs/adr/` as a numbered ADR with context, decisi
 
 ## Releases
 
-Releases are driven by tags. Pushing a `v*` tag runs `release.yml`, which builds the binary for 7 target triples (Linux gnu and musl, aarch64 Linux, macOS x64 and arm64, Windows x64 and arm64) in both core and `metacall-deploy` variants, then creates a GitHub release with a changelog generated from `git log` since the previous tag. Versioning is semver. Maintainers cut releases; if you think one is due, say so in the issues.
+Releases are driven by tags. Pushing a `v*` tag runs `release.yml`:
+
+1. `verify` checks that the tag matches the `Cargo.toml` version, then runs tests, clippy, and formatting.
+2. `build` compiles the core and `metacall-deploy` binaries for 7 target triples (Linux gnu and musl, aarch64 Linux, macOS x64 and arm64, Windows x64 and arm64).
+3. `release` generates categorized notes from Conventional Commits with `cliff.toml` (git-cliff) and creates the GitHub release with every artifact.
+
+Versioning is semver. Write commit subjects in Conventional Commits form so the notes group correctly. Merge commits and version bump chores stay out. Preview notes for a tag locally with `git cliff --config cliff.toml --current --strip header --offline`.
+
+Crates.io publishing is manual: run the `publish` workflow with the release tag. Keep `dry_run` enabled for the first pass. The workflow reads `CARGO_REGISTRY_TOKEN` from the repository secrets and uses the `release` environment.
+
+Maintainers cut releases; if you think one is due, say so in the issues.
 
 ## License
 
