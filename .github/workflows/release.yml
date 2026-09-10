@@ -8,9 +8,43 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check tag against Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+
+      - name: Test
+        run: cargo test --all-features --locked
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Format
+        run: cargo fmt --check
+
   build:
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -41,6 +75,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.94.0
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
@@ -56,7 +91,7 @@ jobs:
 
       # Core binary (no features).
       - name: Build release (core)
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Strip binary (core)
         if: runner.os != 'Windows'
@@ -66,7 +101,7 @@ jobs:
       - name: Build release (deploy)
         env:
           CARGO_TARGET_DIR: target-deploy
-        run: cargo build --release --target ${{ matrix.target }} --features metacall-deploy
+        run: cargo build --release --locked --target ${{ matrix.target }} --features metacall-deploy
 
       - name: Strip binary (deploy)
         if: runner.os != 'Windows'
@@ -84,19 +119,19 @@ jobs:
         with:
           name: meta-ast-${{ matrix.target }}
           path: release/meta-ast-${{ matrix.target }}${{ matrix.ext }}
-          if-no-files-match-files: error
+          if-no-files-found: error
 
       - name: Upload deploy artifact
         uses: actions/upload-artifact@v4
         with:
           name: meta-ast-${{ matrix.target }}-deploy
           path: release/meta-ast-${{ matrix.target }}-deploy${{ matrix.ext }}
-          if-no-files-match-files: error
+          if-no-files-found: error
 
   release:
     name: release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [verify, build]
     permissions:
       contents: write
     steps:
@@ -110,34 +145,21 @@ jobs:
           path: artifacts
           merge-multiple: false
 
-      - name: Generate changelog
+      - name: Generate release notes
         id: changelog
-        run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            LOG=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges)
-          else
-            LOG=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
-          fi
-          echo "log<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$LOG" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+        uses: orhun/git-cliff-action@v4
+        with:
+          version: v2.14.1
+          config: cliff.toml
+          args: --current --strip header --offline
+        env:
+          OUTPUT: release-notes.md
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: false
-          body: |
-            ## meta-ast ${{ github.ref_name }}
-
-            Polyglot static analysis engine - GSoC 2026 final release.
-
-            This release includes core and `metacall-deploy` binaries for
-            Linux (glibc + musl), macOS (x86_64 + aarch64), and Windows
-            (x86_64 + aarch64), plus the crates.io package.
-
-            ## Changes
-            ${{ steps.changelog.outputs.log }}
+          body_path: ${{ steps.changelog.outputs.changelog }}
           files: |
             artifacts/meta-ast-x86_64-unknown-linux-gnu/*
             artifacts/meta-ast-x86_64-unknown-linux-musl/*

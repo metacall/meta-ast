@@ -1,0 +1,52 @@
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to publish, for example v0.6.1
+        required: true
+        type: string
+      dry_run:
+        description: Validate the package without uploading to crates.io
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: publish ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check tag against Cargo.toml
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          tag="${INPUT_TAG#v}"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag $INPUT_TAG does not match Cargo.toml version $version"
+            exit 1
+          fi
+
+      - name: Publish dry run
+        if: inputs.dry_run
+        run: cargo publish --locked --dry-run
+
+      - name: Publish
+        if: ${{ !inputs.dry_run }}
+        run: cargo publish --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

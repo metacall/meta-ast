@@ -1,0 +1,66 @@
+# git-cliff configuration. See https://git-cliff.org/docs/configuration
+#
+# Release notes group Conventional Commits by type. Merge commits and version
+# bump chores stay out. Unconventional subjects land under Other Changes.
+# Run offline so notes never depend on the GitHub API:
+#
+#   git cliff --config cliff.toml --current --strip header --offline
+
+[changelog]
+body = """
+{% if version %}## meta-ast {{ version }}{% else %}## Unreleased{% endif %}
+
+Polyglot static analysis engine for Python, JavaScript, TypeScript, TSX, C, C++, Rust, Go, and Ruby.
+See the [README](https://github.com/metacall/meta-ast#readme) for usage.
+
+{% for entry in commits | commit_groups(groups=commit_parsers_groups) -%}
+### {{ entry.group | striptags | trim }}
+
+{% for commit in entry.commits -%}
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/metacall/meta-ast/commit/{{ commit.id }}))
+{% endfor %}
+{% endfor %}
+### Install
+
+- CLI: `cargo install meta-ast{% if version %} --version {{ version | trim_start_matches(pat="v") }}{% endif %}`
+- Library: `cargo add meta-ast{% if version %}@{{ version | trim_start_matches(pat="v") }}{% endif %}`
+- Prebuilt binaries are attached for Linux (glibc and musl), macOS (x86_64 and aarch64), and Windows (x86_64 and aarch64), in core and `metacall-deploy` variants.
+{% if previous.version %}
+**Full Changelog**: https://github.com/metacall/meta-ast/compare/{{ previous.version }}...{{ version }}
+{% endif %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+require_conventional = false
+split_commits = false
+protect_breaking_commits = true
+commit_parsers = [
+    { message = "^feat", group = "<!-- 0 -->Features" },
+    { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+    { message = "^perf", group = "<!-- 2 -->Performance" },
+    { message = "^refactor", group = "<!-- 3 -->Refactoring" },
+    { message = "^docs?", group = "<!-- 4 -->Documentation" },
+    { message = "^test", group = "<!-- 5 -->Testing" },
+    { message = "^build", group = "<!-- 6 -->Build" },
+    { message = "^ci", group = "<!-- 7 -->CI" },
+    { message = "^style", group = "<!-- 8 -->Style" },
+    { message = "^revert", group = "<!-- 9 -->Reverts" },
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^chore.*version", skip = true },
+    { message = "^chore", group = "<!-- 10 -->Maintenance" },
+    { message = "^Merge", skip = true },
+    { message = ".*", group = "<!-- 11 -->Other Changes" },
+]
+filter_commits = false
+fail_on_unmatched_commit = false
+tag_pattern = "v[0-9].*"
+use_branch_tags = false
+topo_order = false
+topo_order_commits = true
+sort_commits = "oldest"
+commit_preprocessors = [
+    { pattern = '\(#(\d+)\)', replace = "([#${1}](https://github.com/metacall/meta-ast/pull/${1}))" },
+]
