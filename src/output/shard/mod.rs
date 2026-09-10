@@ -201,6 +201,8 @@ mod tests {
             references: Vec::new(),
             diagnostics: Vec::new(),
             ast_node_count: 0,
+            #[cfg(feature = "metacall-deploy")]
+            call_sites: Vec::new(),
             edges: vec![ShardEdge {
                 source_name: "python file a.py".to_string(),
                 target_name: "python file b.py".to_string(),
@@ -235,6 +237,8 @@ mod tests {
             references: Vec::new(),
             diagnostics: Vec::new(),
             ast_node_count: 0,
+            #[cfg(feature = "metacall-deploy")]
+            call_sites: Vec::new(),
             edges: Vec::new(),
         })
         .unwrap();
@@ -350,6 +354,52 @@ mod tests {
             edge_targets
                 .iter()
                 .any(|name| name.contains("process#function!1"))
+        );
+    }
+
+    #[cfg(feature = "metacall-deploy")]
+    #[test]
+    fn shard_round_trip_preserves_call_sites() {
+        use crate::deploy::scanner::{CallSite, CallSiteVariant};
+
+        let mut extraction = extraction();
+        extraction.call_sites = vec![CallSite {
+            source_file: extraction.path.clone(),
+            caller_lang: LangId::Python,
+            variant: CallSiteVariant::ClientCall,
+            target_lang: None,
+            scripts: Vec::new(),
+            function_name: Some("multiply".to_string()),
+            is_async: false,
+            source_range: Some(range()),
+            confidence: 0.4,
+        }];
+        let mut diagnostics = Vec::new();
+        let (graph, _) = GraphBuilder::from_extractions(
+            std::slice::from_ref(&extraction),
+            Path::new("."),
+            SnapshotId::new(1).unwrap(),
+            &mut diagnostics,
+        );
+        let shard = ShardFile::from_extraction(&extraction, &graph).unwrap();
+        let mut bytes = Vec::new();
+        write_shard(&mut bytes, &[shard]).unwrap();
+        let decoded = read_shard(Cursor::new(bytes)).unwrap();
+        let loaded = decoded
+            .into_iter()
+            .next()
+            .unwrap()
+            .load(&IdGenerator::with_start(500))
+            .unwrap();
+
+        assert_eq!(loaded.file.call_sites.len(), 1);
+        assert_eq!(
+            loaded.file.call_sites[0].variant,
+            CallSiteVariant::ClientCall
+        );
+        assert_eq!(
+            loaded.file.call_sites[0].function_name.as_deref(),
+            Some("multiply")
         );
     }
 }

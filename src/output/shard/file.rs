@@ -17,7 +17,7 @@ use crate::output::shard::edge::{ShardEdge, validate_edge};
 use crate::output::shard::error::ShardError;
 use crate::output::shard::name::{node_belongs_to_file, normalized_path, stable_node_name};
 
-pub const SHARD_SCHEMA_VERSION: u32 = 2;
+pub const SHARD_SCHEMA_VERSION: u32 = 3;
 
 /// A per-file shard record stored in `.meta-ast/shards/<n>.jsonl`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +30,10 @@ pub struct ShardFile {
     pub references: Vec<UnresolvedReference>,
     pub diagnostics: Vec<Diagnostic>,
     pub ast_node_count: usize,
+    /// MetaCall load and client-call sites, persisted for cold-start fidelity.
+    #[cfg(feature = "metacall-deploy")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub call_sites: Vec<crate::deploy::scanner::CallSite>,
     pub edges: Vec<ShardEdge>,
 }
 
@@ -111,6 +115,8 @@ impl ShardFile {
             references: extraction.references.clone(),
             diagnostics: extraction.diagnostics.clone(),
             ast_node_count: extraction.ast_node_count,
+            #[cfg(feature = "metacall-deploy")]
+            call_sites: extraction.call_sites.clone(),
             edges,
         })
     }
@@ -136,6 +142,10 @@ impl ShardFile {
         file.references = self.references;
         file.diagnostics = self.diagnostics;
         file.ast_node_count = self.ast_node_count;
+        #[cfg(feature = "metacall-deploy")]
+        {
+            file.call_sites = self.call_sites;
+        }
 
         Ok(LoadedShard {
             file,
