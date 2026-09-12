@@ -354,7 +354,15 @@ fn reader_refuses_a_name_that_no_platform_can_write() {
 
     let (analysis, _diagnostics) =
         meta_ast::pipeline::analyze_graph(root, SnapshotId::new(1).unwrap(), None).unwrap();
-    write_index(root, &analysis, &["shards/CON.jsonl".to_string()]);
+    write_index(root, &analysis, &["shards/0.jsonl".to_string()]);
+
+    let manifest_path = root.join(INDEX_DIR_NAME).join("manifest.jsonl");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    fs::write(
+        &manifest_path,
+        manifest.replace("shards/0.jsonl", "shards/CON.jsonl"),
+    )
+    .unwrap();
 
     let error = load_index(
         root,

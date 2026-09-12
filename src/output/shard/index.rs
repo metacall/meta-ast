@@ -119,13 +119,14 @@ pub fn load_index(
     let mut shards: BTreeMap<String, Vec<ShardFile>> = BTreeMap::new();
     let mut unreadable_shards: BTreeMap<String, String> = BTreeMap::new();
     for record in &manifest {
+        // Containment and writability stay separate, so a traversal attempt and
+        // a name that no portable writer creates do not look alike. Shard names
+        // are checked here, where the shard file is opened.
         if !is_safe_shard_name(&record.shard) {
             return Err(ShardError::UnsafeShardName {
                 name: record.shard.clone(),
             });
         }
-        // Containment and writability stay separate, so a traversal attempt
-        // and a name that no portable writer creates do not look alike.
         if !is_writable_name(&record.shard) {
             return Err(ShardError::UnwritableShardName {
                 name: record.shard.clone(),
