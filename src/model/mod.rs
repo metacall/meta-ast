@@ -115,6 +115,8 @@ pub enum SymbolKind {
     Module,
     Namespace,
     TypeAlias,
+    /// Function or method declaration without a body (C and C++ prototypes).
+    Declaration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -314,6 +316,7 @@ mod tests {
             SymbolKind::Module,
             SymbolKind::Namespace,
             SymbolKind::TypeAlias,
+            SymbolKind::Declaration,
         ];
         for v in &variants {
             let json = serde_json::to_string(v).unwrap();
