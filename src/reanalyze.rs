@@ -357,6 +357,17 @@ mod tests {
             .collect()
     }
 
+    /// Root ignores file permissions, so the read-failure case cannot run as root.
+    #[cfg(unix)]
+    fn writes_as_root(path: &Path) -> bool {
+        std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(path).unwrap()) == 0
+    }
+
+    #[cfg(not(unix))]
+    fn writes_as_root(_path: &Path) -> bool {
+        false
+    }
+
     #[test]
     fn cold_analysis_populates_state() {
         let root = temp_dir("cold");
@@ -636,6 +647,114 @@ mod tests {
             reanalyze_extractions(&root, None, &[outside], &mut state).unwrap();
         assert!(extractions.is_empty());
         assert_eq!(cs.files_added, 0);
+    }
+
+    #[test]
+    fn read_failure_keeps_the_cached_entry() {
+        let root = temp_dir("read_failure");
+        let a = write_file(&root, "a.py", "def kept(): pass\n");
+
+        let mut state = WatchState::new();
+        let (first, cs, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
+        assert_eq!(cs.files_added, 1);
+        let id_before = first.graph.symbols().next().unwrap().0.to_raw();
+
+        if writes_as_root(&a) {
+            return;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&a).unwrap().permissions();
+            perms.set_mode(0o000);
+            std::fs::set_permissions(&a, perms).unwrap();
+        }
+
+        let (_, cs2, diags2) = incremental_reanalyze(&root, None, &mut state).unwrap();
+        assert_eq!(cs2.files_removed, 0, "a read failure is not a removal");
+        assert_eq!(
+            cs2.files_unchanged, 1,
+            "a read failure keeps the cached file"
+        );
+        assert_eq!(state.cache.extractions.len(), 1);
+        assert!(!diags2.is_empty(), "the read failure must be reported");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&a).unwrap().permissions();
+            perms.set_mode(0o644);
+            std::fs::set_permissions(&a, perms).unwrap();
+        }
+
+        let (third, cs3, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
+        assert_eq!(cs3.files_unchanged, 1);
+        assert_eq!(
+            third.graph.symbols().next().unwrap().0.to_raw(),
+            id_before,
+            "the transient failure must not renumber the cached file"
+        );
+    }
+
+    #[test]
+    fn id_exhaustion_is_an_error() {
+        let root = temp_dir("id_exhaustion");
+        write_file(&root, "a.py", "def a(): pass\n");
+
+        let mut state = WatchState::new();
+        let mut seated = FileExtraction::empty(root.join("a.py"), LangId::Python);
+        seated.symbols.push(crate::model::Symbol {
+            id: crate::model::SymbolId::new(u32::MAX).unwrap(),
+            name: "seated".into(),
+            kind: crate::model::SymbolKind::Function,
+            language: LangId::Python,
+            file_path: root.join("a.py"),
+            source_range: crate::model::SourceRange {
+                byte_start: 0,
+                byte_end: 0,
+                start: crate::model::LineColumn { line: 0, column: 0 },
+                end: crate::model::LineColumn { line: 0, column: 0 },
+            },
+            visibility: None,
+            signature: None,
+            docstring: None,
+            is_async: false,
+        });
+        state.cache_mut().update(
+            root.join("a.py"),
+            Fingerprint::of(b"stale"),
+            Arc::new(seated),
+        );
+
+        assert!(
+            incremental_reanalyze(&root, None, &mut state).is_err(),
+            "an exhausted id space must report an error"
+        );
+    }
+
+    /// The verbatim prefix only exists on Windows, so this key-form defect is Windows-only.
+    #[cfg(windows)]
+    #[test]
+    fn overlay_verbatim_path_shares_the_discovered_key() {
+        let root = temp_dir("overlay_key");
+        write_file(&root, "a.py", "def shared(): pass\n");
+
+        let mut state = WatchState::new();
+        let mut verbatim = overlay(&root, "a.py", "def shared(): pass\n");
+        verbatim.path = PathBuf::from(format!(r"\\?\{}", verbatim.path.display()));
+
+        let (extractions, cs, _) =
+            reanalyze_extractions(&root, None, std::slice::from_ref(&verbatim), &mut state)
+                .unwrap();
+        assert_eq!(
+            cs.files_added, 1,
+            "one file must not be counted under two keys"
+        );
+        assert_eq!(extractions.len(), 1);
+
+        let (_, cs2, _) = reanalyze_extractions(&root, None, &[verbatim], &mut state).unwrap();
+        assert_eq!(cs2.files_unchanged, 1);
+        assert_eq!(cs2.files_added + cs2.files_modified, 0);
     }
 
     #[test]

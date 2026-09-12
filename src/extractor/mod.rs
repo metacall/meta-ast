@@ -265,6 +265,85 @@ mod tests {
     }
 
     #[test]
+    fn symbol_ids_are_contiguous_in_path_order() {
+        let dir = test_dir().join("numbering");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut files = Vec::new();
+        for index in (0..24).rev() {
+            let path = dir.join(format!("f{index:02}.py"));
+            let body: String = (0..5)
+                .map(|n| format!("def g{index}_{n}(): pass\n"))
+                .collect();
+            std::fs::write(&path, body).unwrap();
+            files.push((path, LangId::Python));
+        }
+
+        let result = extract(&files);
+        let mut per_file: Vec<(PathBuf, Vec<u32>)> = result
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.path.clone(),
+                    file.symbols.iter().map(|s| s.id.to_raw()).collect(),
+                )
+            })
+            .collect();
+        per_file.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut next = 1u32;
+        for (path, ids) in &per_file {
+            assert_eq!(ids.len(), 5, "{}", path.display());
+            assert_eq!(
+                ids.first().copied(),
+                Some(next),
+                "ids of {} must start at {next} in path order",
+                path.display()
+            );
+            let last = ids.last().copied().unwrap();
+            assert_eq!(
+                last,
+                next + ids.len() as u32 - 1,
+                "ids of {} must be contiguous",
+                path.display()
+            );
+            next = last + 1;
+        }
+    }
+
+    #[test]
+    fn symbol_ids_are_stable_across_runs() {
+        let dir = test_dir().join("stable_numbering");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut files = Vec::new();
+        for index in 0..8 {
+            let path = dir.join(format!("s{index}.py"));
+            std::fs::write(
+                &path,
+                format!("def h{index}(): pass\ndef k{index}(): pass\n"),
+            )
+            .unwrap();
+            files.push((path, LangId::Python));
+        }
+
+        let map = |result: ExtractionResult| {
+            let mut entries: Vec<(String, u32)> = result
+                .files
+                .iter()
+                .flat_map(|file| file.symbols.iter().map(|s| (s.name.clone(), s.id.to_raw())))
+                .collect();
+            entries.sort();
+            entries
+        };
+
+        assert_eq!(map(extract(&files)), map(extract(&files)));
+    }
+
+    #[test]
     fn extract_single_python_file() {
         let path = write_temp("single.py", b"def hello(): pass\n");
         let result = extract(&[(path.clone(), LangId::Python)]);
