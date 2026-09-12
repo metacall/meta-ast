@@ -19,7 +19,7 @@ pub fn emit_inspect(symbols: &mut Vec<Symbol>, config: &EmitConfig) -> anyhow::R
     let content = crate::output::inspect::serialize_inspect(symbols, &config.format)?;
     match &config.output {
         Some(path) => {
-            std::fs::write(path, content)?;
+            crate::output::write_atomic(path, content.as_bytes())?;
         }
         None => {
             println!("{content}");
@@ -47,7 +47,7 @@ pub fn emit_graph(analysis: &GraphAnalysis, config: &EmitConfig) -> anyhow::Resu
             .output
             .clone()
             .unwrap_or_else(|| PathBuf::from("project.metast"));
-        std::fs::write(&path, html)?;
+        crate::output::write_atomic(&path, html.as_bytes())?;
         if config.open_browser {
             // A file URL keeps a non-UTF-8 path intact. `to_string_lossy` would
             // replace the unencodable bytes, and the OS handler expects a URL.
@@ -77,7 +77,7 @@ pub fn emit_graph(analysis: &GraphAnalysis, config: &EmitConfig) -> anyhow::Resu
         )?;
         match &config.output {
             Some(path) => {
-                std::fs::write(path, content)?;
+                crate::output::write_atomic(path, content.as_bytes())?;
             }
             None => {
                 println!("{content}");
