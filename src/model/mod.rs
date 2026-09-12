@@ -292,11 +292,11 @@ mod tests {
     fn visibility_serialization() {
         assert_eq!(
             serde_json::to_string(&Visibility::Public).unwrap(),
-            "\"Public\""
+            "\"public\""
         );
         assert_eq!(
             serde_json::to_string(&Visibility::Private).unwrap(),
-            "\"Private\""
+            "\"private\""
         );
     }
 
@@ -328,6 +328,11 @@ mod tests {
                 json.len() > 2,
                 "expected non-empty variant name, got: {json}"
             );
+            assert!(
+                json.chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '_' || c == '"'),
+                "kind names are lowercase snake_case, got: {json}"
+            );
         }
     }
 
@@ -348,7 +353,7 @@ mod tests {
         let json = serde_json::to_string(&sym).unwrap();
         let val: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(val["name"], "roundtrip_fn");
-        assert_eq!(val["kind"], "Method");
+        assert_eq!(val["kind"], "method");
         assert_eq!(val["is_async"], false);
     }
 
@@ -365,11 +370,11 @@ mod tests {
     fn data_scope_serialization() {
         assert_eq!(
             serde_json::to_string(&DataScope::Local).unwrap(),
-            "\"Local\""
+            "\"local\""
         );
         assert_eq!(
             serde_json::to_string(&DataScope::Parameter).unwrap(),
-            "\"Parameter\""
+            "\"parameter\""
         );
     }
 
@@ -385,19 +390,19 @@ mod tests {
     fn flow_kind_serialization() {
         assert_eq!(
             serde_json::to_string(&FlowKind::DefUse).unwrap(),
-            "\"DefUse\""
+            "\"def_use\""
         );
         assert_eq!(
             serde_json::to_string(&FlowKind::Argument).unwrap(),
-            "\"Argument\""
+            "\"argument\""
         );
         assert_eq!(
             serde_json::to_string(&FlowKind::Return).unwrap(),
-            "\"Return\""
+            "\"return\""
         );
         assert_eq!(
             serde_json::to_string(&FlowKind::FieldAccess).unwrap(),
-            "\"FieldAccess\""
+            "\"field_access\""
         );
     }
 
@@ -414,7 +419,7 @@ mod tests {
         let json = serde_json::to_string(&data).unwrap();
         let val: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(val["name"], "x");
-        assert_eq!(val["scope"], "Local");
+        assert_eq!(val["scope"], "local");
         assert_eq!(val["type_hint"], "int");
     }
 
@@ -445,7 +450,7 @@ mod tests {
         let val: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(val["source"], 1);
         assert_eq!(val["target"], 2);
-        assert_eq!(val["kind"], "Argument");
+        assert_eq!(val["kind"], "argument");
         assert_eq!(val["confidence"], 0.85);
     }
 

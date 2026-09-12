@@ -406,4 +406,86 @@ mod tests {
             Some("multiply")
         );
     }
+
+    /// The version superseded by the casing change must be refused, so an old
+    /// index is regenerated instead of being used with a different encoding.
+    #[test]
+    fn reader_rejects_the_superseded_schema_version() {
+        let mut value = serde_json::to_value(ShardFile {
+            schema_version: SHARD_SCHEMA_VERSION,
+            path: PathBuf::from("a.py"),
+            language: LangId::Python,
+            symbols: Vec::new(),
+            imports: Vec::new(),
+            references: Vec::new(),
+            diagnostics: Vec::new(),
+            ast_node_count: 0,
+            #[cfg(feature = "metacall-deploy")]
+            call_sites: Vec::new(),
+            edges: Vec::new(),
+        })
+        .unwrap();
+        value["schema_version"] = serde_json::json!(3);
+        let input = format!("{}\n", serde_json::to_string(&value).unwrap());
+
+        let error = read_shard(Cursor::new(input)).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ShardError::SchemaVersion {
+                    found: 3,
+                    expected: SHARD_SCHEMA_VERSION,
+                    ..
+                }
+            ),
+            "version 3 is refused with the expected version reported"
+        );
+    }
+
+    /// A dropped dataflow payload is data loss, so the record must say so.
+    #[cfg(feature = "dataflow")]
+    #[test]
+    fn dataflow_payload_drop_is_recorded() {
+        let mut extraction = extraction();
+        extraction.data_nodes = vec![crate::model::DataNode {
+            id: crate::model::DataNodeId::new(1).unwrap(),
+            symbol_id: None,
+            name: Some("count".to_string()),
+            scope: crate::model::DataScope::Local,
+            type_hint: None,
+            source_range: range(),
+        }];
+
+        let (graph, _) = GraphBuilder::from_extractions(
+            std::slice::from_ref(&extraction),
+            Path::new("."),
+            SnapshotId::new(1).unwrap(),
+            &mut Vec::new(),
+        );
+        let shard = ShardFile::from_extraction(&extraction, &graph).unwrap();
+        let reports_drop = |diagnostics: &[crate::error::Diagnostic]| {
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("dataflow payload not persisted"))
+        };
+        assert!(
+            reports_drop(&shard.diagnostics),
+            "the record states that the payload is not persisted: {:?}",
+            shard.diagnostics
+        );
+
+        let mut bytes = Vec::new();
+        write_shard(&mut bytes, &[shard]).unwrap();
+        let loaded = read_shard(Cursor::new(bytes))
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .load(&IdGenerator::with_start(1))
+            .unwrap();
+        assert!(
+            reports_drop(&loaded.file.diagnostics),
+            "the consumer sees the dropped payload after a round trip"
+        );
+    }
 }

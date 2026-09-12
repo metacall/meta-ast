@@ -167,4 +167,35 @@ mod tests {
             ["funcs", "classes", "objects"].into_iter().collect();
         assert_eq!(keys, expected);
     }
+
+    /// Visibility is a documented lowercase value in every output.
+    #[test]
+    fn visibility_is_lowercase_in_inspect_output() {
+        let symbol = Symbol {
+            id: crate::model::SymbolId::new(1).unwrap(),
+            name: "encrypt".to_string(),
+            kind: SymbolKind::Function,
+            language: crate::language::LangId::Python,
+            file_path: std::path::PathBuf::from("a.py"),
+            source_range: crate::model::SourceRange {
+                byte_start: 0,
+                byte_end: 9,
+                start: crate::model::LineColumn { line: 0, column: 0 },
+                end: crate::model::LineColumn { line: 0, column: 9 },
+            },
+            visibility: Some(crate::model::Visibility::Public),
+            signature: None,
+            docstring: None,
+            is_async: false,
+        };
+
+        let mut symbols = vec![symbol];
+        let json = crate::output::inspect::serialize_inspect(
+            &mut symbols,
+            &crate::output::OutputFormat::Json,
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["funcs"][0]["visibility"], "public");
+    }
 }

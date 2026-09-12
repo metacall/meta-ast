@@ -693,4 +693,156 @@ mod tests {
             .collect();
         assert_eq!(order, expected);
     }
+
+    /// Graph nodes are ordered by contract, not by insertion order.
+    #[test]
+    fn serialized_nodes_use_canonical_order() {
+        let mut graph = crate::graph::CodeGraph::new(SnapshotId::new(1).unwrap());
+        let a_id = crate::model::FileId::new(1).unwrap();
+        let b_id = crate::model::FileId::new(2).unwrap();
+
+        // Insertion order is deliberately not the canonical order.
+        let sym_idx = graph.add_node(NodeData::Symbol(SymbolNode {
+            id: crate::model::SymbolId::new(7).unwrap(),
+            name: "zeta".to_string(),
+            kind: crate::model::SymbolKind::Function,
+            file_id: b_id,
+            visibility: Some(crate::model::Visibility::Public),
+            source_range: sample_source_range(),
+        }));
+        let b_idx = graph.add_node(NodeData::File(FileNode::new(
+            b_id,
+            PathBuf::from("b.py"),
+            LangId::Python,
+            SnapshotId::new(1).unwrap(),
+        )));
+        let a_idx = graph.add_node(NodeData::File(FileNode::new(
+            a_id,
+            PathBuf::from("a.py"),
+            LangId::Python,
+            SnapshotId::new(1).unwrap(),
+        )));
+        graph.file_to_index.insert(a_id, a_idx);
+        graph.file_to_index.insert(b_id, b_idx);
+        graph.add_edge_normalized(a_idx, b_idx, EdgeKind::Import, 1.0);
+        graph.add_edge_normalized(b_idx, a_idx, EdgeKind::Import, 1.0);
+
+        let scc = SccAnalysis::analyze(graph.graph());
+        let output = GraphOutput::from_graph(&graph, Some(&scc), 1);
+
+        let order: Vec<(String, Option<String>)> = output
+            .nodes
+            .iter()
+            .map(|n| (n.kind.clone(), n.path.clone().or_else(|| n.name.clone())))
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                ("file".to_string(), Some("a.py".to_string())),
+                ("file".to_string(), Some("b.py".to_string())),
+                ("symbol".to_string(), Some("zeta".to_string())),
+            ],
+            "files come first in path order, then symbols"
+        );
+
+        for scc in &output.sccs {
+            let members = &scc.nodes;
+            assert!(
+                members.windows(2).all(|pair| pair[0] < pair[1]),
+                "SCC members are ordered by node index, got {members:?}"
+            );
+        }
+        let _ = sym_idx;
+    }
+
+    /// The casing contract is lower case for kinds and visibility.
+    #[test]
+    fn symbol_kind_and_visibility_use_the_documented_casing() {
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        let symbol = crate::model::Symbol {
+            id: crate::model::SymbolId::new(3).unwrap(),
+            name: "helper".to_string(),
+            kind: crate::model::SymbolKind::TypeAlias,
+            language: LangId::Python,
+            file_path: PathBuf::from("a.py"),
+            source_range: sample_source_range(),
+            visibility: Some(crate::model::Visibility::Public),
+            signature: None,
+            docstring: None,
+            is_async: false,
+        };
+        builder.add_file(PathBuf::from("a.py"), LangId::Python);
+        builder.add_symbol(&symbol).unwrap();
+        let graph = builder.build();
+        let scc = sample_scc_analysis();
+
+        let json = serialize_graph(&graph, &scc, 1, &OutputFormat::Json).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let node = parsed["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["kind"] == "symbol");
+        assert!(node.is_some(), "the symbol node is serialized");
+        let node = node.unwrap();
+
+        assert_eq!(node["symbol_kind"], "type_alias");
+        assert_eq!(node["visibility"], "public");
+    }
+
+    /// Absence of the confidence field must not carry meaning.
+    #[test]
+    fn edge_confidence_is_always_serialized() {
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        let file_a = builder.add_file(PathBuf::from("a.py"), LangId::Python);
+        builder.add_file(PathBuf::from("b.py"), LangId::Python);
+        builder.add_import(file_a, PathBuf::from("b.py"));
+        let graph = builder.build();
+        let scc = sample_scc_analysis();
+
+        let json = serialize_graph(&graph, &scc, 1, &OutputFormat::Json).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let edges = parsed["edges"].as_array().unwrap();
+        assert!(!edges.is_empty(), "the graph has at least one edge");
+        for edge in edges {
+            assert!(
+                edge["confidence"].is_number(),
+                "every edge carries a confidence, got {edge}"
+            );
+        }
+    }
+
+    /// A non-finite confidence is data corruption, so it is counted and
+    /// normalized instead of being written out as an absent field.
+    #[test]
+    fn non_finite_confidence_is_counted_and_normalized() {
+        let mut graph = crate::graph::CodeGraph::new(SnapshotId::new(1).unwrap());
+        let a_id = crate::model::FileId::new(1).unwrap();
+        let b_id = crate::model::FileId::new(2).unwrap();
+        let a_idx = graph.add_node(NodeData::File(FileNode::new(
+            a_id,
+            PathBuf::from("a.py"),
+            LangId::Python,
+            SnapshotId::new(1).unwrap(),
+        )));
+        let b_idx = graph.add_node(NodeData::File(FileNode::new(
+            b_id,
+            PathBuf::from("b.py"),
+            LangId::Python,
+            SnapshotId::new(1).unwrap(),
+        )));
+        graph.file_to_index.insert(a_id, a_idx);
+        graph.file_to_index.insert(b_id, b_idx);
+        graph.add_edge_normalized(a_idx, b_idx, EdgeKind::Import, f32::NAN);
+
+        let scc = SccAnalysis::analyze(graph.graph());
+        let output = GraphOutput::from_graph(&graph, Some(&scc), 1);
+        let json = serde_json::to_string(&output).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed["metadata"]["invalid_confidence_edges"], 1,
+            "the graph records the rejected confidence"
+        );
+        assert_eq!(parsed["edges"][0]["confidence"], 0.0);
+    }
 }
