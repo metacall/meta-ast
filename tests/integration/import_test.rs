@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use meta_ast::error::Severity;
 use meta_ast::extractor::extract;
 use meta_ast::graph::{CodeGraph, GraphBuilder, NodeData, edge::EdgeKind};
-use meta_ast::input::discover_files;
+use meta_ast::input::{discover_files, portable_path};
 use meta_ast::model::SnapshotId;
 
 fn project(name: &str) -> PathBuf {
@@ -35,7 +35,7 @@ fn import_edge_exists(graph: &CodeGraph, from: &str, to: &str) -> bool {
     let file_id = |suffix: &str| {
         graph
             .files()
-            .find(|(_, file)| file.path.to_string_lossy().ends_with(suffix))
+            .find(|(_, file)| portable_path(&file.path).ends_with(suffix))
             .map(|(id, _)| id)
     };
     let (Some(from_id), Some(to_id)) = (file_id(from), file_id(to)) else {
