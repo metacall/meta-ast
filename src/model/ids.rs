@@ -235,4 +235,30 @@ mod tests {
         assert_eq!(std::mem::size_of::<Option<SnapshotId>>(), 4);
         assert_eq!(std::mem::size_of::<Option<DataNodeId>>(), 4);
     }
+    #[test]
+    fn counters_hand_out_unique_ids_under_contention() {
+        let idgen = Arc::new(IdGenerator::<SymbolId>::new());
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let idgen = Arc::clone(&idgen);
+                std::thread::spawn(move || {
+                    let mut ids = Vec::with_capacity(10_000);
+                    for _ in 0..10_000 {
+                        ids.push(idgen.next());
+                    }
+                    ids
+                })
+            })
+            .collect();
+
+        let all: Vec<SymbolId> = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect();
+        let unique: HashSet<SymbolId> = all.iter().copied().collect();
+        assert_eq!(unique.len(), 80_000, "every identifier is handed out once");
+        let raw: Vec<u32> = unique.iter().map(|id| id.to_raw()).collect();
+        assert_eq!(raw.iter().min(), Some(&1));
+        assert_eq!(raw.iter().max(), Some(&80_000));
+    }
 }

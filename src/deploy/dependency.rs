@@ -755,4 +755,414 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Every source form the resolver table lists must keep resolving the same
+    /// way: which file wins, whether a version is found, and the source label.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Expectation {
+        Lockfile(Option<&'static str>),
+        Manifest(Option<&'static str>),
+        Unresolved,
+    }
+
+    struct SourceCase {
+        name: &'static str,
+        language: LangId,
+        package: &'static str,
+        file: &'static str,
+        content: &'static str,
+        nested: bool,
+        expectation: Expectation,
+    }
+
+    #[test]
+    fn ecosystem_sources_resolve_through_one_table() {
+        use LangId::{C, Cpp, Go, JavaScript, Python, Ruby, Rust as RustLang};
+
+        let cases = [
+            SourceCase {
+                name: "uv lock",
+                language: Python,
+                package: "requests",
+                file: "uv.lock",
+                content: "[[package]]\nname = \"requests\"\nversion = \"2.32.3\"\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("2.32.3")),
+            },
+            SourceCase {
+                name: "poetry lock",
+                language: Python,
+                package: "requests",
+                file: "poetry.lock",
+                content: "[[package]]\nname = \"requests\"\nversion = \"2.32.3\"\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("2.32.3")),
+            },
+            SourceCase {
+                name: "requirements manifest",
+                language: Python,
+                package: "requests",
+                file: "requirements.txt",
+                content: "requests==2.32.3\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "pyproject manifest",
+                language: Python,
+                package: "requests",
+                file: "pyproject.toml",
+                content: "[project]\nname = \"app\"\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "pyproject in a subdirectory",
+                language: Python,
+                package: "requests",
+                file: "pyproject.toml",
+                content: "[project]\nname = \"app\"\n",
+                nested: true,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "no python source",
+                language: Python,
+                package: "requests",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+            SourceCase {
+                name: "yarn lock",
+                language: JavaScript,
+                package: "express",
+                file: "yarn.lock",
+                content: "\"express@^4.18.2\":\n  version \"4.18.2\"\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("4.18.2")),
+            },
+            SourceCase {
+                name: "pnpm lock",
+                language: JavaScript,
+                package: "express",
+                file: "pnpm-lock.yaml",
+                content: "  express@4.18.2:\n    version: 4.18.2\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("4.18.2")),
+            },
+            SourceCase {
+                name: "package json",
+                language: JavaScript,
+                package: "express",
+                file: "package.json",
+                content: "{\"dependencies\": {\"express\": \"4.18.2\"}}\n",
+                nested: false,
+                expectation: Expectation::Manifest(Some("4.18.2")),
+            },
+            SourceCase {
+                name: "package json in a subdirectory",
+                language: JavaScript,
+                package: "express",
+                file: "package.json",
+                content: "{\"dependencies\": {\"express\": \"4.18.2\"}}\n",
+                nested: true,
+                expectation: Expectation::Manifest(Some("4.18.2")),
+            },
+            SourceCase {
+                name: "no node source",
+                language: JavaScript,
+                package: "express",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+            SourceCase {
+                name: "cargo lock",
+                language: RustLang,
+                package: "serde",
+                file: "Cargo.lock",
+                content: "[[package]]\nname = \"serde\"\nversion = \"1.0.203\"\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("1.0.203")),
+            },
+            SourceCase {
+                name: "cargo manifest",
+                language: RustLang,
+                package: "serde",
+                file: "Cargo.toml",
+                content: "[dependencies]\nserde = \"1\"\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "no rust source",
+                language: RustLang,
+                package: "serde",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+            SourceCase {
+                name: "go sum",
+                language: Go,
+                package: "github.com/pkg/errors",
+                file: "go.sum",
+                content: "github.com/pkg/errors v0.9.1 h1:abc\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("v0.9.1")),
+            },
+            SourceCase {
+                name: "go mod",
+                language: Go,
+                package: "github.com/pkg/errors",
+                file: "go.mod",
+                content: "module app\n\nrequire (\n\tgithub.com/pkg/errors v0.9.1\n)\n",
+                nested: false,
+                expectation: Expectation::Manifest(Some("0.9.1")),
+            },
+            SourceCase {
+                name: "no go source",
+                language: Go,
+                package: "github.com/pkg/errors",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+            SourceCase {
+                name: "gemfile lock",
+                language: Ruby,
+                package: "rails",
+                file: "Gemfile.lock",
+                content: "GEM\n  specs:\n    rails (7.0.8.4)\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("7.0.8.4")),
+            },
+            SourceCase {
+                name: "gemfile",
+                language: Ruby,
+                package: "rails",
+                file: "Gemfile",
+                content: "source \"https://rubygems.org\"\ngem \"rails\"\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "no ruby source",
+                language: Ruby,
+                package: "rails",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+            SourceCase {
+                name: "conan manifest",
+                language: C,
+                package: "zlib/1.3.1",
+                file: "conanfile.txt",
+                content: "[requires]\nzlib/1.3.1\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "vcpkg manifest",
+                language: Cpp,
+                package: "zlib",
+                file: "vcpkg.json",
+                content: "{\"dependencies\": [\"zlib\"]}\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "no c source",
+                language: C,
+                package: "sqlite3",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+        ];
+
+        for case in cases {
+            let dir = test_dir(case.name);
+            let target = if case.nested {
+                let nested = dir.join("pkg");
+                std::fs::create_dir_all(&nested).unwrap();
+                nested
+            } else {
+                dir.clone()
+            };
+            if !case.file.is_empty() {
+                std::fs::write(target.join(case.file), case.content).unwrap();
+            }
+
+            let external = ExternalNode {
+                raw_path: case.package.to_string(),
+                language: case.language,
+                classification: None,
+            };
+            let result = classify_external(&external, &dir);
+            let (source, version) = match &result {
+                ExternalClassification::Classified {
+                    source, version, ..
+                } => (Some(*source), version.clone()),
+                ExternalClassification::Unresolved { .. } => (None, None),
+            };
+
+            match case.expectation {
+                Expectation::Lockfile(expected) => {
+                    assert_eq!(
+                        source,
+                        Some(DependencySource::Lockfile),
+                        "{}: expected a lockfile hit, got {result:?}",
+                        case.name
+                    );
+                    assert_eq!(version.as_deref(), expected, "{}: version", case.name);
+                }
+                Expectation::Manifest(expected) => {
+                    assert_eq!(
+                        source,
+                        Some(DependencySource::Manifest),
+                        "{}: expected a manifest hit, got {result:?}",
+                        case.name
+                    );
+                    assert_eq!(version.as_deref(), expected, "{}: version", case.name);
+                }
+                Expectation::Unresolved => assert_eq!(
+                    source, None,
+                    "{}: expected no classification, got {result:?}",
+                    case.name
+                ),
+            }
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// The ecosystems are not symmetric, and the descriptor table has to keep
+    /// every difference: a lockfile without the entry still names the lockfile
+    /// for Rust and Ruby, Python, Node and Go fall through to the manifest, and
+    /// only Python and Node look inside an immediate subdirectory.
+    #[test]
+    fn ecosystem_lockfile_asymmetries_are_preserved() {
+        let node = |language: LangId, raw: &str| ExternalNode {
+            raw_path: raw.to_string(),
+            language,
+            classification: None,
+        };
+        let hit = |result: &ExternalClassification| match result {
+            ExternalClassification::Classified {
+                source, version, ..
+            } => (Some(*source), version.clone()),
+            ExternalClassification::Unresolved { .. } => (None, None),
+        };
+        let scratch = [
+            "asymmetry_rust",
+            "asymmetry_ruby",
+            "asymmetry_python",
+            "asymmetry_go",
+            "asymmetry_node_subdir",
+            "asymmetry_node_nested_yarn",
+        ];
+        for name in scratch {
+            let _ = std::fs::remove_dir_all(test_dir(name));
+        }
+
+        // A Cargo.lock that does not carry the crate still names the lockfile.
+        let dir = test_dir("asymmetry_rust");
+        std::fs::write(
+            dir.join("Cargo.lock"),
+            "[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            hit(&classify_external(&node(LangId::Rust, "serde"), &dir)),
+            (Some(DependencySource::Lockfile), None),
+            "a Cargo.lock without the crate stays the source for Rust"
+        );
+
+        // The same holds for Gemfile.lock.
+        let dir = test_dir("asymmetry_ruby");
+        std::fs::write(
+            dir.join("Gemfile.lock"),
+            "GEM\n  specs:\n    other (1.0.0)\n",
+        )
+        .unwrap();
+        assert_eq!(
+            hit(&classify_external(&node(LangId::Ruby, "rails"), &dir)),
+            (Some(DependencySource::Lockfile), None),
+            "a Gemfile.lock without the gem stays the source for Ruby"
+        );
+
+        // Python falls through a lockfile that does not carry the entry.
+        let dir = test_dir("asymmetry_python");
+        std::fs::write(
+            dir.join("uv.lock"),
+            "[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"app\"\n").unwrap();
+        assert_eq!(
+            hit(&classify_external(&node(LangId::Python, "requests"), &dir)),
+            (Some(DependencySource::Manifest), None),
+            "Python falls through a lockfile without the entry"
+        );
+
+        // Go falls through go.sum to go.mod, which carries the version.
+        let dir = test_dir("asymmetry_go");
+        std::fs::write(dir.join("go.sum"), "github.com/other/mod v1.0.0 h1:AAAA=\n").unwrap();
+        std::fs::write(
+            dir.join("go.mod"),
+            "module example.com/app\n\nrequire github.com/foo/bar v1.2.3\n",
+        )
+        .unwrap();
+        assert_eq!(
+            hit(&classify_external(
+                &node(LangId::Go, "github.com/foo/bar"),
+                &dir
+            )),
+            (Some(DependencySource::Manifest), Some("1.2.3".to_string())),
+            "Go falls through go.sum to go.mod"
+        );
+
+        // Node answers from an immediate subdirectory, but only for
+        // package.json and package-lock.json.
+        let dir = test_dir("asymmetry_node_subdir");
+        let nested = dir.join("pkg");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(
+            nested.join("package.json"),
+            "{\"dependencies\":{\"react\":\"18.3.1\"}}",
+        )
+        .unwrap();
+        assert_eq!(
+            hit(&classify_external(&node(LangId::JavaScript, "react"), &dir)),
+            (Some(DependencySource::Manifest), Some("18.3.1".to_string())),
+            "a nested package.json answers for Node"
+        );
+
+        let dir = test_dir("asymmetry_node_nested_yarn");
+        let nested = dir.join("pkg");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(
+            nested.join("yarn.lock"),
+            "react@^18:\n  version \"18.3.1\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            hit(&classify_external(&node(LangId::JavaScript, "react"), &dir)),
+            (None, None),
+            "a nested yarn.lock is not consulted"
+        );
+
+        for name in scratch {
+            let _ = std::fs::remove_dir_all(test_dir(name));
+        }
+    }
 }

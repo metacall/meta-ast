@@ -623,4 +623,97 @@ mod tests {
         assert!(parse_diagnostics(&slightly_broken) > 0);
         assert!(parse_diagnostics(&heavily_broken) > 0);
     }
+    #[test]
+    fn a_source_over_the_size_cap_is_reported_once() {
+        use std::io::Write;
+
+        let dir = test_dir().join("oversized");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("huge.py");
+
+        let mut file = std::fs::File::create(&path).unwrap();
+        let line = b"# filler line\n";
+        let cap = 8 * 1024 * 1024;
+        let mut written = 0usize;
+        while written <= cap {
+            file.write_all(line).unwrap();
+            written += line.len();
+        }
+        drop(file);
+        assert!(written > cap, "the file is over the cap");
+
+        let result = extract_with_options(
+            &[(path.clone(), LangId::Python)],
+            &ExtractOptions::default(),
+        );
+        let extraction = &result.files[0];
+
+        assert!(
+            extraction.symbols.is_empty(),
+            "an oversized file contributes no symbols"
+        );
+        let errors: Vec<&Diagnostic> = extraction
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "an oversized file reports exactly one error"
+        );
+        assert!(
+            errors[0].message.contains("8388608"),
+            "the error names the cap: {}",
+            errors[0].message
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn two_passes_over_a_tree_agree() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/multi");
+        let files = crate::input::discover_files(&root, None).unwrap();
+        assert!(!files.is_empty(), "the fixture tree has files");
+
+        let describe = |result: &ExtractionResult| -> Vec<String> {
+            let mut described = Vec::new();
+            for file in &result.files {
+                described.push(format!("file {} {:?}", file.path.display(), file.lang));
+                for symbol in &file.symbols {
+                    described.push(format!(
+                        "symbol {} {} {:?} {}",
+                        symbol.id.to_raw(),
+                        symbol.name,
+                        symbol.kind,
+                        symbol.source_range.byte_start
+                    ));
+                }
+                for import in &file.imports {
+                    described.push(format!(
+                        "import {} {}",
+                        import.import_specifier, import.range.byte_start
+                    ));
+                }
+                for reference in &file.references {
+                    described.push(format!(
+                        "reference {} {}",
+                        reference.name, reference.range.byte_start
+                    ));
+                }
+            }
+            described
+        };
+
+        let first = extract_with_options(&files, &ExtractOptions::default());
+        let second = extract_with_options(&files, &ExtractOptions::default());
+
+        assert_eq!(
+            describe(&first),
+            describe(&second),
+            "two passes over the same tree produce the same extraction"
+        );
+    }
 }

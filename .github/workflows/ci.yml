@@ -42,6 +42,24 @@ jobs:
       - name: Run doc tests
         run: cargo test --doc --all-features
 
+  features:
+    name: feature matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check every feature combination
+        run: |
+          cargo check --no-default-features
+          cargo check --no-default-features --features watch
+          cargo check --no-default-features --features metacall-deploy
+          cargo check --no-default-features --features dataflow
+          cargo check --all-features
+
   build:
     name: build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

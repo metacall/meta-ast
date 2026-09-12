@@ -36,7 +36,7 @@ data into deploy manifest generation.
 ### 1.2 What the Codebase Already Has
 
 | Component | Status | Location |
-|-----------|--------|----------|
+| ----------- | -------- | ---------- |
 | `DeployabilityHint` enum | Built | `src/graph/scc.rs:38-46` |
 | `DeployabilityStats` | Built | `src/output/graph.rs:31-36` |
 | `SerializedScc` | Built | `src/output/graph.rs:81-90` |
@@ -69,16 +69,19 @@ and generate:
 MetaCall uses short runtime tags. meta-ast uses descriptive `LangId` variants.
 A mapping is required:
 
-| meta-ast `LangId` | MetaCall `language_id` |
-|-------------------|----------------------|
-| `Python`          | `"py"`               |
-| `JavaScript`      | `"node"`             |
-| `TypeScript`      | `"ts"`               |
-| `Tsx`             | `"ts"`               |
-| `C`               | `"c"`                |
-| `Cpp`             | `"c"`                |
-| `Rust`            | `"rs"`               |
-| `Go`              | `"go"`               |
+| meta-ast `LangId`   | MetaCall `language_id` |
+|---------------------|------------------------|
+| `Python`            | `"py"`                 |
+| `JavaScript`        | `"node"`               |
+| `TypeScript`        | `"ts"`                 |
+| `Tsx`               | `"ts"`                 |
+| `C`                 | `"c"`                  |
+| `Cpp`               | `"c"`                  |
+| `Rust`              | `"rs"`                 |
+| `Go`                | `"go"`                 |
+| `Ruby`              | `"rb"`                 |
+
+_Note: Ruby joined the engine after this proposal was accepted; the row records the current mapping._
 
 _Note: C and C++ share the `c` loader (libclang). Go has no MetaCall loader yet; the tag stays for manifests and deploy emits a warning._
 
@@ -229,7 +232,7 @@ as structured diagnostics.
 Verified against all fixtures in `tests/fixtures/mixed/`:
 
 | Example | Status | Target Manifests | Mesh Expectation |
-|---------|--------|------------------|------------------|
+| --------- | -------- | ------------------ | ------------------ |
 | `auth-function-mesh` | PASS | `metacall.py.json`, `metacall.node.json`, `metacall.json` | 2 units, 1 edge |
 | `auth-middleware` | PASS | `metacall.node.json`, `metacall.json` | 1 unit |
 | `string-manipulation` | PASS | `metacall.json` | 1 unit (external) |
@@ -258,8 +261,8 @@ memory model for the primary `GraphAnalysis` pipeline.
 
 ### 8.3 Unsupported Languages
 
-Symbol extraction is limited to the 8 languages in `meta-ast`'s core engine.
-Other languages (Ruby, Java) are handled as external nodes.
+Symbol extraction covers the 9 languages in `meta-ast`'s core engine.
+Other languages (Java, Kotlin) are handled as external nodes.
 
 ### 8.4 Dynamic Call Sites
 

@@ -498,4 +498,39 @@ mod tests {
             "acyclic_dependency"
         );
     }
+
+    /// One component per hint kind, plus an ownership edge that must not create
+    /// deployment coupling: the counts pin the classification of a mixed graph.
+    #[test]
+    fn hint_counts_are_stable_for_a_mixed_graph() {
+        let mut graph = DiGraph::new();
+        let self_loop = graph.add_node(make_symbol_node(1, "self_loop", 0));
+        let cycle_left = graph.add_node(make_symbol_node(2, "cycle_left", 0));
+        let cycle_right = graph.add_node(make_symbol_node(3, "cycle_right", 0));
+        let dependent = graph.add_node(make_symbol_node(4, "dependent", 0));
+        let standalone = graph.add_node(make_symbol_node(5, "standalone", 0));
+
+        graph.add_edge(self_loop, self_loop, make_edge(EdgeKind::Reference));
+        graph.add_edge(cycle_left, cycle_right, make_edge(EdgeKind::Import));
+        graph.add_edge(cycle_right, cycle_left, make_edge(EdgeKind::Import));
+        graph.add_edge(dependent, cycle_left, make_edge(EdgeKind::Reference));
+        graph.add_edge(standalone, self_loop, make_edge(EdgeKind::Ownership));
+
+        let analysis = SccAnalysis::analyze(&graph);
+        let counts = analysis.hint_counts();
+
+        assert_eq!(
+            analysis.components.len(),
+            4,
+            "the cycle merges two nodes, the other three stay single"
+        );
+        assert_eq!(counts.get(&DeployabilityHint::SelfLoop), Some(&1));
+        assert_eq!(counts.get(&DeployabilityHint::CyclicCluster), Some(&1));
+        assert_eq!(counts.get(&DeployabilityHint::AcyclicDependency), Some(&1));
+        assert_eq!(
+            counts.get(&DeployabilityHint::Independent),
+            Some(&1),
+            "the node whose only edge is ownership has no dependency"
+        );
+    }
 }

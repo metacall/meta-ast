@@ -122,6 +122,12 @@ fn empty_files_produce_empty_symbols() {
 /// Files that cannot be read must surface as a diagnostic, not a panic.
 #[test]
 fn unreadable_file_accumulates_diagnostic() {
+    // Root ignores file permissions, so the read failure cannot be provoked.
+    #[cfg(unix)]
+    if std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(std::env::temp_dir()).unwrap()) == 0 {
+        return;
+    }
+
     let tmp = std::env::temp_dir().join("meta_ast_test_unreadable");
     if tmp.exists() {
         let _ = std::fs::remove_dir_all(&tmp);
