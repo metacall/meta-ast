@@ -41,6 +41,15 @@ DataNode represents a value or variable instance used for def-use and flow analy
 
 `SymbolNode -> SymbolNode` representing symbol usage/call/reference candidates.
 
+A `metacall()` client call also produces a `FileNode -> SymbolNode` reference edge,
+because a call at module level has no enclosing symbol and the calling file is the
+deployment unit. Both edges come from one resolution pass and carry the same
+confidence. The file projection is complete; the symbol projection exists only when
+the call sits inside a symbol, and it is what symbol keyed consumers navigate with.
+
+A reference outside any symbol does not become an edge. The file level dependency is
+already carried by the import edge, and cursor resolution reads the scope cache.
+
 ### OwnershipEdge
 
 `FileNode -> SymbolNode` and optional `SymbolNode -> SymbolNode` for nesting.
@@ -54,7 +63,14 @@ DataNode represents a value or variable instance used for def-use and flow analy
 1. Every SymbolNode must map to exactly one FileNode.
 2. Ownership edges must form an acyclic containment structure.
 3. SCC computation applies to dependency/reference subgraph, not ownership edges. Self-loop detection and independence classification follow the same subgraph rule.
-4. Duplicate edges should be normalized by `(src, dst, edge_kind)` key. Client-call edges (FileNode to SymbolNode) can only merge with other client-call edges; scope-resolved references (SymbolNode to SymbolNode) never collide with them. Strongest evidence wins within a triple.
+4. Duplicate edges should be normalized by `(src, dst, edge_kind)` key. Strongest
+evidence wins within a triple, and the first flow kind wins. The two client-call
+projections never collide, because their source endpoints are different node kinds.
+5. A name resolves to the nearest definition only. The own file shadows a direct
+same-language import, a direct import shadows a transitive one, and a cross-language
+import ranks last. Equally ranked candidates stay visible and order by path.
+6. An import edge between two languages carries the cross-language confidence, not
+the direct one.
 
 ## 5. SCC semantics
 

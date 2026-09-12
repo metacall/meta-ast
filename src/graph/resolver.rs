@@ -20,6 +20,15 @@ pub type ScopeMap = HashMap<String, Vec<(SymbolId, f32)>>;
 pub(crate) type SymbolIndexEntry = (SymbolId, String, LangId, Option<Visibility>);
 pub(crate) type SymbolIndex = HashMap<FileId, Vec<SymbolIndexEntry>>;
 
+/// One visible symbol candidate before shadowing and ranking.
+struct Candidate {
+    symbol: SymbolId,
+    confidence: f32,
+    rank: u8,
+    path: PathBuf,
+    name: String,
+}
+
 /// Bundles the data needed for scope resolution across files.
 pub struct ResolutionContext {
     pub symbol_index: SymbolIndex,
@@ -78,7 +87,7 @@ impl FlattenedScopeCache {
     /// - 0.8: transitive import, same language
     /// - 0.6: cross-language imports
     pub fn build(ctx: &ResolutionContext, diagnostics: &mut Vec<Diagnostic>) -> Self {
-        let results: Vec<(FileId, ScopeMap, Vec<Diagnostic>)> = ctx
+        let mut results: Vec<(FileId, ScopeMap, Vec<Diagnostic>)> = ctx
             .symbol_index
             .par_iter()
             .map(|(&file_id, _)| {
@@ -86,6 +95,10 @@ impl FlattenedScopeCache {
                 (file_id, scope, diags)
             })
             .collect();
+
+        // The parallel pass returns in hash order; diagnostics must follow the
+        // file path so two runs report the same sequence.
+        results.sort_by(|a, b| ctx.file_paths.get(&a.0).cmp(&ctx.file_paths.get(&b.0)));
 
         let mut scopes = HashMap::with_capacity(results.len());
         for (file_id, scope, diags) in results {
@@ -100,6 +113,7 @@ impl FlattenedScopeCache {
         let mut diagnostics = Vec::new();
         let source_lang = ctx.file_languages.get(&file_id).copied();
         let mut scope: ScopeMap = HashMap::new();
+        let mut candidates: Vec<Candidate> = Vec::new();
         let mut visited: HashSet<FileId> = HashSet::new();
         let mut queue: VecDeque<(FileId, usize)> = VecDeque::new();
 
@@ -144,11 +158,26 @@ impl FlattenedScopeCache {
                         CONFIDENCE_TRANSITIVE
                     };
 
-                    if let Some(entries) = scope.get_mut(name) {
-                        entries.push((*sym_id, confidence));
+                    // Rank classes follow the shadowing rule: the own file wins,
+                    // then a direct same-language import, then a transitive one,
+                    // and a cross-language import comes last.
+                    let rank = if distance == 0 {
+                        0u8
+                    } else if distance == 1 && same_lang {
+                        1
+                    } else if same_lang {
+                        2
                     } else {
-                        scope.insert(name.clone(), vec![(*sym_id, confidence)]);
-                    }
+                        3
+                    };
+
+                    candidates.push(Candidate {
+                        symbol: *sym_id,
+                        name: name.clone(),
+                        confidence,
+                        rank,
+                        path: ctx.file_paths.get(&current).cloned().unwrap_or_default(),
+                    });
                 }
             }
 
@@ -182,13 +211,35 @@ impl FlattenedScopeCache {
             }
         }
 
-        // Sort each entry: higher confidence first, then by symbol_id (stable)
-        for entries in scope.values_mut() {
-            entries.sort_by(|a, b| {
-                b.1.partial_cmp(&a.1)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then(a.0.to_raw().cmp(&b.0.to_raw()))
+        // Nearer definitions shadow farther ones. The remaining candidates keep
+        // a total order: rank, confidence, path, then identifier. The raw
+        // identifier comes last, because it is unique only inside a run.
+        let mut grouped: HashMap<String, Vec<Candidate>> = HashMap::new();
+        for candidate in candidates {
+            grouped
+                .entry(candidate.name.clone())
+                .or_default()
+                .push(candidate);
+        }
+        for (name, mut group) in grouped {
+            let best = group.iter().map(|candidate| candidate.rank).min();
+            if let Some(best) = best {
+                group.retain(|candidate| candidate.rank == best);
+            }
+            group.sort_by(|a, b| {
+                a.rank
+                    .cmp(&b.rank)
+                    .then(b.confidence.total_cmp(&a.confidence))
+                    .then(a.path.cmp(&b.path))
+                    .then(a.symbol.to_raw().cmp(&b.symbol.to_raw()))
             });
+            scope.insert(
+                name,
+                group
+                    .into_iter()
+                    .map(|candidate| (candidate.symbol, candidate.confidence))
+                    .collect(),
+            );
         }
 
         (scope, diagnostics)
@@ -268,10 +319,7 @@ where
 
                     if let Some(source) = source_sym {
                         for &(target_id, confidence) in matches {
-                            // Don't add self-references (symbol to itself)
-                            if source.id != target_id {
-                                local_edges.push((source.id, target_id, confidence));
-                            }
+                            local_edges.push((source.id, target_id, confidence));
                         }
                     }
                 } else {

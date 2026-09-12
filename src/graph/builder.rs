@@ -15,7 +15,7 @@ use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 
 use crate::graph::CodeGraph;
-use crate::graph::edge::{EdgeData, EdgeKind};
+use crate::graph::edge::{CONFIDENCE_CROSS_LANGUAGE, CONFIDENCE_OWN_OR_DIRECT, EdgeData, EdgeKind};
 #[cfg(feature = "dataflow")]
 use crate::graph::node::DataGraphNode;
 use crate::graph::node::{ExternalNode, FileNode, NodeData, SymbolNode};
@@ -92,7 +92,6 @@ impl GraphBuilder {
         };
 
         let idx = self.graph.add_node(NodeData::File(node));
-
         self.file_to_index.insert(id, idx);
         self.path_to_file.insert(path, id);
 
@@ -200,11 +199,20 @@ impl GraphBuilder {
         let Some(&from_idx) = self.file_to_index.get(&from) else {
             return; // Source not in graph
         };
+        let Some(source_language) = self.graph[from_idx].as_file().map(|file| file.language) else {
+            return; // Index without a file node: the graph is inconsistent
+        };
 
         // Resolve target path to file ID if it exists in our graph
         if let Some(&to_id) = self.path_to_file.get(&to) {
             if let Some(&to_idx) = self.file_to_index.get(&to_id) {
-                self.add_edge_internal(from_idx, to_idx, EdgeKind::Import, 1.0);
+                let target_language = self.graph[to_idx].as_file().map(|file| file.language);
+                let confidence = if target_language == Some(source_language) {
+                    CONFIDENCE_OWN_OR_DIRECT
+                } else {
+                    CONFIDENCE_CROSS_LANGUAGE
+                };
+                self.add_edge_internal(from_idx, to_idx, EdgeKind::Import, confidence);
             }
             return;
         }
@@ -214,19 +222,9 @@ impl GraphBuilder {
         let to_idx = if let Some(&idx) = self.external_index.get(&raw_path) {
             idx
         } else {
-            // Determine language from source file
-            let language = self
-                .path_to_file
-                .iter()
-                .find(|(_, id)| **id == from)
-                .map(|(p, _)| {
-                    crate::input::detect_language(p).unwrap_or(crate::language::LangId::Python)
-                })
-                .unwrap_or(crate::language::LangId::Python);
-
             let node = ExternalNode {
                 raw_path: raw_path.clone(),
-                language,
+                language: source_language,
                 classification: None,
             };
             let idx = self.graph.add_node(NodeData::External(node));
@@ -234,12 +232,25 @@ impl GraphBuilder {
             idx
         };
 
-        self.add_edge_internal(from_idx, to_idx, EdgeKind::Import, 1.0);
+        self.add_edge_internal(from_idx, to_idx, EdgeKind::Import, CONFIDENCE_OWN_OR_DIRECT);
     }
 
     /// Internal edge addition with flow kind, respecting normalization.
     #[cfg(feature = "dataflow")]
     fn add_edge_internal_with_flow(
+        &mut self,
+        source: NodeIndex,
+        target: NodeIndex,
+        kind: EdgeKind,
+        confidence: f32,
+        flow_kind: Option<crate::model::FlowKind>,
+    ) {
+        self.insert_edge(source, target, kind, confidence, flow_kind);
+    }
+
+    /// The one normalization rule: max merge confidence on a repeated triple,
+    /// and the first flow kind wins.
+    fn insert_edge(
         &mut self,
         source: NodeIndex,
         target: NodeIndex,
@@ -257,15 +268,9 @@ impl GraphBuilder {
             }
             return;
         }
-        let edge_idx = self.graph.add_edge(
-            source,
-            target,
-            EdgeData {
-                kind,
-                confidence,
-                flow_kind,
-            },
-        );
+        let mut edge_data = EdgeData::with_confidence(kind, confidence);
+        edge_data.flow_kind = flow_kind;
+        let edge_idx = self.graph.add_edge(source, target, edge_data);
         self.edge_index.insert(key, edge_idx);
     }
 
@@ -296,18 +301,7 @@ impl GraphBuilder {
         kind: EdgeKind,
         confidence: f32,
     ) {
-        let confidence = confidence.clamp(0.0, 1.0);
-        let key = (source, target, kind);
-        if let Some(&edge_idx) = self.edge_index.get(&key) {
-            let existing = &mut self.graph[edge_idx];
-            existing.confidence = existing.confidence.max(confidence);
-            return;
-        }
-
-        let edge_data = EdgeData::with_confidence(kind, confidence);
-
-        let edge_idx = self.graph.add_edge(source, target, edge_data);
-        self.edge_index.insert(key, edge_idx);
+        self.insert_edge(source, target, kind, confidence, None);
     }
 
     /// Returns the FileId for a given file path, if registered.
@@ -525,15 +519,17 @@ impl GraphBuilder {
                 .flat_map(|file| file.borrow().call_sites.iter().cloned())
                 .collect();
             if !call_sites.is_empty() {
-                let (call_edges, call_diagnostics) =
-                    crate::deploy::client_call::resolve_client_call_edges(
-                        &graph,
-                        extractions,
-                        &call_sites,
-                        root,
-                    );
-                diagnostics.extend(call_diagnostics);
-                for (from, to, confidence) in call_edges {
+                let projections = crate::deploy::client_call::resolve_client_call_projections(
+                    &graph,
+                    extractions,
+                    &call_sites,
+                    root,
+                );
+                diagnostics.extend(projections.diagnostics);
+                for (from_idx, to_idx, confidence) in projections.file_edges {
+                    graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Reference, confidence);
+                }
+                for (from, to, confidence) in projections.symbol_edges {
                     if let (Some(from_idx), Some(to_idx)) =
                         (graph.symbol_node_index(from), graph.symbol_node_index(to))
                     {

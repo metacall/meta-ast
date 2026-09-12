@@ -14,13 +14,6 @@ use crate::language::LangId;
 use crate::model::{FileExtraction, FileId, SymbolId};
 use petgraph::graph::NodeIndex;
 
-/// Result of mapping ClientCall sites to target symbol nodes.
-pub(crate) struct ClientCallResolution {
-    /// (source file node, target symbol node, confidence)
-    pub edges: Vec<(NodeIndex, NodeIndex, f32)>,
-    pub diagnostics: Vec<Diagnostic>,
-}
-
 /// Resolve a load script to a file node, trying the same strategies as
 /// add_metacall_edge (root-relative, source-file-relative, filename match,
 /// component-stripping). Returns None when no file node matches.
@@ -271,13 +264,23 @@ struct ResolvedCall {
     confidence: f32,
 }
 
-/// Resolve ClientCall sites to file-to-symbol edges for the deploy mesh.
-pub(crate) fn resolve_client_calls<F>(
+/// Both call-edge projections of one resolution pass.
+pub(crate) struct ClientCallProjections {
+    /// File node to symbol node. Deployment needs the calling file, because a
+    /// top-level call has no enclosing symbol.
+    pub file_edges: Vec<(NodeIndex, NodeIndex, f32)>,
+    /// Symbol node to symbol node. Navigation keys on the caller symbol.
+    pub symbol_edges: Vec<(SymbolId, SymbolId, f32)>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Resolve ClientCall sites once and emit both projections.
+pub(crate) fn resolve_client_call_projections<F>(
     graph: &CodeGraph,
     extractions: &[F],
     call_sites: &[CallSite],
     root: &Path,
-) -> ClientCallResolution
+) -> ClientCallProjections
 where
     F: std::borrow::Borrow<FileExtraction> + Sync,
 {
@@ -288,43 +291,28 @@ where
             path_to_idx.insert(file.path.clone(), idx);
         }
     }
-    let mut edges = Vec::with_capacity(resolved.len());
+
+    let mut file_edges = Vec::with_capacity(resolved.len());
+    let mut symbol_edges = Vec::with_capacity(resolved.len());
     for call in resolved {
-        let (Some(&caller_idx), Some(target_idx)) = (
+        if let (Some(&caller_idx), Some(target_idx)) = (
             path_to_idx.get(&call.source_file),
             graph.symbol_node_index(call.target),
-        ) else {
-            continue;
-        };
-        edges.push((caller_idx, target_idx, call.confidence));
+        ) {
+            file_edges.push((caller_idx, target_idx, call.confidence));
+        }
+        if let Some(caller) =
+            enclosing_symbol(extractions, &call.source_file, call.source_range.as_ref())
+        {
+            symbol_edges.push((caller, call.target, call.confidence));
+        }
     }
-    ClientCallResolution { edges, diagnostics }
-}
 
-/// Resolve ClientCall sites to symbol-to-symbol reference edges.
-///
-/// The caller is the smallest symbol in the call-site file that encloses the
-/// invocation. The graph builder applies these edges so navigation sees
-/// `metacall()` targets.
-pub(crate) fn resolve_client_call_edges<F>(
-    graph: &CodeGraph,
-    extractions: &[F],
-    call_sites: &[CallSite],
-    root: &Path,
-) -> (Vec<(SymbolId, SymbolId, f32)>, Vec<Diagnostic>)
-where
-    F: std::borrow::Borrow<FileExtraction> + Sync,
-{
-    let (resolved, diagnostics) = resolve_sites(graph, extractions, call_sites, root);
-    let edges = resolved
-        .into_iter()
-        .filter_map(|call| {
-            let caller =
-                enclosing_symbol(extractions, &call.source_file, call.source_range.as_ref())?;
-            Some((caller, call.target, call.confidence))
-        })
-        .collect();
-    (edges, diagnostics)
+    ClientCallProjections {
+        file_edges,
+        symbol_edges,
+        diagnostics,
+    }
 }
 
 fn enclosing_symbol<F>(
@@ -492,11 +480,15 @@ mod tests {
             load_from_file("orchestrator.py", vec!["math.js"]),
             client_call("orchestrator.py", "multiply", 1.0),
         ];
-        let resolution =
-            resolve_client_calls(&fx.graph, &fx.extractions, &call_sites, Path::new("."));
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &call_sites,
+            Path::new("."),
+        );
 
-        assert_eq!(resolution.edges.len(), 1);
-        let (from, to, confidence) = resolution.edges[0];
+        assert_eq!(resolution.file_edges.len(), 1);
+        let (from, to, confidence) = resolution.file_edges[0];
         let py_idx = *fx.graph.file_to_index.get(&py_id).unwrap();
         assert_eq!(from, py_idx);
         assert_eq!(to, sym_idx);
@@ -534,12 +526,16 @@ mod tests {
             mistagged_load,
             client_call("orchestrator.py", "multiply", 1.0),
         ];
-        let resolution =
-            resolve_client_calls(&fx.graph, &fx.extractions, &call_sites, Path::new("."));
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &call_sites,
+            Path::new("."),
+        );
 
-        assert_eq!(resolution.edges.len(), 1);
-        assert_eq!(resolution.edges[0].1, js_sym);
-        assert_eq!(resolution.edges[0].2, 1.0);
+        assert_eq!(resolution.file_edges.len(), 1);
+        assert_eq!(resolution.file_edges[0].1, js_sym);
+        assert_eq!(resolution.file_edges[0].2, 1.0);
         assert!(resolution.diagnostics.is_empty());
     }
 
@@ -567,15 +563,19 @@ mod tests {
             py_load,
             client_call("orchestrator.py", "multiply", 1.0),
         ];
-        let resolution =
-            resolve_client_calls(&fx.graph, &fx.extractions, &call_sites, Path::new("."));
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &call_sites,
+            Path::new("."),
+        );
 
-        let mut targets: Vec<_> = resolution.edges.iter().map(|(_, to, _)| *to).collect();
+        let mut targets: Vec<_> = resolution.file_edges.iter().map(|(_, to, _)| *to).collect();
         targets.sort();
         let mut expected = vec![js_sym, py_sym];
         expected.sort();
         assert_eq!(targets, expected);
-        assert!(resolution.edges.iter().all(|(_, _, c)| *c == 0.8));
+        assert!(resolution.file_edges.iter().all(|(_, _, c)| *c == 0.8));
     }
 
     #[test]
@@ -610,9 +610,13 @@ mod tests {
             source_range: None,
             confidence: 1.0,
         };
-        let resolution =
-            resolve_client_calls(&fx.graph, &fx.extractions, &[config_site], Path::new("."));
-        assert!(resolution.edges.is_empty());
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &[config_site],
+            Path::new("."),
+        );
+        assert!(resolution.file_edges.is_empty());
         assert_eq!(resolution.diagnostics.len(), 1);
         assert_eq!(resolution.diagnostics[0].severity, Severity::Warning);
         assert_eq!(
@@ -636,17 +640,22 @@ mod tests {
             load_from_file("orchestrator.py", vec!["math.js", "utils.js"]),
             client_call("orchestrator.py", "multiply", 1.0),
         ];
-        let resolution =
-            resolve_client_calls(&fx.graph, &fx.extractions, &call_sites, Path::new("."));
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &call_sites,
+            Path::new("."),
+        );
 
-        assert_eq!(resolution.edges.len(), 2);
+        assert_eq!(resolution.file_edges.len(), 2);
         let py_idx = *fx.graph.file_to_index.get(&py_id).unwrap();
-        let mut targets: Vec<NodeIndex> = resolution.edges.iter().map(|(_, to, _)| *to).collect();
+        let mut targets: Vec<NodeIndex> =
+            resolution.file_edges.iter().map(|(_, to, _)| *to).collect();
         targets.sort();
         let mut expected = vec![s1, s2];
         expected.sort();
         assert_eq!(targets, expected);
-        for (from, _, confidence) in &resolution.edges {
+        for (from, _, confidence) in &resolution.file_edges {
             assert_eq!(*from, py_idx);
             assert_eq!(*confidence, 0.8);
         }
@@ -662,11 +671,15 @@ mod tests {
         let sym_idx = fx.add_symbol(&helper, js_id, "helpers.js", LangId::JavaScript);
 
         let call_sites = vec![client_call("orchestrator.py", "helper", 1.0)];
-        let resolution =
-            resolve_client_calls(&fx.graph, &fx.extractions, &call_sites, Path::new("."));
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &call_sites,
+            Path::new("."),
+        );
 
-        assert_eq!(resolution.edges.len(), 1);
-        let (from, to, confidence) = resolution.edges[0];
+        assert_eq!(resolution.file_edges.len(), 1);
+        let (from, to, confidence) = resolution.file_edges[0];
         let py_idx = *fx.graph.file_to_index.get(&py_id).unwrap();
         assert_eq!(from, py_idx);
         assert_eq!(to, sym_idx);
@@ -686,17 +699,22 @@ mod tests {
         let s2 = fx.add_symbol(&h2, b_id, "utils.js", LangId::JavaScript);
 
         let call_sites = vec![client_call("orchestrator.py", "helper", 1.0)];
-        let resolution =
-            resolve_client_calls(&fx.graph, &fx.extractions, &call_sites, Path::new("."));
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &call_sites,
+            Path::new("."),
+        );
 
-        assert_eq!(resolution.edges.len(), 2);
+        assert_eq!(resolution.file_edges.len(), 2);
         let py_idx = *fx.graph.file_to_index.get(&py_id).unwrap();
-        let mut targets: Vec<NodeIndex> = resolution.edges.iter().map(|(_, to, _)| *to).collect();
+        let mut targets: Vec<NodeIndex> =
+            resolution.file_edges.iter().map(|(_, to, _)| *to).collect();
         targets.sort();
         let mut expected = vec![s1, s2];
         expected.sort();
         assert_eq!(targets, expected);
-        for (from, _, confidence) in &resolution.edges {
+        for (from, _, confidence) in &resolution.file_edges {
             assert_eq!(*from, py_idx);
             assert_eq!(*confidence, 0.5);
         }
@@ -714,11 +732,15 @@ mod tests {
         // A computed first argument keeps the source text as function_name and
         // drops the site confidence to 0.4 (scanner convention).
         let call_sites = vec![client_call("orchestrator.py", "fn_var", 0.4)];
-        let resolution =
-            resolve_client_calls(&fx.graph, &fx.extractions, &call_sites, Path::new("."));
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &call_sites,
+            Path::new("."),
+        );
 
-        assert_eq!(resolution.edges.len(), 1);
-        let (from, to, confidence) = resolution.edges[0];
+        assert_eq!(resolution.file_edges.len(), 1);
+        let (from, to, confidence) = resolution.file_edges[0];
         let py_idx = *fx.graph.file_to_index.get(&py_id).unwrap();
         assert_eq!(from, py_idx);
         assert_eq!(to, sym_idx);
@@ -732,10 +754,14 @@ mod tests {
         let _ = fx.add_file("orchestrator.py", LangId::Python);
 
         let call_sites = vec![client_call("orchestrator.py", "no_such_fn", 1.0)];
-        let resolution =
-            resolve_client_calls(&fx.graph, &fx.extractions, &call_sites, Path::new("."));
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &call_sites,
+            Path::new("."),
+        );
 
-        assert!(resolution.edges.is_empty());
+        assert!(resolution.file_edges.is_empty());
         assert_eq!(resolution.diagnostics.len(), 1);
         let diag = &resolution.diagnostics[0];
         assert_eq!(diag.path, PathBuf::from("orchestrator.py"));
@@ -806,10 +832,14 @@ mod tests {
 
         // Computed-name client call: file -> sym @ 0.4.
         let call_sites = vec![client_call("orchestrator.py", "multiply", 0.4)];
-        let resolution =
-            resolve_client_calls(&fx.graph, &fx.extractions, &call_sites, Path::new("."));
-        assert_eq!(resolution.edges.len(), 1);
-        let (from, to, confidence) = resolution.edges[0];
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &call_sites,
+            Path::new("."),
+        );
+        assert_eq!(resolution.file_edges.len(), 1);
+        let (from, to, confidence) = resolution.file_edges[0];
         assert_eq!((from, to, confidence), (py_idx, sym_idx, 0.4));
         fx.graph
             .add_edge_normalized(from, to, EdgeKind::Reference, confidence);

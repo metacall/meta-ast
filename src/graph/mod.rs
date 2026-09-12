@@ -124,6 +124,22 @@ impl CodeGraph {
     pub fn add_node(&mut self, node: NodeData) -> NodeIndex {
         self.graph.add_node(node)
     }
+
+    /// Add a file node and register it in the file index.
+    pub fn add_file_node(&mut self, node: FileNode) -> NodeIndex {
+        let file_id = node.id;
+        let idx = self.graph.add_node(NodeData::File(node));
+        self.file_to_index.insert(file_id, idx);
+        idx
+    }
+
+    /// Add a symbol node and register it in the symbol index.
+    pub fn add_symbol_node(&mut self, node: SymbolNode) -> NodeIndex {
+        let symbol_id = node.id;
+        let idx = self.graph.add_node(NodeData::Symbol(node));
+        self.symbol_to_index.insert(symbol_id, idx);
+        idx
+    }
     pub fn file_node_index(&self, file_id: FileId) -> Option<NodeIndex> {
         self.file_to_index.get(&file_id).copied()
     }
@@ -234,18 +250,41 @@ impl CodeGraph {
     }
 
     pub fn files(&self) -> impl Iterator<Item = (FileId, &FileNode)> + '_ {
-        self.file_to_index.iter().filter_map(|(file_id, &idx)| {
-            self.graph
-                .node_weight(idx)
-                .and_then(|data| data.as_file().map(|f| (*file_id, f)))
-        })
+        let mut files: Vec<(FileId, &FileNode)> = self
+            .file_to_index
+            .iter()
+            .filter_map(|(file_id, &idx)| {
+                self.graph
+                    .node_weight(idx)
+                    .and_then(|data| data.as_file().map(|f| (*file_id, f)))
+            })
+            .collect();
+        files.sort_by(|a, b| a.1.path.cmp(&b.1.path));
+        files.into_iter()
     }
+
+    /// Files in path order.
+    ///
+    /// Callers that need a stable sequence, such as a shard export or a
+    /// partition, must not rely on hash map order.
     pub fn symbols(&self) -> impl Iterator<Item = (SymbolId, &SymbolNode)> + '_ {
-        self.symbol_to_index.iter().filter_map(|(symbol_id, &idx)| {
-            self.graph
-                .node_weight(idx)
-                .and_then(|data| data.as_symbol().map(|s| (*symbol_id, s)))
-        })
+        let mut symbols: Vec<(SymbolId, &SymbolNode)> = self
+            .symbol_to_index
+            .iter()
+            .filter_map(|(symbol_id, &idx)| {
+                self.graph
+                    .node_weight(idx)
+                    .and_then(|data| data.as_symbol().map(|s| (*symbol_id, s)))
+            })
+            .collect();
+        symbols.sort_by(|a, b| {
+            let left = self.file_node(a.1.file_id).map(|file| &file.path);
+            let right = self.file_node(b.1.file_id).map(|file| &file.path);
+            left.cmp(&right)
+                .then(a.1.name.cmp(&b.1.name))
+                .then(a.0.to_raw().cmp(&b.0.to_raw()))
+        });
+        symbols.into_iter()
     }
     pub fn edges_of_kind(
         &self,
