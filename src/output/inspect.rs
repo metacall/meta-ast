@@ -12,7 +12,7 @@ pub fn symbols_to_inspect_output(symbols: Vec<Symbol>) -> InspectOutput {
 
     for symbol in symbols {
         match symbol.kind {
-            SymbolKind::Function | SymbolKind::Method => {
+            SymbolKind::Function | SymbolKind::Method | SymbolKind::Declaration => {
                 output.funcs.push(crate::model::output::FuncEntry {
                     name: symbol.name,
                     source_range: symbol.source_range,

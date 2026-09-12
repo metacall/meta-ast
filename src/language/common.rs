@@ -132,6 +132,7 @@ pub(crate) fn extract_with_spec<'a>(
                         "module" => SymbolKind::Module,
                         "namespace" => SymbolKind::Namespace,
                         "type_alias" => SymbolKind::TypeAlias,
+                        "declaration" => SymbolKind::Declaration,
                         "object" => SymbolKind::Object,
                         _ => continue,
                     };

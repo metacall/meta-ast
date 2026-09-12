@@ -13,10 +13,74 @@ static CPP_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
         r#"
         (function_definition
           declarator: (function_declarator
-            declarator: (_) @name
+            declarator: [
+              (identifier)
+              (field_identifier)
+              (operator_name)
+              (destructor_name)
+            ] @name
             parameters: (parameter_list) @signature
           )
         ) @kind.function
+
+        (function_definition
+          declarator: (function_declarator
+            declarator: (qualified_identifier name: (identifier) @name)
+            parameters: (parameter_list) @signature
+          )
+        ) @kind.function
+
+        (function_definition
+          declarator: (pointer_declarator
+            declarator: (function_declarator
+              declarator: (identifier) @name
+              parameters: (parameter_list) @signature
+            )
+          )
+        ) @kind.function
+
+        (function_definition
+          declarator: (reference_declarator
+            (function_declarator
+              declarator: (identifier) @name
+              parameters: (parameter_list) @signature
+            )
+          )
+        ) @kind.function
+
+        (declaration
+          declarator: (function_declarator
+            declarator: (identifier) @name
+            parameters: (parameter_list) @signature
+          )
+        ) @kind.declaration
+
+        (declaration
+          declarator: (function_declarator
+            declarator: (qualified_identifier name: (identifier) @name)
+            parameters: (parameter_list) @signature
+          )
+        ) @kind.declaration
+
+        (declaration
+          declarator: (pointer_declarator
+            declarator: (function_declarator
+              declarator: (identifier) @name
+              parameters: (parameter_list) @signature
+            )
+          )
+        ) @kind.declaration
+
+        (field_declaration
+          declarator: (function_declarator
+            declarator: [
+              (field_identifier)
+              (operator_name)
+              (destructor_name)
+            ] @name
+            parameters: (parameter_list) @signature
+          )
+        ) @kind.declaration
 
         (class_specifier
             name: (type_identifier) @name) @kind.class
@@ -57,7 +121,7 @@ fn cpp_import_ref_query() -> &'static tree_sitter::Query {
 }
 
 pub(crate) const CPP_SPEC: LanguageSpec = LanguageSpec {
-    extensions: &["cc", "cpp", "cxx"],
+    extensions: &["cc", "cpp", "cxx", "hpp"],
     grammar_fn: || tree_sitter_cpp::LANGUAGE.into(),
     query_fn: cpp_query,
     import_path_resolver: resolve_cpp_import,

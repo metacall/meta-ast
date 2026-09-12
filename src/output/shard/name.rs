@@ -187,5 +187,6 @@ pub(crate) fn symbol_kind_name(kind: SymbolKind) -> &'static str {
         SymbolKind::Module => "module",
         SymbolKind::Namespace => "namespace",
         SymbolKind::TypeAlias => "type_alias",
+        SymbolKind::Declaration => "declaration",
     }
 }

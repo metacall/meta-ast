@@ -33,6 +33,17 @@ static C_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
 
         (type_definition
             declarator: (type_identifier) @name) @kind.type_alias
+
+        (declaration
+            declarator: [
+                (function_declarator
+                    declarator: (identifier) @name
+                    parameters: (parameter_list) @signature)
+                (pointer_declarator
+                    declarator: (function_declarator
+                        declarator: (identifier) @name
+                        parameters: (parameter_list) @signature))
+            ]) @kind.declaration
         "#,
         "C",
     )
@@ -76,7 +87,7 @@ fn c_import_ref_query() -> &'static tree_sitter::Query {
 }
 
 pub(crate) const C_SPEC: LanguageSpec = LanguageSpec {
-    extensions: &["c"],
+    extensions: &["c", "h"],
     grammar_fn: || tree_sitter_c::LANGUAGE.into(),
     query_fn: c_query,
     import_path_resolver: resolve_c_import,

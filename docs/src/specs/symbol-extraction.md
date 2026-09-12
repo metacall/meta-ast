@@ -31,11 +31,13 @@ languages grows over time; see `ROADMAP.md` Phase 6 for the expansion plan.
 ### C
 
 - Extract: function definitions/declarations, structs, enums, typedefs, includes.
+- Extensions: `.c` and `.h`.
 - Distinguish declaration vs definition 'where possible'.
 
 ### C++
 
 - Extract C symbols plus classes, namespaces, templates, aliases, method definitions.
+- Extensions: `.cc`, `.cpp`, `.cxx` and `.hpp`.
 
 ### Rust
 
