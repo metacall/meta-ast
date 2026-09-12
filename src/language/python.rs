@@ -371,10 +371,11 @@ define_language_pack!(
 // ── Dataflow extraction ─────────────────────────────────────────────
 
 #[cfg(feature = "dataflow")]
-static PYTHON_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> = std::sync::LazyLock::new(|| {
-    crate::language::common::compile_query(
-        &tree_sitter_python::LANGUAGE.into(),
-        r#"
+static PYTHON_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> =
+    std::sync::LazyLock::new(|| {
+        crate::language::common::compile_query(
+            &tree_sitter_python::LANGUAGE.into(),
+            r#"
 ; Assignments
 (assignment
   left: (identifier) @def.var)
@@ -408,9 +409,9 @@ static PYTHON_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> = std::syn
 (subscript
   value: (identifier) @use.var)
 "#,
-        "Python dataflow",
-    )
-});
+            "Python dataflow",
+        )
+    });
 
 /// Python AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]

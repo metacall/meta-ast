@@ -303,10 +303,11 @@ define_language_pack!(
 // ── Dataflow extraction ─────────────────────────────────────────────
 
 #[cfg(feature = "dataflow")]
-static RUST_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> = std::sync::LazyLock::new(|| {
-    crate::language::common::compile_query(
-        &tree_sitter_rust::LANGUAGE.into(),
-        r#"
+static RUST_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> =
+    std::sync::LazyLock::new(|| {
+        crate::language::common::compile_query(
+            &tree_sitter_rust::LANGUAGE.into(),
+            r#"
 ; Let binding definitions: let x = expr;
 (let_declaration
   pattern: (identifier) @def.var
@@ -338,9 +339,9 @@ static RUST_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> = std::sync:
 (field_expression
   value: (identifier) @use.var)
 "#,
-        "Rust dataflow",
-    )
-});
+            "Rust dataflow",
+        )
+    });
 
 /// Extract data nodes (definitions) and flow edges (def-use) from a Rust parse tree.
 ///

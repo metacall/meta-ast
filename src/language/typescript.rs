@@ -419,13 +419,14 @@ define_language_pack!(
 // ── Dataflow extraction ─────────────────────────────────────────────
 
 #[cfg(feature = "dataflow")]
-static TS_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> = std::sync::LazyLock::new(|| {
-    crate::language::common::compile_query(
-        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        crate::language::javascript::TS_FAMILY_DATAFLOW_QUERY,
-        "TypeScript dataflow",
-    )
-});
+static TS_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> =
+    std::sync::LazyLock::new(|| {
+        crate::language::common::compile_query(
+            &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            crate::language::javascript::TS_FAMILY_DATAFLOW_QUERY,
+            "TypeScript dataflow",
+        )
+    });
 
 /// TypeScript AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]

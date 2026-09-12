@@ -609,13 +609,14 @@ pub(crate) fn extract_js_family_dataflow_with_query(
 }
 
 #[cfg(feature = "dataflow")]
-static JS_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> = std::sync::LazyLock::new(|| {
-    crate::language::common::compile_query(
-        &tree_sitter_javascript::LANGUAGE.into(),
-        JS_DATAFLOW_QUERY_STR,
-        "JavaScript dataflow",
-    )
-});
+static JS_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> =
+    std::sync::LazyLock::new(|| {
+        crate::language::common::compile_query(
+            &tree_sitter_javascript::LANGUAGE.into(),
+            JS_DATAFLOW_QUERY_STR,
+            "JavaScript dataflow",
+        )
+    });
 
 /// JavaScript AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]

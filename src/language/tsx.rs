@@ -194,13 +194,14 @@ define_language_pack!(
 // ── Dataflow extraction ─────────────────────────────────────────────
 
 #[cfg(feature = "dataflow")]
-static TSX_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> = std::sync::LazyLock::new(|| {
-    crate::language::common::compile_query(
-        &tree_sitter_typescript::LANGUAGE_TSX.into(),
-        crate::language::javascript::TS_FAMILY_DATAFLOW_QUERY,
-        "TSX dataflow",
-    )
-});
+static TSX_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> =
+    std::sync::LazyLock::new(|| {
+        crate::language::common::compile_query(
+            &tree_sitter_typescript::LANGUAGE_TSX.into(),
+            crate::language::javascript::TS_FAMILY_DATAFLOW_QUERY,
+            "TSX dataflow",
+        )
+    });
 
 /// TSX AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]
