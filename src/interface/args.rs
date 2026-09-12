@@ -144,6 +144,33 @@ pub struct DeployArgs {
     /// Maximum number of files in a single pod before rebalancing is triggered
     #[arg(long, default_value_t = crate::deploy::cut::DEFAULT_MAX_POD_SIZE)]
     pub max_pod_size: usize,
+
+    /// Diagnostic severity that makes the run exit with status 1
+    #[arg(long, value_enum, default_value_t = crate::interface::report::FailOn::Error)]
+    pub fail_on: crate::interface::report::FailOn,
+}
+
+/// The CLI owns the mapping from parsed arguments to the emitter configuration.
+impl From<&InspectArgs> for crate::output::emitter::EmitConfig {
+    fn from(args: &InspectArgs) -> Self {
+        Self {
+            output: args.output.clone(),
+            format: args.format,
+            html: false,
+            open_browser: false,
+        }
+    }
+}
+
+impl From<&GraphArgs> for crate::output::emitter::EmitConfig {
+    fn from(args: &GraphArgs) -> Self {
+        Self {
+            output: args.output.clone(),
+            format: args.format,
+            html: args.html,
+            open_browser: true,
+        }
+    }
 }
 
 #[cfg(test)]
