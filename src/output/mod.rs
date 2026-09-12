@@ -51,6 +51,14 @@ impl OutputFormat {
             Self::Yaml => Ok(yaml_serde::to_string(value)?),
         }
     }
+
+    /// File extension for this format, without the dot.
+    pub fn extension(&self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::Yaml => "yaml",
+        }
+    }
 }
 
 #[cfg(test)]

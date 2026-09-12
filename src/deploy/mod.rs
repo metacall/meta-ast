@@ -226,14 +226,18 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     if !config.check {
         std::fs::create_dir_all(&config.out)?;
 
-        let manifest_json = serde_json::to_string_pretty(&pod_manifest)?;
+        let extension = config.format.extension();
+        let manifest_text = config.format.serialize(&pod_manifest)?;
         crate::output::write_atomic(
-            &config.out.join("metacall.pods.json"),
-            manifest_json.as_bytes(),
+            &config.out.join(format!("metacall.pods.{extension}")),
+            manifest_text.as_bytes(),
         )?;
 
-        let mesh_json = serde_json::to_string_pretty(&mesh)?;
-        crate::output::write_atomic(&config.out.join("metacall.mesh.json"), mesh_json.as_bytes())?;
+        let mesh_text = config.format.serialize(&mesh)?;
+        crate::output::write_atomic(
+            &config.out.join(format!("metacall.mesh.{extension}")),
+            mesh_text.as_bytes(),
+        )?;
 
         tracing::info!(
             "Generated pod manifest with {} deployments and {} inter-pod edges.",

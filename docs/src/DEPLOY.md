@@ -11,6 +11,10 @@ The `deploy` subcommand scans polyglot projects for MetaCall load and client cal
 | `metacall.pods.json` | Pod manifest with deployment units, inter-pod edges, dependency lists, and AST metrics |
 | `metacall.mesh.json` | Function Mesh topology with SCC deployment units and call-site attribution |
 
+With `-f yaml` the same documents are written as `metacall.pods.yaml` and
+`metacall.mesh.yaml`. MetaCall core reads JSON only, so the YAML form is a
+meta-ast artifact for people and for tooling that prefers YAML.
+
 ## Usage
 
 ```bash
