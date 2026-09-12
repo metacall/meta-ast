@@ -579,6 +579,12 @@ mod tests {
         let root = temp_dir("unread_diag");
         let a = write_file(&root, "a.py", "def a(): pass\n");
 
+        // Root ignores file permissions, so the read failure cannot be provoked.
+        #[cfg(unix)]
+        if writes_as_root(&a) {
+            return;
+        }
+
         let mut state = WatchState::new();
         let (_, _, diags1) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert!(diags1.is_empty());

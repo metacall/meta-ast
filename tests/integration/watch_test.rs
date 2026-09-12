@@ -276,3 +276,83 @@ fn debounced_watcher_smoke() {
     drop(rx);
     let _ = handle.join();
 }
+
+/// The stop flag must end the loop promptly, even while a burst of changes is
+/// still being debounced, and it must leave a tree that still analyzes to a
+/// deterministic graph.
+#[test]
+fn the_stop_flag_ends_the_loop_during_a_change_burst() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let tmp = TmpDir::new();
+    let root = tmp.path();
+    write_file(root, "a.py", "def alpha(): pass\n");
+
+    let config = meta_ast::watch::WatchConfig {
+        debounce: std::time::Duration::from_millis(50),
+        format: meta_ast::output::OutputFormat::Json,
+        output: None,
+        html: false,
+        open_browser: false,
+        languages: None,
+    };
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+
+    let root_clone = root.to_path_buf();
+    let stop_clone = Arc::clone(&stop);
+    let handle = std::thread::spawn(move || {
+        let result = meta_ast::watch::watcher::run_watch_until(
+            root_clone,
+            config,
+            &stop_clone,
+            move |analysis, _change_set| {
+                let _ = tx.send(analysis.graph.file_count());
+                Ok(())
+            },
+        );
+        let _ = done_tx.send(result.is_ok());
+    });
+
+    let files = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the initial analysis reaches the callback");
+    assert_eq!(files, 1);
+
+    for index in 0..24 {
+        write_file(root, &format!("burst_{index}.py"), "def burst(): pass\n");
+    }
+    std::fs::remove_file(root.join("burst_0.py")).unwrap();
+
+    let stop_requested = std::time::Instant::now();
+    stop.store(true, Ordering::Relaxed);
+    let stopped = done_rx.recv_timeout(std::time::Duration::from_secs(15));
+    assert!(
+        matches!(stopped, Ok(true)),
+        "the watch loop must end cleanly once the stop flag is set"
+    );
+    let stop_latency = stop_requested.elapsed();
+    assert!(
+        stop_latency < std::time::Duration::from_secs(10),
+        "the watch loop took {stop_latency:?} to stop"
+    );
+    handle.join().unwrap();
+
+    let mut state = meta_ast::WatchState::new();
+    let (analysis, change_set, _) =
+        meta_ast::incremental_reanalyze(root, None, &mut state).unwrap();
+    assert_eq!(
+        change_set.files_added,
+        analysis.graph.file_count(),
+        "every remaining file must join the graph"
+    );
+
+    let mut cold = meta_ast::WatchState::new();
+    let (repeated, _, _) = meta_ast::incremental_reanalyze(root, None, &mut cold).unwrap();
+    assert_eq!(analysis.graph.file_count(), repeated.graph.file_count());
+    assert_eq!(analysis.graph.edge_count(), repeated.graph.edge_count());
+    assert_eq!(analysis.graph.symbol_count(), repeated.graph.symbol_count());
+}

@@ -15,6 +15,7 @@ mod integration {
     mod import_test;
     mod inspect_output_test;
     mod output_format_test;
+    mod pipeline_equivalence_test;
     mod pipeline_test;
     mod reanalyze_api_test;
     mod shard_index_test;
