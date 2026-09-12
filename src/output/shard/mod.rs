@@ -1,4 +1,4 @@
-//! `.metast` v2 JSONL shard and index serialization.
+//! JSONL shard and index serialization for the `.meta-ast/` directory.
 //!
 //! Provides the persistence model for `.meta-ast/` index directories:
 //! - `shards/<n>.jsonl`: Per-file AST symbols, unresolved items, and stable-name graph edges.

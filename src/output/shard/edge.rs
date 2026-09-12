@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::graph::{CodeGraph, EdgeKind, NodeData};
 use crate::output::shard::error::ShardError;
+use crate::output::shard::file::SHARD_SCHEMA_VERSION;
 use crate::output::shard::name::stable_node_name;
 
 /// Serialized cross-node edge in a shard file.
@@ -97,7 +98,9 @@ pub(crate) fn validate_edge(
         return Err(ShardError::InvalidEdge {
             line,
             edge_index,
-            message: "schema version 2 does not persist dataflow nodes".to_string(),
+            message: format!(
+                "schema version {SHARD_SCHEMA_VERSION} does not persist dataflow nodes"
+            ),
         });
     }
     if edge.flow_kind.is_some() {

@@ -67,6 +67,16 @@ impl ShardFile {
             normalized_path(&diagnostic.path)?;
         }
         let symbols = extraction.symbols.iter().map(ShardSymbol::from).collect();
+        #[cfg(feature = "dataflow")]
+        let dropped_payload = dataflow_drop_diagnostic(extraction);
+        #[cfg(not(feature = "dataflow"))]
+        let dropped_payload: Option<Diagnostic> = None;
+        let diagnostics: Vec<Diagnostic> = extraction
+            .diagnostics
+            .iter()
+            .cloned()
+            .chain(dropped_payload)
+            .collect();
         let mut edges = graph
             .graph()
             .edge_references()
@@ -113,7 +123,7 @@ impl ShardFile {
             symbols,
             imports: extraction.imports.clone(),
             references: extraction.references.clone(),
-            diagnostics: extraction.diagnostics.clone(),
+            diagnostics,
             ast_node_count: extraction.ast_node_count,
             #[cfg(feature = "metacall-deploy")]
             call_sites: extraction.call_sites.clone(),
@@ -152,6 +162,26 @@ impl ShardFile {
             edges: self.edges,
         })
     }
+}
+
+/// Warning for a dataflow payload that the shard schema cannot store.
+///
+/// Schema version 3 keeps symbols, imports, references and edges. A record
+/// with dataflow nodes or flow edges loses them on write, so the record says
+/// so instead of dropping them without a word.
+#[cfg(feature = "dataflow")]
+fn dataflow_drop_diagnostic(extraction: &FileExtraction) -> Option<Diagnostic> {
+    if extraction.data_nodes.is_empty() && extraction.flow_edges.is_empty() {
+        return None;
+    }
+    Some(Diagnostic {
+        path: extraction.path.clone(),
+        severity: crate::error::Severity::Warning,
+        message: format!(
+            "dataflow payload not persisted: shard schema version {SHARD_SCHEMA_VERSION} stores symbols and edges only"
+        ),
+        source_range: None,
+    })
 }
 
 impl From<&Symbol> for ShardSymbol {
