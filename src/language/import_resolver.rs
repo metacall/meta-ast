@@ -77,21 +77,33 @@ pub(crate) fn resolve_js_family_import(
     probe_relative(raw, source_dir, extensions, is_file, true)
 }
 
-/// Shared stateless core for C-family imports.
+/// Resolve a C or C++ include specifier to a project file.
+///
+/// A system include (`<...>`) never resolves. There is no include path
+/// model, so a quoted include resolves only when the file sits next to the
+/// source file. Everything else stays external (ADR 0003).
 pub(crate) fn resolve_c_family_import(raw: &str, source_dir: &Path) -> Option<PathBuf> {
-    let raw = strip_c_family_quotes(raw);
-    if raw.is_empty() {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.starts_with('<') {
         return None;
     }
-    let path = source_dir.join(raw);
-    if path.extension().is_none() {
-        Some(path.with_extension("h"))
-    } else {
-        Some(path)
+    let relative = strip_c_family_quotes(trimmed);
+    if relative.is_empty() {
+        return None;
     }
+    let candidate = source_dir.join(relative);
+    let candidate = if candidate.extension().is_none() {
+        candidate.with_extension("h")
+    } else {
+        candidate
+    };
+    candidate.is_file().then_some(candidate)
 }
 
-/// Candidate paths for a Python import.
+/// Candidate `__init__.py` and module file for a Python import.
+///
+/// One leading dot is the current package, two dots the parent package, and
+/// so on (PEP 328).
 pub(crate) fn python_candidate_paths(
     raw: &str,
     source_dir: &Path,
@@ -101,28 +113,24 @@ pub(crate) fn python_candidate_paths(
     if raw.is_empty() {
         return None;
     }
-    if raw.starts_with('.') {
-        let relative = raw.trim_start_matches('.');
-        if relative.is_empty() {
-            let init = source_dir.join("__init__.py");
-            return Some((init.clone(), init));
-        }
-        let path = source_dir.join(relative.replace('.', std::path::MAIN_SEPARATOR_STR));
-        let init = path.join("__init__.py");
-        let module = path.with_extension("py");
-        Some((init, module))
-    } else {
+    if !raw.starts_with('.') {
         let path = project_root.join(raw.replace('.', std::path::MAIN_SEPARATOR_STR));
         let init = path.join("__init__.py");
         let module = path.with_extension("py");
-        Some((init, module))
+        return Some((init, module));
     }
-}
 
-/// Relative Go import fast path: `.` prefix strips one dot.
-pub(crate) fn go_relative_path(raw: &str, source_dir: &Path) -> Option<PathBuf> {
-    raw.strip_prefix('.')
-        .map(|relative| source_dir.join(relative).with_extension("go"))
+    let dots = raw.chars().take_while(|c| *c == '.').count();
+    let base = source_dir.ancestors().nth(dots - 1)?;
+    let rest = &raw[dots..];
+    if rest.is_empty() {
+        let init = base.join("__init__.py");
+        return Some((init.clone(), init));
+    }
+    let path = base.join(rest.replace('.', std::path::MAIN_SEPARATOR_STR));
+    let init = path.join("__init__.py");
+    let module = path.with_extension("py");
+    Some((init, module))
 }
 
 /// Walk `project_root` parents for `go.mod` and parse the module name.
@@ -253,12 +261,9 @@ impl GoModResolver {
 impl ImportResolver for GoModResolver {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
         let raw = strip_import_quotes(raw);
-        if raw.is_empty() {
+        if raw.is_empty() || raw.starts_with('.') {
+            // Go modules reject relative imports, so there is no path to build.
             return None;
-        }
-
-        if let Some(path) = go_relative_path(raw, source_dir) {
-            return Some(path);
         }
 
         let cached = self
@@ -278,14 +283,16 @@ impl ImportResolver for GoModResolver {
         };
 
         let matched_module = module_info.as_ref().and_then(|(dir, name)| {
-            if raw.starts_with(name) {
-                Some((dir, name))
-            } else {
-                None
-            }
+            raw.strip_prefix(name.as_str())
+                .filter(|rest| rest.is_empty() || rest.starts_with('/'))
+                .map(|_| (dir, name))
         });
         if let Some((dir, module_name)) = matched_module {
             let relative = raw[module_name.len()..].trim_start_matches('/');
+            if relative.is_empty() {
+                // A package is a directory. One file cannot represent it.
+                return None;
+            }
             return Some(dir.join(relative).with_extension("go"));
         }
 
@@ -769,10 +776,7 @@ mod tests {
         );
         // Invalidate:
         py_resolver.clear_cache();
-        assert_eq!(
-            py_resolver.resolve("py_pkg", &temp_dir, &temp_dir),
-            Some(temp_dir.join("py_pkg.py"))
-        );
+        assert_eq!(py_resolver.resolve("py_pkg", &temp_dir, &temp_dir), None);
 
         // 2. Go resolver cache invalidation
         let go_mod_path = temp_dir.join("go.mod");

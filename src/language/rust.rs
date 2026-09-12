@@ -2,23 +2,35 @@ use crate::language::{DefaultVisibility, DocCommentConfig, LanguageSpec};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+/// Resolve a module path against a base directory.
+///
+/// The trailing segments may name items rather than modules, so the longest
+/// path that yields a file wins: `crate::lib::compute` resolves to `lib.rs`.
 fn resolve_rust_module_path(rest: &str, base: &Path) -> Option<PathBuf> {
-    let segments: Vec<&str> = rest.split("::").collect();
-    let module = segments.first()?;
+    let segments: Vec<&str> = rest.split("::").filter(|s| !s.is_empty()).collect();
+    (1..=segments.len())
+        .rev()
+        .find_map(|end| module_file(&segments[..end], base))
+}
 
-    // Try direct file: base/module.rs
-    let direct_file = base.join(format!("{module}.rs"));
-    if direct_file.exists() {
+fn module_file(segments: &[&str], base: &Path) -> Option<PathBuf> {
+    let (last, parents) = segments.split_last()?;
+
+    let mut current = base.to_path_buf();
+    for segment in parents {
+        current = current.join(segment);
+        if !current.is_dir() {
+            return None;
+        }
+    }
+
+    let direct_file = current.join(format!("{last}.rs"));
+    if direct_file.is_file() {
         return Some(direct_file);
     }
 
-    // Try directory module: base/module/mod.rs
-    let dir_mod = base.join(module).join("mod.rs");
-    if dir_mod.exists() {
-        return Some(dir_mod);
-    }
-
-    None
+    let dir_mod = current.join(last).join("mod.rs");
+    dir_mod.is_file().then_some(dir_mod)
 }
 
 fn resolve_rust_import(raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
@@ -35,7 +47,13 @@ fn resolve_rust_import(raw: &str, source_dir: &Path, project_root: &Path) -> Opt
         return resolve_rust_module_path(rest, parent);
     }
     if let Some(rest) = raw.strip_prefix("crate::") {
-        return resolve_rust_module_path(rest, project_root);
+        let src_dir = project_root.join("src");
+        let base = if src_dir.is_dir() {
+            src_dir
+        } else {
+            project_root.to_path_buf()
+        };
+        return resolve_rust_module_path(rest, &base);
     }
     None
 }
