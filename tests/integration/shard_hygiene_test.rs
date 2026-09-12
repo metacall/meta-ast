@@ -271,18 +271,32 @@ fn export_disambiguates_equivalent_names_end_to_end() {
     fs::write(root.join("a.py"), "def lower():\n    return 2\n").unwrap();
     fs::write(root.join("CON.py"), "def device():\n    return 3\n").unwrap();
 
+    // A case-insensitive file system folds A.py and a.py into one file, so the
+    // tree can hold only two of the three names there. The naming policy is the
+    // part that must hold on every file system, so it is checked with the
+    // intended path list either way, and the export round trip below needs the
+    // three distinct files and runs only where they exist.
+    let folded = std::fs::read_dir(root).unwrap().count() < 3;
+
     let (analysis, _diagnostics) =
         meta_ast::pipeline::analyze_graph(root, SnapshotId::new(1).unwrap(), None).unwrap();
-    let relative: Vec<PathBuf> = analysis
-        .extractions
-        .iter()
-        .map(|file| {
-            file.path
-                .strip_prefix(root)
-                .unwrap_or(file.path.as_path())
-                .to_path_buf()
-        })
-        .collect();
+    let relative: Vec<PathBuf> = if folded {
+        ["A.py", "a.py", "CON.py"]
+            .iter()
+            .map(PathBuf::from)
+            .collect()
+    } else {
+        analysis
+            .extractions
+            .iter()
+            .map(|file| {
+                file.path
+                    .strip_prefix(root)
+                    .unwrap_or(file.path.as_path())
+                    .to_path_buf()
+            })
+            .collect()
+    };
     assert_eq!(relative.len(), 3, "the fixture tree holds three files");
 
     let plan = plan_shard_file_names(&relative).unwrap();
@@ -318,6 +332,12 @@ fn export_disambiguates_equivalent_names_end_to_end() {
         "every written name is portable: {:?}",
         plan.names
     );
+
+    if folded {
+        // The round trip needs three files on disk; the policy assertions above
+        // are the part that has to hold on a case-insensitive file system.
+        return;
+    }
 
     write_index(root, &analysis, &plan.names);
     for name in &plan.names {
