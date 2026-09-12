@@ -3,24 +3,24 @@ use crate::model::Visibility;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-fn resolve_go_import(raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
-    use crate::language::import_resolver::{find_go_module, go_relative_path, strip_import_quotes};
+fn resolve_go_import(raw: &str, _source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
+    use crate::language::import_resolver::{find_go_module, strip_import_quotes};
     let raw = strip_import_quotes(raw);
-    if raw.is_empty() {
+    if raw.is_empty() || raw.starts_with('.') {
+        // Go modules reject relative imports, so there is no path to build.
         return None;
     }
 
-    if let Some(path) = go_relative_path(raw, source_dir) {
-        return Some(path);
-    }
-
     let (dir, module_name) = find_go_module(project_root)?;
-    if raw.starts_with(&module_name) {
-        let relative = raw[module_name.len()..].trim_start_matches('/');
-        return Some(dir.join(relative).with_extension("go"));
+    let relative = raw
+        .strip_prefix(module_name.as_str())
+        .filter(|rest| rest.starts_with('/'))?
+        .trim_start_matches('/');
+    if relative.is_empty() {
+        // A package is a directory. One file cannot represent it.
+        return None;
     }
-
-    None
+    Some(dir.join(relative).with_extension("go"))
 }
 
 static GO_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {

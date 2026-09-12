@@ -469,13 +469,25 @@ impl GraphBuilder {
                 continue;
             };
             let source_dir = file.path.parent().unwrap_or(std::path::Path::new("."));
-            if let Some(resolver) = resolvers.get(&file.lang) {
-                for import in &file.imports {
-                    if let Some(target) =
-                        resolver.resolve(&import.import_specifier, source_dir, root)
-                    {
-                        builder.add_import(source_fid, target);
+            let Some(resolver) = resolvers.get(&file.lang) else {
+                continue;
+            };
+            for import in &file.imports {
+                let specifier = import_specifier_for(file.lang, import);
+                match resolver.resolve(&specifier, source_dir, root) {
+                    Some(target) => builder.add_import(source_fid, target),
+                    None if is_relative_specifier(&specifier) => {
+                        diagnostics.push(crate::error::Diagnostic {
+                            path: file.path.clone(),
+                            severity: crate::error::Severity::Warning,
+                            message: format!("unresolved relative import: {specifier}"),
+                            source_range: Some(import.range.clone()),
+                        });
                     }
+                    None => builder.add_import(
+                        source_fid,
+                        std::path::PathBuf::from(external_name(file.lang, &specifier)),
+                    ),
                 }
             }
         }
@@ -540,6 +552,41 @@ impl GraphBuilder {
 
         (graph, scc, scope_cache)
     }
+}
+
+/// The specifier the resolver sees.
+///
+/// Python spells a bare relative import (`from . import x`) as a package plus
+/// a name, so the name joins the module path before resolution.
+fn import_specifier_for<'a>(
+    lang: crate::language::LangId,
+    import: &'a crate::model::UnresolvedImport,
+) -> std::borrow::Cow<'a, str> {
+    if lang == crate::language::LangId::Python {
+        crate::language::python::normalize_relative_specifier(
+            &import.import_specifier,
+            import.symbol.as_deref(),
+            import.star,
+        )
+    } else {
+        std::borrow::Cow::Borrowed(import.import_specifier.as_str())
+    }
+}
+
+/// A relative specifier addresses the project, so a miss is a config error.
+fn is_relative_specifier(specifier: &str) -> bool {
+    let stripped = specifier.trim_matches(|c| c == '\'' || c == '"');
+    stripped.starts_with('.') || stripped.starts_with('/')
+}
+
+/// Node name for an unresolved non-relative import (ADR 0003).
+fn external_name(lang: crate::language::LangId, specifier: &str) -> String {
+    use crate::language::{LangId, import_resolver};
+    let name = match lang {
+        LangId::C | LangId::Cpp => import_resolver::strip_c_family_quotes(specifier),
+        _ => import_resolver::strip_import_quotes(specifier),
+    };
+    name.to_string()
 }
 
 #[cfg(test)]

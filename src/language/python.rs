@@ -5,10 +5,30 @@ use std::sync::LazyLock;
 fn resolve_python_import(raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
     use crate::language::import_resolver::python_candidate_paths;
     let (init_path, module_path) = python_candidate_paths(raw, source_dir, project_root)?;
-    if init_path.exists() {
+    if init_path.is_file() {
         return Some(init_path);
     }
-    Some(module_path)
+    module_path.is_file().then_some(module_path)
+}
+
+/// Join the imported name onto a dots-only relative specifier.
+///
+/// `from . import util` imports the submodule `util` of the current package.
+/// Tree-sitter captures the specifier and the name separately, so the module
+/// path is `.util`.
+pub(crate) fn normalize_relative_specifier<'a>(
+    specifier: &'a str,
+    symbol: Option<&str>,
+    star: bool,
+) -> std::borrow::Cow<'a, str> {
+    let specifier = specifier.trim();
+    if star || specifier.is_empty() || !specifier.bytes().all(|byte| byte == b'.') {
+        return std::borrow::Cow::Borrowed(specifier);
+    }
+    match symbol {
+        Some(name) if !name.is_empty() => std::borrow::Cow::Owned(format!("{specifier}{name}")),
+        _ => std::borrow::Cow::Borrowed(specifier),
+    }
 }
 
 static PYTHON_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
@@ -58,13 +78,22 @@ const PYTHON_IMPORT_QUERY_STR: &str = r#"
     name: (dotted_name) @import.path
     alias: (identifier) @import.alias))
 (import_from_statement
-  module_name: (dotted_name) @import.path
-  name: (_) @import.symbol)
+  module_name: [
+    (dotted_name)
+    (relative_import)
+  ] @import.path
+  name: (dotted_name) @import.symbol)
 (import_from_statement
-  module_name: (dotted_name) @import.path
+  module_name: [
+    (dotted_name)
+    (relative_import)
+  ] @import.path
   (aliased_import name: (_) @import.symbol alias: (identifier) @import.alias))
 (import_from_statement
-  module_name: (dotted_name) @import.path
+  module_name: [
+    (dotted_name)
+    (relative_import)
+  ] @import.path
   (wildcard_import) @import.star)
 "#;
 

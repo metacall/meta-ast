@@ -183,7 +183,7 @@ fn extract_source(
     let metrics = parser::tree_metrics(&tree, source);
     let mut diags = Vec::new();
 
-    if metrics.error_ratio > 0.5 {
+    if tree.root_node().has_error() {
         diags.push(Diagnostic {
             path: path.to_path_buf(),
             severity: Severity::Warning,
