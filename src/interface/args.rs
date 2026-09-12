@@ -95,7 +95,7 @@ pub struct GraphArgs {
     #[arg(long)]
     pub datagraph: bool,
 
-    /// Output file for the datagraph export (defaults to <output stem>.datagraph.json)
+    /// Output file for the datagraph export (defaults to the graph output name plus `.datagraph.json`)
     #[cfg(feature = "dataflow")]
     #[arg(long)]
     pub datagraph_output: Option<std::path::PathBuf>,
