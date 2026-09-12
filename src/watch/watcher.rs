@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::input;
+use crate::interface::report::report_diagnostics;
 use crate::language::LangId;
 use crate::pipeline::GraphAnalysis;
 use crate::reanalyze::{ChangeSet, WatchState, incremental_reanalyze};
@@ -50,17 +51,15 @@ pub fn run_watch_until(
 
     let languages = config.languages.as_deref();
     let debounce = config.debounce();
+    let mut failures = 0usize;
 
     tracing::info!(root = %root.display(), "Running initial analysis");
-    let (analysis, change_set, diags) = incremental_reanalyze(&root, languages, &mut state)?;
+    let (analysis, change_set, diagnostics) = incremental_reanalyze(&root, languages, &mut state)?;
 
-    for d in &diags {
-        tracing::warn!(
-            path = %d.path.display(),
-            severity = ?d.severity,
-            "{}",
-            d.message,
-        );
+    // The policy is reported per tick and ends the run only once the loop stops:
+    // a long watch run must not abort on a diagnostic it already reported.
+    if report_diagnostics(&diagnostics, config.fail_on).is_err() {
+        failures += 1;
     }
 
     on_change(&analysis, &change_set)?;
@@ -81,7 +80,6 @@ pub fn run_watch_until(
         "Watching for file changes",
     );
 
-    let mut failures = 0usize;
     while !stop.load(Ordering::Relaxed) {
         let res = match rx.recv_timeout(IDLE_POLL) {
             Ok(res) => res,
@@ -99,14 +97,9 @@ pub fn run_watch_until(
 
                 tracing::debug!(count = events.len(), "Debounced change detected");
                 match incremental_reanalyze(&root, languages, &mut state) {
-                    Ok((analysis, change_set, diags)) => {
-                        for d in &diags {
-                            tracing::warn!(
-                                path = %d.path.display(),
-                                severity = ?d.severity,
-                                "{}",
-                                d.message,
-                            );
+                    Ok((analysis, change_set, diagnostics)) => {
+                        if report_diagnostics(&diagnostics, config.fail_on).is_err() {
+                            failures += 1;
                         }
                         if let Err(e) = on_change(&analysis, &change_set) {
                             failures += 1;

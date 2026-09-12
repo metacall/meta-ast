@@ -5,7 +5,7 @@ use crate::error::Diagnostic;
 use crate::graph::{CodeGraph, GraphBuilder, SccAnalysis};
 use crate::input;
 use crate::language::LangId;
-use crate::model::SnapshotId;
+use crate::model::{FileExtraction, SnapshotId};
 
 /// Metadata about a snapshot analysis run.
 #[derive(Debug, Clone)]
@@ -20,6 +20,33 @@ pub struct GraphAnalysis {
     pub scc: SccAnalysis,
     pub snapshot_id: SnapshotId,
     pub extractions: Vec<Arc<crate::model::FileExtraction>>,
+}
+
+/// Assemble the graph, the scope cache, the resolved references, the client
+/// call edges and the SCC analysis from a set of extractions.
+///
+/// Both the one-shot and the incremental entry point call this, so the analysis
+/// of a tree cannot depend on which entry point produced it. The returned
+/// diagnostics are in the canonical order.
+pub fn build_analysis(
+    extractions: Vec<Arc<FileExtraction>>,
+    root: &Path,
+    snapshot_id: SnapshotId,
+) -> (GraphAnalysis, Vec<Diagnostic>) {
+    let mut diagnostics = Vec::new();
+    let (graph, scc) =
+        GraphBuilder::from_extractions(&extractions, root, snapshot_id, &mut diagnostics);
+    diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+
+    (
+        GraphAnalysis {
+            graph,
+            scc,
+            snapshot_id,
+            extractions,
+        },
+        diagnostics,
+    )
 }
 
 /// Run the full graph analysis pipeline on a path.
@@ -42,19 +69,11 @@ pub fn analyze_graph(
 
     let arc_extractions: Vec<_> = extraction.files.into_iter().map(Arc::new).collect();
 
-    let (graph, scc) =
-        GraphBuilder::from_extractions(&arc_extractions, root, snapshot_id, &mut diagnostics);
+    let (analysis, mut graph_diagnostics) = build_analysis(arc_extractions, root, snapshot_id);
+    diagnostics.append(&mut graph_diagnostics);
     diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
 
-    Ok((
-        GraphAnalysis {
-            graph,
-            scc,
-            snapshot_id,
-            extractions: arc_extractions,
-        },
-        diagnostics,
-    ))
+    Ok((analysis, diagnostics))
 }
 
 /// Build a SnapshotMeta for the current analysis run.

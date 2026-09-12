@@ -243,10 +243,13 @@ fn debounced_watcher_smoke() {
 
     let config = meta_ast::watch::WatchConfig {
         debounce: std::time::Duration::from_millis(300),
-        format: meta_ast::output::OutputFormat::Json,
-        output: None,
-        html: false,
-        open_browser: false,
+        emit: meta_ast::output::emitter::EmitConfig {
+            output: None,
+            format: meta_ast::output::OutputFormat::Json,
+            html: false,
+            open_browser: false,
+        },
+        fail_on: meta_ast::interface::report::FailOn::Error,
         languages: None,
     };
 
@@ -277,6 +280,89 @@ fn debounced_watcher_smoke() {
     let _ = handle.join();
 }
 
+/// Watch configuration for the policy tests: one broken file, no output.
+fn policy_config(fail_on: meta_ast::interface::report::FailOn) -> meta_ast::watch::WatchConfig {
+    meta_ast::watch::WatchConfig {
+        debounce: std::time::Duration::from_millis(50),
+        emit: meta_ast::output::emitter::EmitConfig {
+            output: None,
+            format: meta_ast::output::OutputFormat::Json,
+            html: false,
+            open_browser: false,
+        },
+        fail_on,
+        languages: None,
+    }
+}
+
+/// Run the watcher over a project with one unparsable file and return the
+/// result of the loop once it stops.
+fn run_policy_watch(
+    root: &Path,
+    fail_on: meta_ast::interface::report::FailOn,
+) -> anyhow::Result<()> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let (seen_tx, seen_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let root_clone = root.to_path_buf();
+    let stop_clone = Arc::clone(&stop);
+
+    let handle = std::thread::spawn(move || {
+        let result = meta_ast::watch::watcher::run_watch_until(
+            root_clone,
+            policy_config(fail_on),
+            &stop_clone,
+            move |_analysis, _change_set| {
+                let _ = seen_tx.send(());
+                Ok(())
+            },
+        );
+        let _ = done_tx.send(());
+        result
+    });
+
+    seen_rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the initial analysis reaches the callback");
+    stop.store(true, Ordering::Relaxed);
+    done_rx
+        .recv_timeout(std::time::Duration::from_secs(15))
+        .expect("the watch loop must stop once the flag is set");
+
+    handle.join().unwrap()
+}
+
+#[test]
+fn a_tripped_policy_fails_the_watch_run_when_it_stops() {
+    let tmp = TmpDir::new();
+    let root = tmp.path();
+    write_file(root, "broken.py", "def oops(:\n");
+
+    let result = run_policy_watch(root, meta_ast::interface::report::FailOn::Warning);
+
+    assert!(
+        result.is_err(),
+        "the warning policy must fail a watch run that reported a warning"
+    );
+}
+
+#[test]
+fn a_warning_keeps_a_default_watch_run_alive() {
+    let tmp = TmpDir::new();
+    let root = tmp.path();
+    write_file(root, "broken.py", "def oops(:\n");
+
+    let result = run_policy_watch(root, meta_ast::interface::report::FailOn::Error);
+
+    assert!(
+        result.is_ok(),
+        "a parse warning must not fail the default policy: {result:?}"
+    );
+}
+
 /// The stop flag must end the loop promptly, even while a burst of changes is
 /// still being debounced, and it must leave a tree that still analyzes to a
 /// deterministic graph.
@@ -291,10 +377,13 @@ fn the_stop_flag_ends_the_loop_during_a_change_burst() {
 
     let config = meta_ast::watch::WatchConfig {
         debounce: std::time::Duration::from_millis(50),
-        format: meta_ast::output::OutputFormat::Json,
-        output: None,
-        html: false,
-        open_browser: false,
+        emit: meta_ast::output::emitter::EmitConfig {
+            output: None,
+            format: meta_ast::output::OutputFormat::Json,
+            html: false,
+            open_browser: false,
+        },
+        fail_on: meta_ast::interface::report::FailOn::Error,
         languages: None,
     };
 

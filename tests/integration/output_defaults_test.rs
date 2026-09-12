@@ -97,7 +97,7 @@ fn the_dashboard_embeds_the_vendored_bundle() {
 fn the_watch_configuration_does_not_open_a_browser() {
     let config = meta_ast::watch::WatchConfig::new();
     assert!(
-        !config.open_browser,
+        !config.emit.open_browser,
         "opening a browser needs an explicit opt-in"
     );
 }
