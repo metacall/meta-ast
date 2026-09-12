@@ -24,7 +24,7 @@ impl GraphSink for JsonSink {
     fn emit(&self, export: &GraphOutput) -> anyhow::Result<()> {
         let json = serde_json::to_string_pretty(export)?;
         match &self.path {
-            Some(p) => std::fs::write(p, json)?,
+            Some(p) => crate::output::write_atomic(p, json.as_bytes())?,
             None => println!("{json}"),
         }
         Ok(())

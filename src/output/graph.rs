@@ -216,12 +216,15 @@ impl GraphOutput {
 
     fn serialize_nodes(graph: &CodeGraph) -> Vec<SerializedNode> {
         let g = graph.graph();
-        g.node_indices()
+        let mut nodes: Vec<SerializedNode> = g
+            .node_indices()
             .map(|idx| {
                 let node_data = &g[idx];
                 Self::serialize_node(graph, idx.index(), node_data)
             })
-            .collect()
+            .collect();
+        nodes.sort_by(|left, right| node_sort_key(left).cmp(&node_sort_key(right)));
+        nodes
     }
 
     fn serialize_node(graph: &CodeGraph, id: usize, node_data: &NodeData) -> SerializedNode {
@@ -335,7 +338,8 @@ impl GraphOutput {
             .components
             .iter()
             .map(|scc| {
-                let nodes: Vec<usize> = scc.nodes.iter().map(|n| n.index()).collect();
+                let mut nodes: Vec<usize> = scc.nodes.iter().map(|n| n.index()).collect();
+                nodes.sort_unstable();
 
                 SerializedScc {
                     index: scc.index,
@@ -385,6 +389,29 @@ pub fn serialize_graph(
 ) -> anyhow::Result<String> {
     let output = GraphOutput::from_graph(graph, Some(scc_analysis), snapshot_id);
     format.serialize(&output)
+}
+
+/// Order key for serialized nodes: kind group, then location, then node id.
+///
+/// Insertion order depends on how the graph was built; the output order must
+/// not. Files group first (paths), then symbols (defining file, name), then
+/// externals and data nodes (names).
+fn node_sort_key(node: &SerializedNode) -> (u8, &str, &str, usize) {
+    let rank = match node.kind.as_str() {
+        "file" => 0,
+        "symbol" => 1,
+        "external" => 2,
+        _ => 3,
+    };
+    (
+        rank,
+        node.path
+            .as_deref()
+            .or(node.file_path.as_deref())
+            .unwrap_or(""),
+        node.name.as_deref().unwrap_or(""),
+        node.id,
+    )
 }
 
 #[cfg(test)]
