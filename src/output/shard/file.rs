@@ -19,9 +19,10 @@ use crate::output::shard::name::{StableNameIndex, node_owner_path, normalized_pa
 
 /// Shard payload version.
 ///
-/// Version 4 spells symbol kinds and visibility in lowercase, so version 3
-/// records no longer parse. Regenerate the index after an upgrade.
-pub const SHARD_SCHEMA_VERSION: u32 = 4;
+/// Version 5 stores the import specifier without its surrounding quotes and
+/// drops a specifier that is not valid UTF-8, so version 4 records no longer
+/// parse. Regenerate the index after an upgrade.
+pub const SHARD_SCHEMA_VERSION: u32 = 5;
 
 /// A per-file shard record stored in `.meta-ast/shards/<n>.jsonl`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
