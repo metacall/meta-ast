@@ -35,7 +35,7 @@ impl WatchConfig {
             format: OutputFormat::Json,
             output: None,
             html: false,
-            open_browser: true,
+            open_browser: false,
             languages: None,
         }
     }
@@ -64,7 +64,7 @@ mod tests {
         assert_eq!(cfg.format, OutputFormat::Json);
         assert!(cfg.output.is_none());
         assert!(!cfg.html);
-        assert!(cfg.open_browser);
+        assert!(!cfg.open_browser);
         assert!(cfg.languages.is_none());
     }
 

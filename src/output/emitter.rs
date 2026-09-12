@@ -30,12 +30,11 @@ pub fn emit_inspect(symbols: &mut Vec<Symbol>, config: &EmitConfig) -> anyhow::R
 
 /// Serialize and emit the dependency graph analysis results.
 ///
-/// If `config.html` is true, generates an interactive HTML dashboard and writes it
-/// to `config.output` (defaulting to "project.metast"). If `config.open_browser` is true,
-/// opens the HTML file in the default browser.
-///
-/// Otherwise, serializes the graph into the requested text format (JSON/YAML) and
-/// writes to `config.output` or prints to stdout.
+/// If `config.html` is true, generates the interactive HTML dashboard. It is
+/// written to `config.output`, or printed to stdout when no path is given, in
+/// which case there is nothing for `config.open_browser` to open. Otherwise,
+/// the graph is serialized into the requested text format (JSON/YAML) and
+/// written to `config.output`, or printed to stdout.
 pub fn emit_graph(analysis: &GraphAnalysis, config: &EmitConfig) -> anyhow::Result<()> {
     if config.html {
         let html = crate::output::dashboard::to_graph_html(
@@ -43,30 +42,14 @@ pub fn emit_graph(analysis: &GraphAnalysis, config: &EmitConfig) -> anyhow::Resu
             &analysis.scc,
             analysis.snapshot_id.to_raw() as u64,
         )?;
-        let path = config
-            .output
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("project.metast"));
-        crate::output::write_atomic(&path, html.as_bytes())?;
-        if config.open_browser {
-            // A file URL keeps a non-UTF-8 path intact. `to_string_lossy` would
-            // replace the unencodable bytes, and the OS handler expects a URL.
-            let absolute = if path.is_absolute() {
-                path.clone()
-            } else {
-                std::env::current_dir()?.join(&path)
-            };
-            match url::Url::from_file_path(&absolute) {
-                Ok(url) => {
-                    if let Err(e) = webbrowser::open(url.as_str()) {
-                        tracing::warn!(error = %e, "could not open browser");
-                    }
+        match &config.output {
+            Some(path) => {
+                crate::output::write_atomic(path, html.as_bytes())?;
+                if config.open_browser {
+                    open_in_browser(path)?;
                 }
-                Err(()) => tracing::warn!(
-                    path = %absolute.display(),
-                    "cannot open the dashboard in a browser"
-                ),
             }
+            None => println!("{html}"),
         }
     } else {
         let content = crate::output::graph::serialize_graph(
@@ -83,6 +66,29 @@ pub fn emit_graph(analysis: &GraphAnalysis, config: &EmitConfig) -> anyhow::Resu
                 println!("{content}");
             }
         }
+    }
+    Ok(())
+}
+
+/// Hand the written dashboard to the operating system's default browser.
+fn open_in_browser(path: &std::path::Path) -> anyhow::Result<()> {
+    // A file URL keeps a non-UTF-8 path intact. `to_string_lossy` would
+    // replace the unencodable bytes, and the OS handler expects a URL.
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    match url::Url::from_file_path(&absolute) {
+        Ok(url) => {
+            if let Err(e) = webbrowser::open(url.as_str()) {
+                tracing::warn!(error = %e, "could not open browser");
+            }
+        }
+        Err(()) => tracing::warn!(
+            path = %absolute.display(),
+            "cannot open the dashboard in a browser"
+        ),
     }
     Ok(())
 }

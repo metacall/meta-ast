@@ -2,10 +2,23 @@ use crate::graph::CodeGraph;
 use crate::graph::scc::SccAnalysis;
 use crate::output::graph::GraphOutput;
 
+/// The Cytoscape.js bundle every dashboard carries.
+///
+/// The file is the cdnjs artifact for cytoscape 3.30.4, whose published SRI is
+/// `sha384-H3uzGzTfGHUAumB8+s4GEdfFwzAceN9wCCndN8AXubWKFIPuBSWKKtWDx7RhSf/z`.
+/// It holds no `</script` sequence, so the document can inline it as it is, and
+/// the `.js.txt` name keeps editors and formatters away from the bytes.
+const CYTOSCAPE_BUNDLE: &str = include_str!("../../assets/cytoscape-3.30.4.min.js.txt");
+
+/// BLAKE3 of [`CYTOSCAPE_BUNDLE`]. A replacement asset must update this pin.
+#[cfg(test)]
+const CYTOSCAPE_BUNDLE_BLAKE3: &str =
+    "7a81eefc9202b3f3596583a6207800f8ccc308b3b34564308ccc9a1acbfa40ee";
+
 /// Generate an interactive HTML dashboard from graph analysis data.
 ///
-/// Cytoscape.js is always loaded from a CDN so the library is never shipped
-/// in the binary; the browser caches it after the first fetch.
+/// The document is self-contained: the vendored Cytoscape.js bundle travels
+/// inside it, so it renders offline and needs no integrity attribute.
 pub fn to_graph_html(
     graph: &CodeGraph,
     scc_analysis: &SccAnalysis,
@@ -15,7 +28,7 @@ pub fn to_graph_html(
     let json_data = escape_script_payload(&serde_json::to_string(&graph_output)?);
 
     let html = HTML_TEMPLATE
-        .replacen("__CDN_SCRIPT__", &cdn_script(), 1)
+        .replacen("__CYTOSCAPE_BUNDLE__", CYTOSCAPE_BUNDLE, 1)
         .replacen("__DATA__", &json_data, 1);
     Ok(html)
 }
@@ -40,10 +53,6 @@ fn escape_script_payload(json: &str) -> String {
         }
     }
     escaped
-}
-
-fn cdn_script() -> String {
-    r#"<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js"></script>"#.to_string()
 }
 
 const HTML_TEMPLATE: &str = r##"<!DOCTYPE html>
@@ -121,6 +130,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubunt
 </div>
 </div>
 </div>
+<script>
+__CYTOSCAPE_BUNDLE__
+</script>
 <script>
 var DATA=__DATA__;
 window.addEventListener("DOMContentLoaded",function(){
@@ -260,6 +272,21 @@ var png=cy.png({full:true,scale:2});
 var a=document.createElement("a");a.href=png;a.download="meta-ast-graph.png";a.click();
 }
 </script>
-__CDN_SCRIPT__
 </body>
 </html>"##;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_vendored_bundle_matches_the_pinned_hash() {
+        let hash = blake3::hash(CYTOSCAPE_BUNDLE.as_bytes())
+            .to_hex()
+            .to_string();
+        assert_eq!(
+            hash, CYTOSCAPE_BUNDLE_BLAKE3,
+            "update the pin when the vendored bundle changes"
+        );
+    }
+}

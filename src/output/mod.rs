@@ -6,7 +6,7 @@ pub mod shard;
 
 use serde::Serialize;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Write `bytes` to `path` by renaming a temporary file beside it.
 ///
@@ -61,6 +61,32 @@ impl OutputFormat {
     }
 }
 
+/// The document a command writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OutputKind {
+    /// The interactive dashboard.
+    Html,
+    /// The serialized graph or symbol list.
+    Text,
+}
+
+/// Resolve where a command writes its document.
+///
+/// An explicit path always wins. The dashboard then lands beside the analyzed
+/// path as `<stem>.html`, and serialized text goes to stdout.
+pub fn default_output_path(
+    kind: OutputKind,
+    output: Option<PathBuf>,
+    root: &Path,
+) -> Option<PathBuf> {
+    match (kind, output) {
+        (_, Some(path)) => Some(path),
+        (OutputKind::Html, None) => Some(root.with_extension("html")),
+        (OutputKind::Text, None) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,6 +98,35 @@ mod tests {
             .map(|entry| entry.file_name().to_string_lossy().to_string())
             .filter(|name| name.contains(".tmp."))
             .collect()
+    }
+
+    #[test]
+    fn explicit_output_wins_over_the_default() {
+        let given = PathBuf::from("reports/graph.html");
+        assert_eq!(
+            default_output_path(OutputKind::Html, Some(given.clone()), Path::new("demo")),
+            Some(given)
+        );
+    }
+
+    #[test]
+    fn html_defaults_beside_the_analyzed_path() {
+        assert_eq!(
+            default_output_path(OutputKind::Html, None, Path::new("demo")),
+            Some(PathBuf::from("demo.html"))
+        );
+        assert_eq!(
+            default_output_path(OutputKind::Html, None, Path::new("demo/src/main.py")),
+            Some(PathBuf::from("demo/src/main.html"))
+        );
+    }
+
+    #[test]
+    fn text_without_a_path_goes_to_stdout() {
+        assert_eq!(
+            default_output_path(OutputKind::Text, None, Path::new("demo")),
+            None
+        );
     }
 
     #[test]

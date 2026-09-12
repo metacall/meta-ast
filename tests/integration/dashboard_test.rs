@@ -69,8 +69,8 @@ fn to_graph_html_data_placeholder_replaced() {
     let html = meta_ast::output::dashboard::to_graph_html(&graph, &scc, 1).unwrap();
     assert!(!html.contains("__DATA__"), "__DATA__ should be substituted");
     assert!(
-        !html.contains("__CDN_SCRIPT__"),
-        "__CDN_SCRIPT__ should be substituted"
+        !html.contains("__CYTOSCAPE_BUNDLE__"),
+        "__CYTOSCAPE_BUNDLE__ should be substituted"
     );
 }
 
@@ -93,12 +93,12 @@ fn to_graph_html_json_data_valid() {
 }
 
 #[test]
-fn to_graph_html_cdn_link() {
+fn to_graph_html_embeds_the_vendored_bundle() {
     let (graph, scc) = build_sample_graph();
     let html = meta_ast::output::dashboard::to_graph_html(&graph, &scc, 1).unwrap();
     assert!(
-        html.contains("cdnjs.cloudflare.com/ajax/libs/cytoscape"),
-        "should contain CDN link"
+        html.contains("kc.version=\"3.30.4\""),
+        "should embed the pinned Cytoscape.js build"
     );
 }
 
