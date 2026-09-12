@@ -13,6 +13,7 @@ mod integration {
     #[cfg(feature = "metacall-deploy")]
     mod deploy_test;
     mod edge_cases_test;
+    mod go_package_import_test;
     mod graph_contracts_test;
     mod graph_regression_test;
     mod import_hygiene_test;
