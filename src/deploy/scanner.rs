@@ -60,14 +60,21 @@ impl CallSiteVariant {
             s,
             "metacall"
                 | "metacall_await"
+                | "metacall_await_s"
                 | "metacall_no_arg"
                 | "metacall_untyped"
+                | "metacall_untyped_no_arg"
                 | "metacallfms"
+                | "metacallfms_await"
                 | "metacallv"
+                | "metacallv_s"
                 | "metacallt"
+                | "metacallt_s"
                 | "metacall_function"
                 | "Call"
+                | "CallUnsafe"
                 | "Await"
+                | "AwaitUnsafe"
         ) {
             // metacall_handle excluded: its argument layout differs per port
             // (tag first in C/Node, handle first in Rust).
@@ -79,7 +86,10 @@ impl CallSiteVariant {
 }
 
 fn is_async_call(name: &str) -> bool {
-    name.contains("await") || name.contains("Await")
+    matches!(
+        name,
+        "metacall_await" | "metacall_await_s" | "metacallfms_await" | "Await" | "AwaitUnsafe"
+    )
 }
 
 fn strip_quotes(s: &str) -> String {
@@ -177,7 +187,7 @@ static C_QUERY: LazyLock<Query> = LazyLock::new(|| {
 (call_expression
   function: (identifier) @fn_name
   arguments: (argument_list) @args
-  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacallfms|metacallv|metacallt|metacall_function)$"))
+  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacall_await_s|metacallfms|metacallfms_await|metacallv|metacallv_s|metacallt|metacallt_s|metacall_function)$"))
 "#,
         "C deploy",
     )
@@ -190,7 +200,7 @@ static CPP_QUERY: LazyLock<Query> = LazyLock::new(|| {
 (call_expression
   function: (identifier) @fn_name
   arguments: (argument_list) @args
-  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacallfms|metacallv|metacallt|metacall_function)$"))
+  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacall_await_s|metacallfms|metacallfms_await|metacallv|metacallv_s|metacallt|metacallt_s|metacall_function)$"))
 "#,
         "CPP deploy",
     )
@@ -226,7 +236,7 @@ static GO_QUERY: LazyLock<Query> = LazyLock::new(|| {
     field: (field_identifier) @fn_name)
   arguments: (argument_list) @args
   (#match? @pkg_name "metacall")
-  (#match? @fn_name "^(LoadFrom.*|Call|Await)$"))
+  (#match? @fn_name "^(LoadFrom.*|Call|CallUnsafe|Await|AwaitUnsafe)$"))
 "#,
         "Go deploy",
     )
@@ -612,6 +622,58 @@ mod tests {
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("greet"));
+    }
+
+    #[test]
+    fn test_scan_rust_metacall_untyped_no_arg() {
+        let source = b"metacall::metacall_untyped_no_arg(\"greet\")";
+        let tree = parse(LangId::Rust, source);
+        let sites = scan_file(LangId::Rust, &tree, source, Path::new("lib.rs"));
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
+        assert_eq!(sites[0].function_name.as_deref(), Some("greet"));
+        assert!(!sites[0].is_async);
+    }
+
+    #[test]
+    fn test_scan_go_call_unsafe() {
+        let source = b"metacall.CallUnsafe(\"sum\", 1, 2)";
+        let tree = parse(LangId::Go, source);
+        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
+        assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
+        assert!(!sites[0].is_async);
+    }
+
+    #[test]
+    fn test_scan_go_await_unsafe_is_async() {
+        let source = b"metacall.AwaitUnsafe(\"sum\", resolve, reject, ctx)";
+        let tree = parse(LangId::Go, source);
+        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
+        assert!(sites[0].is_async);
+    }
+
+    #[test]
+    fn test_scan_c_metacallv_s() {
+        let source = b"metacallv_s(\"sum\", args, size);";
+        let tree = parse(LangId::C, source);
+        let sites = scan_file(LangId::C, &tree, source, Path::new("test.c"));
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
+        assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
+    }
+
+    #[test]
+    fn test_scan_c_metacall_await_s_is_async() {
+        let source = b"metacall_await_s(\"sum\", args, size, resolve, reject, data);";
+        let tree = parse(LangId::C, source);
+        let sites = scan_file(LangId::C, &tree, source, Path::new("test.c"));
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
+        assert!(sites[0].is_async);
     }
 
     #[test]
