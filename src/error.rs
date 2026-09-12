@@ -53,6 +53,9 @@ pub enum Error {
     #[error("identifier space exhausted")]
     IdExhausted,
 
+    #[error("analysis reported {errors} error(s) and {warnings} warning(s)")]
+    Diagnostics { errors: usize, warnings: usize },
+
     #[error("invalid source URI '{uri}': {message}")]
     InvalidSourceUri { uri: String, message: String },
 

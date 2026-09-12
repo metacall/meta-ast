@@ -1,20 +1,42 @@
+use std::process::ExitCode;
+
 use clap::Parser;
 use meta_ast::interface::args::Cli;
+use meta_ast::interface::report::report_diagnostics;
 use meta_ast::model::SnapshotId;
 
 #[cfg(feature = "watch")]
 use meta_ast::watch::{WatchConfig, run_watch};
 
-fn main() -> anyhow::Result<()> {
-    meta_ast::interface::banner::print_banner();
+fn main() -> ExitCode {
+    match run() {
+        Ok(status) => status,
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            ExitCode::from(exit_status(&error))
+        }
+    }
+}
 
-    meta_ast::language::validate_queries();
+/// Usage and configuration problems exit with 2, every other failure with 1.
+fn exit_status(error: &anyhow::Error) -> u8 {
+    match error.downcast_ref::<meta_ast::Error>() {
+        Some(meta_ast::Error::Config(_)) => 2,
+        _ => 1,
+    }
+}
+
+/// Parse first, so help and version stay clean, then install the subscriber
+/// before anything can log or panic.
+fn run() -> anyhow::Result<ExitCode> {
+    let cli = Cli::parse();
 
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let cli = Cli::parse();
+    meta_ast::interface::banner::print_banner();
+    meta_ast::language::validate_queries();
 
     match cli {
         Cli::Inspect(args) => {
@@ -31,20 +53,14 @@ fn main() -> anyhow::Result<()> {
                 },
             );
 
-            let mut symbols: Vec<_> = result
-                .files
-                .into_iter()
-                .flat_map(|f| {
-                    for diag in &f.diagnostics {
-                        tracing::warn!(
-                            path = %diag.path.display(),
-                            severity = ?diag.severity,
-                            "{}", diag.message
-                        );
-                    }
-                    f.symbols
-                })
-                .collect();
+            let mut diagnostics = Vec::new();
+            let mut symbols = Vec::new();
+            for file in result.files {
+                diagnostics.extend(file.diagnostics.iter().cloned());
+                symbols.extend(file.symbols);
+            }
+
+            report_diagnostics(&diagnostics, args.fail_on)?;
 
             let config = meta_ast::output::emitter::EmitConfig {
                 output: args.output,
@@ -55,7 +71,7 @@ fn main() -> anyhow::Result<()> {
 
             meta_ast::output::emitter::emit_inspect(&mut symbols, &config)?;
 
-            Ok(())
+            Ok(ExitCode::SUCCESS)
         }
 
         Cli::Graph(args) => {
@@ -73,6 +89,7 @@ fn main() -> anyhow::Result<()> {
                 let output = args.output.clone();
                 let html = args.html;
                 let format = args.format;
+                let fail_on = args.fail_on;
 
                 return run_watch(args.path, watch_config, move |analysis, change_set| {
                     let emit_config = meta_ast::output::emitter::EmitConfig {
@@ -106,11 +123,14 @@ fn main() -> anyhow::Result<()> {
                         "Re-analyzed",
                     );
 
+                    let _ = fail_on;
+
                     Ok(())
-                });
+                })
+                .map(|()| ExitCode::SUCCESS);
             }
 
-            let snapshot_id = SnapshotId::new(1).unwrap();
+            let snapshot_id = SnapshotId::from(std::num::NonZeroU32::MIN);
             let languages = args.language.map(|l| [l]);
             let (analysis, diags) = meta_ast::pipeline::analyze_graph(
                 &args.path,
@@ -118,13 +138,7 @@ fn main() -> anyhow::Result<()> {
                 languages.as_ref().map(|a| a.as_slice()),
             )?;
 
-            for diag in &diags {
-                tracing::warn!(
-                    path = %diag.path.display(),
-                    severity = ?diag.severity,
-                    "{}", diag.message
-                );
-            }
+            report_diagnostics(&diags, args.fail_on)?;
 
             let default_html_output = if args.html && args.output.is_none() {
                 let name = args
@@ -180,7 +194,7 @@ fn main() -> anyhow::Result<()> {
                 sink.emit(&export)?;
             }
 
-            Ok(())
+            Ok(ExitCode::SUCCESS)
         }
 
         #[cfg(feature = "metacall-deploy")]
@@ -192,7 +206,8 @@ fn main() -> anyhow::Result<()> {
                 check: args.check,
                 max_pod_size: args.max_pod_size,
             };
-            meta_ast::deploy::run_deploy(config)
+            meta_ast::deploy::run_deploy(config)?;
+            Ok(ExitCode::SUCCESS)
         }
     }
 }

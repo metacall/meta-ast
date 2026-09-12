@@ -35,7 +35,7 @@ Goals:
 
 - Extend model with optional data/flow nodes (DataNode, FlowEdge, DataScope, FlowKind).
 - Implement intra-procedural def-use extraction for Rust (let bindings, parameters).
-- Provide portable graph export contract with schema versioning (v1).
+- Provide portable graph export contract with schema versioning. The graph document carries `SCHEMA_VERSION` and the shard format carries `SHARD_SCHEMA_VERSION` (4 as of this release).
 - Pluggable sink adapters (GraphSink trait + JsonSink).
 - CLI integration: `--datagraph` flag on graph subcommand.
 - Unified GraphOutput serialization (replaces separate datagraph module).
@@ -222,8 +222,8 @@ Goals:
 - Extract statement nodes, binary operations, control flow branches, and expression terms across
   all 9 supported languages.
 - Maintain a layered representation:
-  - *Layer 1 (Default)*: Fast, lightweight symbol & reference graph.
-  - *Layer 2 (Opt-in)*: Full expression-level AST with lexical scopes and operator nodes.
+  - _Layer 1 (Default)_: Fast, lightweight symbol & reference graph.
+  - _Layer 2 (Opt-in)_: Full expression-level AST with lexical scopes and operator nodes.
 - Generate intra-procedural CFGs for abstract interpretation, dead branch elimination, and
   fine-grained taint propagation.
 
