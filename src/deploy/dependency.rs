@@ -19,25 +19,6 @@ pub struct DependencyEntry {
     pub source: DependencySource,
 }
 
-/// Classify a single external dependency using language-specific strategies.
-///
-/// Dispatches by `external.language` via exhaustive match, following the
-/// repo's enum-static-dispatch convention. Lockfiles are tried first;
-/// if missing or unparseable, falls back to the manifest file. If that
-/// also fails, returns `Unresolved` (never blocks).
-pub fn classify_external(external: &ExternalNode, project_root: &Path) -> ExternalClassification {
-    match external.language {
-        LangId::Python => classify_python(external, project_root),
-        LangId::JavaScript | LangId::TypeScript | LangId::Tsx => {
-            classify_node_ecosystem(external, project_root)
-        }
-        LangId::Rust => classify_rust(external, project_root),
-        LangId::Go => classify_go(external, project_root),
-        LangId::Ruby => classify_ruby(external, project_root),
-        LangId::C | LangId::Cpp => classify_c_cpp_best_effort(external, project_root),
-    }
-}
-
 /// Resolve all external nodes in a graph and return per-pod dependency lists.
 ///
 /// Walks Import edges from each pod's files to ExternalNode targets,
@@ -111,56 +92,210 @@ pub fn resolve_dependencies(
     deps
 }
 
-// ── Per-language resolvers ─────────────────────────────────────────
+// ── Dependency sources ─────────────────────────────────────────────
 
-fn classify_python(external: &ExternalNode, root: &Path) -> ExternalClassification {
-    let lockfiles = [
-        root.join("uv.lock"),
-        root.join("poetry.lock"),
-        root.join("Pipfile.lock"),
-    ];
-    for lf in &lockfiles {
-        if !lf.exists() {
-            continue;
-        }
-        if let Some(version) = parse_version_from_lockfile(lf, &external.raw_path) {
-            return ExternalClassification::Classified {
-                package_name: external.raw_path.clone(),
-                version: Some(version),
-                language: LangId::Python,
-                source: DependencySource::Lockfile,
-            };
+/// How a file states the version of one entry.
+#[derive(Debug, Clone, Copy)]
+enum EntryFormat {
+    /// `name = "x"` with a `version = "..."` in the same entry, `name==1.2.3`,
+    /// or yarn's `version "1.2.3"` line inside the entry.
+    EntryValue,
+    /// `[[package]]` blocks that carry `name` and `version`.
+    TomlPackageArray,
+    /// A JSON object whose dependency sections map a name to a version.
+    JsonDependencyMap,
+    /// `<name> (<version>)`, as Gemfile.lock writes it.
+    ParenthesizedName,
+    /// `<name> <version> <hash>`, matched on the exact first token.
+    ExactToken,
+    /// A `require` line, single or block form, carrying a `v` prefix.
+    GoRequire,
+    /// The file proves the ecosystem is in use and carries no version.
+    Presence,
+}
+
+/// One file that can answer a dependency question.
+struct SourceSpec {
+    file: &'static str,
+    format: EntryFormat,
+    kind: DependencySource,
+    /// A lockfile that does not carry the entry is skipped rather than used as
+    /// the source. Python, Node and Go do that; Rust and Ruby keep the lockfile.
+    needs_entry: bool,
+    at_root: bool,
+    in_subdirectory: bool,
+}
+
+const fn lockfile(
+    file: &'static str,
+    format: EntryFormat,
+    needs_entry: bool,
+    at_root: bool,
+    in_subdirectory: bool,
+) -> SourceSpec {
+    SourceSpec {
+        file,
+        format,
+        kind: DependencySource::Lockfile,
+        needs_entry,
+        at_root,
+        in_subdirectory,
+    }
+}
+
+const fn manifest(
+    file: &'static str,
+    format: EntryFormat,
+    at_root: bool,
+    in_subdirectory: bool,
+) -> SourceSpec {
+    SourceSpec {
+        file,
+        format,
+        kind: DependencySource::Manifest,
+        needs_entry: false,
+        at_root,
+        in_subdirectory,
+    }
+}
+
+static PYTHON_SOURCES: [SourceSpec; 5] = [
+    lockfile("uv.lock", EntryFormat::EntryValue, true, true, false),
+    lockfile("poetry.lock", EntryFormat::EntryValue, true, true, false),
+    lockfile("Pipfile.lock", EntryFormat::EntryValue, true, true, false),
+    manifest("pyproject.toml", EntryFormat::Presence, true, true),
+    manifest("requirements.txt", EntryFormat::Presence, true, true),
+];
+
+static NODE_SOURCES: [SourceSpec; 5] = [
+    lockfile(
+        "package-lock.json",
+        EntryFormat::EntryValue,
+        true,
+        true,
+        false,
+    ),
+    lockfile("yarn.lock", EntryFormat::EntryValue, true, true, false),
+    lockfile("pnpm-lock.yaml", EntryFormat::EntryValue, true, true, false),
+    lockfile(
+        "package-lock.json",
+        EntryFormat::EntryValue,
+        true,
+        false,
+        true,
+    ),
+    manifest("package.json", EntryFormat::JsonDependencyMap, true, true),
+];
+
+static RUST_SOURCES: [SourceSpec; 2] = [
+    lockfile(
+        "Cargo.lock",
+        EntryFormat::TomlPackageArray,
+        false,
+        true,
+        false,
+    ),
+    manifest("Cargo.toml", EntryFormat::Presence, true, false),
+];
+
+static GO_SOURCES: [SourceSpec; 2] = [
+    lockfile("go.sum", EntryFormat::ExactToken, true, true, false),
+    manifest("go.mod", EntryFormat::GoRequire, true, false),
+];
+
+static RUBY_SOURCES: [SourceSpec; 2] = [
+    lockfile(
+        "Gemfile.lock",
+        EntryFormat::ParenthesizedName,
+        false,
+        true,
+        false,
+    ),
+    manifest("Gemfile", EntryFormat::Presence, true, false),
+];
+
+static C_SOURCES: [SourceSpec; 2] = [
+    manifest("conanfile.txt", EntryFormat::Presence, true, false),
+    manifest("vcpkg.json", EntryFormat::Presence, true, false),
+];
+
+/// The files one ecosystem answers dependency questions from, in the order
+/// they are tried, plus the reason reported when none of them answers.
+struct EcosystemSpec {
+    sources: &'static [SourceSpec],
+    unresolved: &'static str,
+}
+
+static PYTHON: EcosystemSpec = EcosystemSpec {
+    sources: &PYTHON_SOURCES,
+    unresolved: "no Python lockfile or manifest found",
+};
+static NODE: EcosystemSpec = EcosystemSpec {
+    sources: &NODE_SOURCES,
+    unresolved: "no Node.js lockfile or package.json found",
+};
+static RUST: EcosystemSpec = EcosystemSpec {
+    sources: &RUST_SOURCES,
+    unresolved: "no Cargo.lock or Cargo.toml found",
+};
+static GO: EcosystemSpec = EcosystemSpec {
+    sources: &GO_SOURCES,
+    unresolved: "no go.sum or go.mod found",
+};
+static RUBY: EcosystemSpec = EcosystemSpec {
+    sources: &RUBY_SOURCES,
+    unresolved: "no Gemfile.lock or Gemfile found",
+};
+static C_FAMILY: EcosystemSpec = EcosystemSpec {
+    sources: &C_SOURCES,
+    unresolved: "no C/C++ manifest convention found (conanfile.txt, vcpkg.json)",
+};
+
+fn ecosystem_spec(lang: LangId) -> &'static EcosystemSpec {
+    match lang {
+        LangId::Python => &PYTHON,
+        LangId::JavaScript | LangId::TypeScript | LangId::Tsx => &NODE,
+        LangId::Rust => &RUST,
+        LangId::Go => &GO,
+        LangId::Ruby => &RUBY,
+        LangId::C | LangId::Cpp => &C_FAMILY,
+    }
+}
+
+/// Classify a single external dependency from the ecosystem's source table.
+///
+/// Root sources are tried first, then the sources that may live in an
+/// immediate subdirectory, so a monorepo layout answers without a project-wide
+/// search. An ecosystem that declares no subdirectory source never reads the
+/// directory listing.
+pub fn classify_external(external: &ExternalNode, project_root: &Path) -> ExternalClassification {
+    let spec = ecosystem_spec(external.language);
+
+    for source in spec.sources.iter().filter(|source| source.at_root) {
+        if let Some(classification) =
+            classify_source(external, &project_root.join(source.file), source)
+        {
+            return classification;
         }
     }
 
-    let manifests = [root.join("pyproject.toml"), root.join("requirements.txt")];
-    for mf in &manifests {
-        if mf.exists() {
-            return ExternalClassification::Classified {
-                package_name: external.raw_path.clone(),
-                version: None,
-                language: LangId::Python,
-                source: DependencySource::Manifest,
-            };
-        }
-    }
-
-    // Check immediate subdirectories (monorepo layout).
-    if let Ok(entries) = std::fs::read_dir(root) {
-        for entry in entries.flatten() {
-            let subdir = entry.path();
-            if !subdir.is_dir() {
-                continue;
-            }
-            for mf in &manifests {
-                let p = subdir.join(mf.file_name().unwrap_or_default());
-                if p.exists() {
-                    return ExternalClassification::Classified {
-                        package_name: external.raw_path.clone(),
-                        version: None,
-                        language: LangId::Python,
-                        source: DependencySource::Manifest,
-                    };
+    if spec.sources.iter().any(|source| source.in_subdirectory)
+        && let Ok(entries) = std::fs::read_dir(project_root)
+    {
+        // Sorted, so two subdirectories offering the same file name do not
+        // depend on the order the file system hands them out.
+        let mut directories: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect();
+        directories.sort();
+        for directory in directories {
+            for source in spec.sources.iter().filter(|source| source.in_subdirectory) {
+                if let Some(classification) =
+                    classify_source(external, &directory.join(source.file), source)
+                {
+                    return classification;
                 }
             }
         }
@@ -168,184 +303,41 @@ fn classify_python(external: &ExternalNode, root: &Path) -> ExternalClassificati
 
     ExternalClassification::Unresolved {
         raw_path: external.raw_path.clone(),
-        reason: "no Python lockfile or manifest found".into(),
+        reason: spec.unresolved.to_string(),
     }
 }
 
-fn classify_node_ecosystem(external: &ExternalNode, root: &Path) -> ExternalClassification {
-    // Check root-level lockfiles and manifests first.
-    let lockfiles = [
-        root.join("package-lock.json"),
-        root.join("yarn.lock"),
-        root.join("pnpm-lock.yaml"),
-    ];
-    for lf in &lockfiles {
-        if !lf.exists() {
-            continue;
-        }
-        if let Some(version) = parse_version_from_lockfile(lf, &external.raw_path) {
-            return ExternalClassification::Classified {
-                package_name: external.raw_path.clone(),
-                version: Some(version),
-                language: external.language,
-                source: DependencySource::Lockfile,
-            };
-        }
+/// Classify one candidate file, or report that the file does not answer.
+fn classify_source(
+    external: &ExternalNode,
+    path: &Path,
+    source: &SourceSpec,
+) -> Option<ExternalClassification> {
+    if !path.exists() {
+        return None;
     }
-
-    let mf = root.join("package.json");
-    if mf.exists() {
-        return ExternalClassification::Classified {
-            package_name: external.raw_path.clone(),
-            version: parse_version_from_package_json(&mf, &external.raw_path),
-            language: external.language,
-            source: DependencySource::Manifest,
-        };
+    let version = read_version(source.format, path, &external.raw_path);
+    if version.is_none() && source.needs_entry {
+        return None;
     }
-
-    // Search immediate subdirectories for package.json (monorepo layout).
-    if let Ok(entries) = std::fs::read_dir(root) {
-        for entry in entries.flatten() {
-            let subdir = entry.path();
-            if !subdir.is_dir() {
-                continue;
-            }
-            let lock_path = subdir.join("package-lock.json");
-            if lock_path.exists()
-                && let Some(version) = parse_version_from_lockfile(&lock_path, &external.raw_path)
-            {
-                return ExternalClassification::Classified {
-                    package_name: external.raw_path.clone(),
-                    version: Some(version),
-                    language: external.language,
-                    source: DependencySource::Lockfile,
-                };
-            }
-            let pkg_path = subdir.join("package.json");
-            if pkg_path.exists() {
-                return ExternalClassification::Classified {
-                    package_name: external.raw_path.clone(),
-                    version: parse_version_from_package_json(&pkg_path, &external.raw_path),
-                    language: external.language,
-                    source: DependencySource::Manifest,
-                };
-            }
-        }
-    }
-
-    ExternalClassification::Unresolved {
-        raw_path: external.raw_path.clone(),
-        reason: "no Node.js lockfile or package.json found".into(),
-    }
+    Some(ExternalClassification::Classified {
+        package_name: external.raw_path.clone(),
+        version,
+        language: external.language,
+        source: source.kind,
+    })
 }
 
-fn classify_rust(external: &ExternalNode, root: &Path) -> ExternalClassification {
-    let lf = root.join("Cargo.lock");
-    if lf.exists() {
-        return ExternalClassification::Classified {
-            package_name: external.raw_path.clone(),
-            version: parse_version_from_cargo_lock(&lf, &external.raw_path),
-            language: LangId::Rust,
-            source: DependencySource::Lockfile,
-        };
-    }
-
-    let mf = root.join("Cargo.toml");
-    if mf.exists() {
-        return ExternalClassification::Classified {
-            package_name: external.raw_path.clone(),
-            version: None,
-            language: LangId::Rust,
-            source: DependencySource::Manifest,
-        };
-    }
-
-    ExternalClassification::Unresolved {
-        raw_path: external.raw_path.clone(),
-        reason: "no Cargo.lock or Cargo.toml found".into(),
-    }
-}
-
-fn classify_go(external: &ExternalNode, root: &Path) -> ExternalClassification {
-    let lf = root.join("go.sum");
-    if lf.exists()
-        && let Some(version) = parse_version_from_go_sum(&lf, &external.raw_path)
-    {
-        return ExternalClassification::Classified {
-            package_name: external.raw_path.clone(),
-            version: Some(version),
-            language: LangId::Go,
-            source: DependencySource::Lockfile,
-        };
-    }
-
-    let mf = root.join("go.mod");
-    if mf.exists() {
-        return ExternalClassification::Classified {
-            package_name: external.raw_path.clone(),
-            version: parse_version_from_go_mod(&mf, &external.raw_path),
-            language: LangId::Go,
-            source: DependencySource::Manifest,
-        };
-    }
-
-    ExternalClassification::Unresolved {
-        raw_path: external.raw_path.clone(),
-        reason: "no go.sum or go.mod found".into(),
-    }
-}
-
-fn classify_ruby(external: &ExternalNode, root: &Path) -> ExternalClassification {
-    let lf = root.join("Gemfile.lock");
-    if lf.exists() {
-        return ExternalClassification::Classified {
-            package_name: external.raw_path.clone(),
-            version: parse_version_from_gemfile_lock(&lf, &external.raw_path),
-            language: LangId::Ruby,
-            source: DependencySource::Lockfile,
-        };
-    }
-
-    let mf = root.join("Gemfile");
-    if mf.exists() {
-        return ExternalClassification::Classified {
-            package_name: external.raw_path.clone(),
-            version: None,
-            language: LangId::Ruby,
-            source: DependencySource::Manifest,
-        };
-    }
-
-    ExternalClassification::Unresolved {
-        raw_path: external.raw_path.clone(),
-        reason: "no Gemfile.lock or Gemfile found".into(),
-    }
-}
-
-fn classify_c_cpp_best_effort(external: &ExternalNode, root: &Path) -> ExternalClassification {
-    // C/C++ has no universal convention. Try conanfile.txt, then vcpkg.json.
-    // If neither exists, silently fall back to Unresolved.
-    if root.join("conanfile.txt").exists() {
-        return ExternalClassification::Classified {
-            package_name: external.raw_path.clone(),
-            version: None,
-            language: external.language,
-            source: DependencySource::Manifest,
-        };
-    }
-    if root.join("vcpkg.json").exists() {
-        return ExternalClassification::Classified {
-            package_name: external.raw_path.clone(),
-            version: None,
-            language: external.language,
-            source: DependencySource::Manifest,
-        };
-    }
-
-    tracing::trace!(path = %external.raw_path, "C/C++ external dependency unresolved");
-    ExternalClassification::Unresolved {
-        raw_path: external.raw_path.clone(),
-        reason: "no C/C++ manifest convention found (conanfile.txt, vcpkg.json)".into(),
+/// Read the version a file states for a package, in the shape it writes.
+fn read_version(format: EntryFormat, path: &Path, package: &str) -> Option<String> {
+    match format {
+        EntryFormat::EntryValue => entry_value_version(path, package),
+        EntryFormat::TomlPackageArray => toml_package_version(path, package),
+        EntryFormat::JsonDependencyMap => json_dependency_version(path, package),
+        EntryFormat::ParenthesizedName => parenthesized_version(path, package),
+        EntryFormat::ExactToken => exact_token_version(path, package),
+        EntryFormat::GoRequire => go_require_version(path, package),
+        EntryFormat::Presence => None,
     }
 }
 
@@ -390,7 +382,7 @@ fn version_assignment(line: &str) -> Option<String> {
     extract_semver(rest)
 }
 
-fn parse_version_from_lockfile(path: &Path, package: &str) -> Option<String> {
+fn entry_value_version(path: &Path, package: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     let mut inside_entry = false;
 
@@ -429,7 +421,7 @@ fn parse_version_from_lockfile(path: &Path, package: &str) -> Option<String> {
     None
 }
 
-fn parse_version_from_package_json(path: &Path, package: &str) -> Option<String> {
+fn json_dependency_version(path: &Path, package: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     // Check dependencies/devDependencies for the package.
@@ -443,7 +435,7 @@ fn parse_version_from_package_json(path: &Path, package: &str) -> Option<String>
     None
 }
 
-fn parse_version_from_cargo_lock(path: &Path, package: &str) -> Option<String> {
+fn toml_package_version(path: &Path, package: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     // Cargo.lock uses TOML; search for [[package]] sections with name = "..."
     let mut in_package_section = false;
@@ -464,7 +456,7 @@ fn parse_version_from_cargo_lock(path: &Path, package: &str) -> Option<String> {
     None
 }
 
-fn parse_version_from_go_sum(path: &Path, package: &str) -> Option<String> {
+fn exact_token_version(path: &Path, package: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     // go.sum format: <module> <version> <hash>, one line per module version.
     for line in content.lines() {
@@ -480,7 +472,7 @@ fn parse_version_from_go_sum(path: &Path, package: &str) -> Option<String> {
 }
 
 /// Read a `require` line, in single or block form, and drop the `v` prefix.
-fn parse_version_from_go_mod(path: &Path, module: &str) -> Option<String> {
+fn go_require_version(path: &Path, module: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     let mut inside_block = false;
 
@@ -512,7 +504,7 @@ fn parse_version_from_go_mod(path: &Path, module: &str) -> Option<String> {
     None
 }
 
-fn parse_version_from_gemfile_lock(path: &Path, name: &str) -> Option<String> {
+fn parenthesized_version(path: &Path, name: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     // Gemfile.lock lists each gem as "  <name> (<version>)" under a specs
     // section. The name has no quotes; match the indented line exactly.
@@ -601,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_version_from_gemfile_lock_extracts_version() {
+    fn parenthesized_version_extracts_version() {
         let dir = test_dir("parse");
         let lf = dir.join("Gemfile.lock");
         std::fs::write(
@@ -611,10 +603,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            parse_version_from_gemfile_lock(&lf, "rails"),
+            parenthesized_version(&lf, "rails"),
             Some("7.0.8.4".to_string())
         );
-        assert_eq!(parse_version_from_gemfile_lock(&lf, "missing"), None);
+        assert_eq!(parenthesized_version(&lf, "missing"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -627,7 +619,7 @@ mod tests {
         )
         .unwrap();
 
-        let classification = classify_ruby(&external_node("rails"), &dir);
+        let classification = classify_external(&external_node("rails"), &dir);
         match classification {
             ExternalClassification::Classified {
                 package_name,
@@ -648,7 +640,7 @@ mod tests {
     #[test]
     fn classify_ruby_unresolved_without_gemfile() {
         let missing = std::env::temp_dir().join("meta_ast_ruby_dep_missing_dir");
-        let classification = classify_ruby(&external_node("rails"), &missing);
+        let classification = classify_external(&external_node("rails"), &missing);
         match classification {
             ExternalClassification::Unresolved { raw_path, reason } => {
                 assert_eq!(raw_path, "rails");
@@ -670,12 +662,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            parse_version_from_lockfile(&lf, "requests"),
+            entry_value_version(&lf, "requests"),
             None,
             "requests must not match the requests-toolbelt entry"
         );
         assert_eq!(
-            parse_version_from_lockfile(&lf, "requests-toolbelt").as_deref(),
+            entry_value_version(&lf, "requests-toolbelt").as_deref(),
             Some("4.0.0")
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -692,7 +684,7 @@ mod tests {
         )
         .unwrap();
 
-        let classification = classify_python(&python_node("requests"), &dir);
+        let classification = classify_external(&python_node("requests"), &dir);
         assert!(
             !matches!(
                 classification,
@@ -714,12 +706,12 @@ mod tests {
         std::fs::write(&lf, "github.com/foo/bar/baz v1.0.0 h1:AAAA=\n").unwrap();
 
         assert_eq!(
-            parse_version_from_go_sum(&lf, "github.com/foo/bar"),
+            exact_token_version(&lf, "github.com/foo/bar"),
             None,
             "a prefix must not match a different module"
         );
         assert_eq!(
-            parse_version_from_go_sum(&lf, "github.com/foo/bar/baz").as_deref(),
+            exact_token_version(&lf, "github.com/foo/bar/baz").as_deref(),
             Some("v1.0.0")
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -735,7 +727,7 @@ mod tests {
         )
         .unwrap();
 
-        let classification = classify_go(&go_node("github.com/foo/bar"), &dir);
+        let classification = classify_external(&go_node("github.com/foo/bar"), &dir);
         match classification {
             ExternalClassification::Classified {
                 version,

@@ -13,7 +13,7 @@
 //! preserved as a single deployment unit whenever possible.
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::{EdgeFiltered, EdgeRef};
+use petgraph::visit::EdgeFiltered;
 use std::collections::HashMap;
 
 use crate::graph::edge::EdgeData;
@@ -91,27 +91,6 @@ impl SccAnalysis {
         let mut node_to_component = HashMap::new();
 
         for (index, nodes) in scc_groups.into_iter().enumerate() {
-            // Self-loop detection must use the dependency subgraph too:
-            // a Flow or Ownership self-loop does not make the component
-            // cyclic because those edges are excluded from SCC analysis.
-            let has_self_loop = nodes.iter().any(|&node| {
-                graph
-                    .edges_directed(node, petgraph::Direction::Outgoing)
-                    .any(|edge| edge.weight().kind.participates_in_scc() && edge.target() == node)
-            });
-
-            let is_cyclic = nodes.len() > 1 || has_self_loop;
-
-            let hint = if nodes.len() > 1 {
-                DeployabilityHint::CyclicCluster
-            } else if has_self_loop {
-                DeployabilityHint::SelfLoop
-            } else if nodes.len() == 1 {
-                DeployabilityHint::AcyclicDependency
-            } else {
-                DeployabilityHint::Independent
-            };
-
             for &node in &nodes {
                 node_to_component.insert(node, index);
             }
@@ -119,62 +98,61 @@ impl SccAnalysis {
             components.push(Scc {
                 index,
                 nodes,
-                is_cyclic,
-                hint,
+                is_cyclic: false,
+                hint: DeployabilityHint::Independent,
             });
         }
 
-        Self::classify_independence(graph, &mut components, &node_to_component);
-
-        Self {
-            components,
-            node_to_component,
-        }
-    }
-
-    /// Classify components as Independent if they have no outgoing dependencies
-    /// to other components.
-    fn classify_independence(
-        graph: &DiGraph<NodeData, EdgeData>,
-        components: &mut [Scc],
-        node_to_component: &HashMap<NodeIndex, usize>,
-    ) {
-        let mut component_deps: HashMap<usize, Vec<usize>> = HashMap::new();
+        // One walk over the dependency edges answers both questions the hints
+        // need: a self-loop makes a single node cyclic, and an edge that leaves
+        // its component makes that component dependent on another one.
+        let mut self_loops = vec![false; components.len()];
+        let mut has_outer_dependency = vec![false; components.len()];
 
         for edge_idx in graph.edge_indices() {
             let Some(weight) = graph.edge_weight(edge_idx) else {
                 continue;
             };
-            // Independence follows the dependency subgraph: Ownership and
-            // Flow edges do not create deployment coupling between units.
             if !weight.kind.participates_in_scc() {
                 continue;
             }
             let Some((source, target)) = graph.edge_endpoints(edge_idx) else {
                 continue;
             };
-            let source_comp = node_to_component.get(&source);
-            let target_comp = node_to_component.get(&target);
+            let (Some(&source_component), Some(&target_component)) = (
+                node_to_component.get(&source),
+                node_to_component.get(&target),
+            ) else {
+                continue;
+            };
 
-            if let (Some(&s), Some(&t)) = (source_comp, target_comp)
-                && s != t
-            {
-                component_deps.entry(s).or_default().push(t);
+            if source_component == target_component {
+                if source == target {
+                    self_loops[source_component] = true;
+                }
+            } else {
+                has_outer_dependency[source_component] = true;
             }
         }
 
-        // Update hints for components with no external dependencies
-        for comp in components.iter_mut() {
-            if comp.hint == DeployabilityHint::AcyclicDependency {
-                let has_external_deps = component_deps
-                    .get(&comp.index)
-                    .map(|deps| !deps.is_empty())
-                    .unwrap_or(false);
+        for component in &mut components {
+            let clustered = component.nodes.len() > 1;
+            let self_loop = self_loops[component.index];
+            component.is_cyclic = clustered || self_loop;
+            component.hint = if clustered {
+                DeployabilityHint::CyclicCluster
+            } else if self_loop {
+                DeployabilityHint::SelfLoop
+            } else if has_outer_dependency[component.index] {
+                DeployabilityHint::AcyclicDependency
+            } else {
+                DeployabilityHint::Independent
+            };
+        }
 
-                if !has_external_deps {
-                    comp.hint = DeployabilityHint::Independent;
-                }
-            }
+        Self {
+            components,
+            node_to_component,
         }
     }
 
