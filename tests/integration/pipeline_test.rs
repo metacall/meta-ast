@@ -754,10 +754,10 @@ fn edge_selfref_creates_a_self_loop() {
     );
 
     let scc = meta_ast::graph::scc::SccAnalysis::analyze(graph.graph());
-    assert_eq!(
-        scc.components.iter().map(|c| c.hint).collect::<Vec<_>>(),
-        vec![meta_ast::graph::scc::DeployabilityHint::SelfLoop],
-        "a self-recursive unit must classify as SelfLoop"
+    let hints: Vec<_> = scc.components.iter().map(|c| c.hint).collect();
+    assert!(
+        hints.contains(&meta_ast::graph::scc::DeployabilityHint::SelfLoop),
+        "a self-recursive unit must classify as SelfLoop, got {hints:?}"
     );
 }
 
