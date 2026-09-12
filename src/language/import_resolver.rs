@@ -500,10 +500,157 @@ mod tests {
     fn shared_quote_strip_helpers() {
         assert_eq!(strip_import_quotes("\"react\""), "react");
         assert_eq!(strip_c_family_quotes("<stdio.h>"), "stdio.h");
-        assert_eq!(
-            resolve_c_family_import("<stdio.h>", Path::new("/src")),
-            Some(PathBuf::from("/src/stdio.h"))
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("meta_ast_resolver_{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn touch(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "").unwrap();
+    }
+
+    fn resolved(
+        lang: crate::language::LangId,
+        raw: &str,
+        source_dir: &Path,
+        root: &Path,
+    ) -> Option<PathBuf> {
+        make_resolver(lang).resolve(raw, source_dir, root)
+    }
+
+    #[test]
+    fn python_level_two_relative_import_uses_the_parent_package() {
+        let root = scratch("py_level_two");
+        let pkg = root.join("pkg");
+        touch(&root.join("util.py"));
+        touch(&pkg.join("util.py"));
+
+        let out = resolved(crate::language::LangId::Python, "..util", &pkg, &root);
+        assert_eq!(out, Some(root.join("util.py")));
+    }
+
+    #[test]
+    fn python_third_party_import_is_not_a_project_path() {
+        let root = scratch("py_third_party");
+        let pkg = root.join("pkg");
+        touch(&pkg.join("__init__.py"));
+
+        let out = resolved(crate::language::LangId::Python, "requests", &pkg, &root);
+        assert_eq!(out, None);
+    }
+
+    #[test]
+    fn python_first_party_relative_import_still_resolves() {
+        let root = scratch("py_first_party");
+        let pkg = root.join("pkg");
+        touch(&pkg.join("util.py"));
+
+        let out = resolved(crate::language::LangId::Python, ".util", &pkg, &root);
+        assert_eq!(out, Some(pkg.join("util.py")));
+    }
+
+    #[test]
+    fn python_dotted_import_resolves_when_the_file_exists() {
+        let root = scratch("py_dotted");
+        touch(&root.join("svc/api.py"));
+
+        let out = resolved(crate::language::LangId::Python, "svc.api", &root, &root);
+        assert_eq!(out, Some(root.join("svc/api.py")));
+    }
+
+    #[test]
+    fn go_relative_import_is_rejected() {
+        let root = scratch("go_relative");
+        let out = resolved(crate::language::LangId::Go, "\"./util\"", &root, &root);
+        assert_eq!(out, None);
+    }
+
+    #[test]
+    fn go_module_prefix_requires_a_boundary() {
+        let root = scratch("go_prefix");
+        std::fs::write(root.join("go.mod"), "module myproject\n").unwrap();
+
+        let out = resolved(
+            crate::language::LangId::Go,
+            "\"myproject2/pkg\"",
+            &root,
+            &root,
         );
+        assert_eq!(out, None);
+    }
+
+    #[test]
+    fn go_module_import_of_a_subpackage_resolves() {
+        let root = scratch("go_subpackage");
+        std::fs::write(root.join("go.mod"), "module myproject\n").unwrap();
+
+        let out = resolved(
+            crate::language::LangId::Go,
+            "\"myproject/internal/util\"",
+            &root,
+            &root,
+        );
+        assert_eq!(out, Some(root.join("internal/util.go")));
+    }
+
+    #[test]
+    fn c_system_include_is_not_a_project_path() {
+        let root = scratch("c_system_include");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+
+        let out = resolved(crate::language::LangId::C, "<stdio.h>", &src, &root);
+        assert_eq!(out, None);
+    }
+
+    #[test]
+    fn c_missing_quoted_include_is_not_a_project_path() {
+        let root = scratch("c_missing_include");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+
+        let out = resolved(crate::language::LangId::C, "\"missing.h\"", &src, &root);
+        assert_eq!(out, None);
+    }
+
+    #[test]
+    fn c_existing_quoted_include_resolves() {
+        let root = scratch("c_existing_include");
+        let src = root.join("src");
+        touch(&src.join("local.h"));
+
+        let out = resolved(crate::language::LangId::C, "\"local.h\"", &src, &root);
+        assert_eq!(out, Some(src.join("local.h")));
+    }
+
+    #[test]
+    fn rust_crate_path_walks_all_segments() {
+        let root = scratch("rust_crate_path");
+        let src = root.join("src");
+        touch(&src.join("a/b.rs"));
+
+        let out = resolved(
+            crate::language::LangId::Rust,
+            "\"crate::a::b\"",
+            &src,
+            &root,
+        );
+        assert_eq!(out, Some(src.join("a/b.rs")));
+    }
+
+    #[test]
+    fn rust_self_path_resolves_within_the_module() {
+        let root = scratch("rust_self_path");
+        let src = root.join("src");
+        touch(&src.join("here.rs"));
+
+        let out = resolved(crate::language::LangId::Rust, "\"self::here\"", &src, &root);
+        assert_eq!(out, Some(src.join("here.rs")));
     }
 
     #[test]

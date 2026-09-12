@@ -119,6 +119,50 @@ mod tests {
     }
 
     #[test]
+    fn extract_class_member_function_declaration() {
+        let src = b"class C { void m(); };";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Cpp, &tree, src);
+        let found = symbols.iter().find(|s| s.name == "m");
+        assert!(found.is_some(), "missing m: {symbols:?}");
+        assert_eq!(format!("{:?}", found.unwrap().kind), "Declaration");
+    }
+
+    #[test]
+    fn qualified_definition_uses_the_plain_name() {
+        let src = b"void C::m() {}";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Cpp, &tree, src);
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_ref()).collect();
+        assert!(names.contains(&"m"), "names: {names:?}");
+        assert!(!names.contains(&"C::m"), "names: {names:?}");
+    }
+
+    #[test]
+    fn pointer_returning_definition_is_captured() {
+        let src = b"void *alloc(int n) { return 0; }";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Cpp, &tree, src);
+        assert!(symbols.iter().any(|s| s.name == "alloc"), "{symbols:?}");
+    }
+
+    #[test]
+    fn reference_returning_definition_is_captured() {
+        let src = b"int &ref(int n) { return n; }";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Cpp, &tree, src);
+        assert!(symbols.iter().any(|s| s.name == "ref"), "{symbols:?}");
+    }
+
+    #[test]
+    fn data_member_is_not_a_symbol() {
+        let src = b"class C { int x; };";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Cpp, &tree, src);
+        assert!(!symbols.iter().any(|s| s.name == "x"));
+    }
+
+    #[test]
     fn cpp_insta_snapshot() {
         let src = std::fs::read_to_string(
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -326,6 +326,95 @@ mod tests {
         assert_eq!(edges[0].kind, crate::model::FlowKind::DefUse);
     }
 
+    fn symbol_names(symbols: &[crate::language::RawSymbol<'_>]) -> Vec<String> {
+        symbols.iter().map(|s| s.name.to_string()).collect()
+    }
+
+    #[test]
+    fn module_level_assignment_is_a_constant() {
+        let src = b"MAX_RETRIES = 3\n";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Python, &tree, src);
+        let found = symbols.iter().find(|s| s.name == "MAX_RETRIES");
+        assert!(
+            found.is_some(),
+            "missing MAX_RETRIES: {:?}",
+            symbol_names(&symbols)
+        );
+        assert!(matches!(found.unwrap().kind, SymbolKind::Constant));
+    }
+
+    #[test]
+    fn function_local_assignment_is_not_a_symbol() {
+        let src = b"def f():\n    local = 1\n";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::Python, &tree, src);
+        assert!(!symbols.iter().any(|s| s.name == "local"));
+    }
+
+    #[test]
+    fn relative_import_with_bare_dot_is_captured() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"from . import util\n";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::Python,
+            &tree,
+            src,
+            std::path::Path::new("pkg/mod.py"),
+        );
+        assert_eq!(imports.len(), 1, "imports: {imports:?}");
+        assert_eq!(imports[0].import_specifier, ".");
+        assert_eq!(imports[0].symbol.as_deref(), Some("util"));
+    }
+
+    #[test]
+    fn relative_import_with_module_is_captured() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"from .util import helper\n";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::Python,
+            &tree,
+            src,
+            std::path::Path::new("pkg/mod.py"),
+        );
+        assert_eq!(imports.len(), 1, "imports: {imports:?}");
+        assert_eq!(imports[0].import_specifier, ".util");
+        assert_eq!(imports[0].symbol.as_deref(), Some("helper"));
+    }
+
+    #[test]
+    fn relative_parent_import_is_captured() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"from ..pkg.mod import baz\n";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::Python,
+            &tree,
+            src,
+            std::path::Path::new("pkg/mod.py"),
+        );
+        assert_eq!(imports.len(), 1, "imports: {imports:?}");
+        assert_eq!(imports[0].import_specifier, "..pkg.mod");
+    }
+
+    #[test]
+    fn aliased_from_import_is_recorded_once() {
+        use crate::language::extract_imports_and_references_for;
+        let src = b"from a.b import c as d\n";
+        let tree = parse(src);
+        let (imports, _) = extract_imports_and_references_for(
+            LangId::Python,
+            &tree,
+            src,
+            std::path::Path::new("pkg/mod.py"),
+        );
+        assert_eq!(imports.len(), 1, "imports: {imports:?}");
+        assert_eq!(imports[0].symbol.as_deref(), Some("c"));
+        assert_eq!(imports[0].alias.as_deref(), Some("d"));
+    }
+
     #[cfg(feature = "dataflow")]
     #[test]
     fn python_dataflow_for_loop_assignment() {

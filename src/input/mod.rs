@@ -301,4 +301,13 @@ mod tests {
         let out = simplified_path(Path::new("a/b.py"));
         assert_eq!(out, PathBuf::from("a/b.py"));
     }
+
+    #[test]
+    fn header_extensions_are_detected() {
+        assert_eq!(detect_language(&PathBuf::from("foo.h")), Some(LangId::C));
+        assert_eq!(
+            detect_language(&PathBuf::from("foo.hpp")),
+            Some(LangId::Cpp)
+        );
+    }
 }

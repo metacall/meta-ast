@@ -10,6 +10,7 @@ mod integration {
     #[cfg(feature = "metacall-deploy")]
     mod deploy_test;
     mod edge_cases_test;
+    mod import_test;
     mod inspect_output_test;
     mod output_format_test;
     mod pipeline_test;
