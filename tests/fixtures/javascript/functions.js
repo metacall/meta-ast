@@ -1,4 +1,3 @@
-/* biome-ignore-all lint/correctness/noUnusedVariables: every declaration is parser input */
 function hello() {
     return "hello";
 }
@@ -12,4 +11,7 @@ const compute = (x, y) => x + y;
 
 const greet = (name) => `Hello, ${name}`;
 
-module.exports = { hello, fetchData, compute, greet };
+export async function demo(url) {
+    const data = await fetchData(url);
+    return [hello(), data, compute(1, 2), greet("world")];
+}

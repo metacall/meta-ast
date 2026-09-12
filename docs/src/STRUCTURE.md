@@ -8,85 +8,85 @@ This document defines the module layout, data structures, design patterns, langu
 
 ```
 src/
-├── lib.rs                    Public API re-exports
-├── main.rs                   CLI entrypoint
-├── error.rs                  Error + Diagnostic types (thiserror)
-├── pipeline.rs               Full graph analysis orchestration
-│
-├── model/
-│   ├── mod.rs                Symbol, SymbolKind, SourceRange, UnresolvedImport, UnresolvedReference, FileExtraction, DataNode, DataScope, FlowEdge, FlowKind (feature: dataflow)
-│   ├── ids.rs                FileId, SymbolId, SnapshotId, DataNodeId (newtyped NonZeroU32 via define_id_type! macro; generator starts at 1)
-│   └── output.rs             InspectOutput, FuncEntry, ClassEntry, ObjectEntry
-│
-├── language/
-│   ├── mod.rs                LangId enum, LanguageSpec struct, DefaultVisibility, DocCommentConfig
-│   ├── common.rs             extract_with_spec, extract_imports_and_references_with_spec, associate_docstrings
-│   ├── dataflow.rs           extract_dataflow() dispatcher (feature: dataflow; Rust impl in rust.rs)
-│   ├── python.rs             Python queries + extraction
-│   ├── javascript.rs         JavaScript queries + extraction
-│   ├── typescript.rs         TypeScript queries + extraction
-│   ├── tsx.rs                TSX queries + extraction (separate grammar from TS)
-│   ├── c.rs                  C queries + extraction
-│   ├── cpp.rs                C++ queries + extraction
-│   ├── rust.rs               Rust queries + extraction
-│   ├── go.rs                 Go queries + extraction
-│   ├── ruby.rs               Ruby queries + extraction
-│   └── import_resolver.rs    ImportResolver trait, stateful resolvers (Python, Go, JS, TS)
-│
-├── input/
-│   └── mod.rs                File discovery, filtering, language routing
-│
-├── parser/
-│   └── mod.rs                Tree-sitter parser lifecycle, parse function
-│
+├── cache.rs                BLAKE3 fingerprinting and the extraction cache
+├── error.rs                Error + Diagnostic types (thiserror)
+├── lib.rs                  Public API re-exports
+├── main.rs                 CLI entry point: parse, subscriber setup, dispatch
+├── pipeline.rs             Full graph analysis orchestration, one assembly path for both entry points
+├── reanalyze.rs            Incremental re-analysis: overlays, diffs, cache reuse
+├── deploy/
+│   ├── check.rs                check_cut_fairness() - bijection check between cuts and rpc_stub edges
+│   ├── client_call.rs          Client call resolution: load aware first, then the global name index
+│   ├── config.rs               DeployConfig and its defaults
+│   ├── cut.rs                  find_cross_language_cuts(), find_oversized_pod_cut(), CutEdge, CutAnnotation
+│   ├── dependency.rs           One table of lockfile and manifest sources plus one reader per format
+│   ├── manifest.rs             generate_pod_manifest(), PodManifest, ManifestEdge
+│   ├── mesh.rs                 generate_mesh_annotation(), DeploymentUnit, CrossLanguageEdge
+│   ├── metrics.rs              compute_file_metrics(), compute_pod_metrics(), FileMetrics
+│   ├── mod.rs                  Entry: run_deploy() in named stages, DeployConfig, add_metacall_edge()
+│   ├── pod.rs                  Union-Find partition_into_pods(), PodPartition, InterPodEdge
+│   ├── scanner.rs              tree-sitter call-site detection, CallSite, CallSiteVariant, confidence
+│   └── tags.rs                 LangId <-> MetaCall runtime tag mapping
 ├── extractor/
-│   └── mod.rs                Pipeline orchestration: parallel parse + extract per-file (symbols + imports + references)
-│
+│   └── mod.rs                  Pipeline orchestration: parallel parse + extract per file (symbols, imports, references, call sites, dataflow)
 ├── graph/
-│   ├── mod.rs                CodeGraph (DiGraph), add_edge_normalized_with_flow, re-exports
-│   ├── node.rs               NodeData enum (File / Symbol / External / Data)
-│   ├── edge.rs               EdgeKind enum (Ownership / Import / Reference / Flow) with confidence + flow_kind
-│   ├── builder.rs            GraphBuilder, from_extractions, add_data_node, add_flow_edge, import_adjacency
-│   ├── scc.rs                Tarjan SCC + DeployabilityHint
-│   └── resolver.rs           FlattenedScopeCache, ResolutionContext, resolve_all_references
-│
+│   ├── builder.rs              GraphBuilder: named stages for files, symbols, dataflow, imports, references and client calls
+│   ├── edge.rs                 EdgeKind enum (Ownership / Import / Reference / Flow) with confidence + flow_kind, one merge rule
+│   ├── mod.rs                  CodeGraph (DiGraph), add_edge_normalized_with_flow, re-exports
+│   ├── naming.rs               Node display name and kind name; one authority for the graph output
+│   ├── node.rs                 NodeData enum (File / Symbol / External / Data)
+│   ├── resolver.rs             FlattenedScopeCache, ResolutionContext, resolve_all_references
+│   └── scc.rs                  Tarjan SCC + DeployabilityHint in a single edge walk
+├── input/
+│   └── mod.rs                  File discovery, filtering, language routing, portable paths
+├── interface/
+│   ├── args.rs                 Clap derive structs (Inspect, Graph, Deploy and their flags)
+│   ├── banner.rs               Startup banner
+│   ├── commands.rs             Command implementations: inspect, graph, watch and deploy
+│   ├── mod.rs                  CLI module root
+│   └── report.rs               FailOn policy and diagnostic reporting
+├── language/
+│   ├── c.rs                    C queries + extraction
+│   ├── common.rs               extract_with_spec, extract_imports_and_references_with_spec, associate_docstrings
+│   ├── cpp.rs                  C++ queries + extraction
+│   ├── dataflow.rs             extract_dataflow() dispatcher (feature: dataflow; Rust impl in rust.rs)
+│   ├── go.rs                   Go queries + extraction
+│   ├── import_resolver.rs      ImportResolver trait, stateful resolvers (Python, Go, JS, TS)
+│   ├── javascript.rs           JavaScript queries + extraction
+│   ├── mod.rs                  LangId enum, LanguageSpec struct, DefaultVisibility, DocCommentConfig, the query registry
+│   ├── pack.rs                 define_language_pack! macro: query statics, fallible accessors, spec literal and snapshot scaffolding
+│   ├── python.rs               Python queries + extraction
+│   ├── ruby.rs                 Ruby queries + extraction
+│   ├── rust.rs                 Rust queries + extraction
+│   ├── tsx.rs                  TSX queries + extraction (separate grammar from TS)
+│   └── typescript.rs           TypeScript queries + extraction
+├── model/
+│   ├── ids.rs                  FileId, SymbolId, SnapshotId, DataNodeId (newtyped NonZeroU32; generator starts at 1)
+│   ├── mod.rs                  Symbol, SymbolKind, SourceRange, UnresolvedImport, UnresolvedReference, FileExtraction, DataNode, DataScope, FlowEdge, FlowKind (feature: dataflow)
+│   └── output.rs               InspectOutput, FuncEntry, ClassEntry, ObjectEntry
 ├── output/
-│   ├── mod.rs                OutputFormat enum (Json / Yaml) with serialize dispatch
-│   ├── emitter.rs            EmitConfig, emit_inspect(), emit_graph() - CLI output dispatch
-│   ├── inspect.rs            Inspect-compatible JSON/YAML emission
-│   ├── graph.rs              Unified GraphOutput (schema_version, metadata, nodes, edges, sccs, deployability)
-│   ├── shard/                `.metast` stable-name JSONL shard and index persistence
-│   │   ├── mod.rs            Module root, re-exports, unit tests
-│   │   ├── error.rs          ShardError enum
-│   │   ├── file.rs           ShardFile, ShardSymbol, write_shard(), read_shard()
-│   │   ├── edge.rs           ShardEdge, ShardEdgeKind, restore_shard_edges()
-│   │   ├── index.rs          load_index(), hardened index verification
-│   │   ├── manifest.rs       ShardManifestRecord, write_manifest(), read_manifest()
-│   │   ├── header.rs         ShardHeader, write_header(), read_header()
-│   │   └── name.rs           Stable naming, descriptors, and parent hierarchy resolution
-│   └── dashboard.rs          Interactive HTML dashboard (Cytoscape.js via CDN, --html)
-│
-└── sink/                     [feature: dataflow] GraphSink trait + JsonSink
-    └── mod.rs                GraphSink trait, JsonSink (file/stdout)
-│
-└── interface/                CLI layer
-    ├── mod.rs                CLI module root
-    └── args.rs               Clap derive structs (Inspect, Graph, Deploy + -l, --format, --html, --datagraph, --datagraph-output, --watch, --watch-debounce, -o, --check)
-│
-├── watch/                     [feature: watch]
-│   └── mod.rs                 IncrementalCache, WatchState, incremental_reanalyze, run_watch
-│
-└── deploy/                   [feature: metacall-deploy] See [DEPLOY.md](DEPLOY.md)
-    ├── mod.rs                Entry: run_deploy(), DeployConfig, add_metacall_edge()
-    ├── scanner.rs            tree-sitter call-site detection, CallSite, CallSiteVariant, confidence
-    ├── pod.rs                Union-Find partition_into_pods(), PodPartition, InterPodEdge
-    ├── cut.rs                find_cross_language_cuts(), find_oversized_pod_cut(), CutEdge
-    ├── dependency.rs         classify_external(), resolve_dependencies(), per-language resolvers
-    ├── metrics.rs            compute_file_metrics(), compute_pod_metrics(), FileMetrics
-    ├── manifest.rs           generate_pod_manifest(), PodManifest, ManifestEdge
-    ├── mesh.rs               generate_mesh_annotation(), DeploymentUnit, CrossLanguageEdge
-    ├── check.rs              check_cut_fairness() - bijection check between cuts and rpc_stub edges
-    └── tags.rs               LangId <-> MetaCall runtime tag mapping
+│   ├── dashboard.rs            Interactive HTML dashboard with the vendored Cytoscape bundle (--html, --open)
+│   ├── emitter.rs              EmitConfig, emit_inspect(), emit_graph() - CLI output dispatch
+│   ├── graph.rs                Unified GraphOutput (schema_version, metadata, nodes, edges, sccs, deployability)
+│   ├── inspect.rs              Inspect-compatible JSON/YAML emission
+│   ├── mod.rs                  OutputFormat and the single default output path
+│   └── shard/
+│       ├── edge.rs                 ShardEdge, ShardEdgeKind, restore_shard_edges()
+│       ├── error.rs                ShardError enum
+│       ├── file.rs                 ShardFile, ShardSymbol, write_shard(), read_shard()
+│       ├── header.rs               ShardHeader, write_header(), read_header()
+│       ├── index.rs                load_index(), hardened index verification
+│       ├── manifest.rs             ShardManifestRecord, write_manifest(), read_manifest()
+│       ├── mod.rs                  Module root, re-exports, unit tests
+│       └── name.rs                 Portable shard naming: the name plan, the collision key and parent hierarchy resolution
+├── parser/
+│   └── mod.rs                  Tree-sitter parser lifecycle, parse function
+├── sink/
+│   └── mod.rs                  GraphSink trait + JsonSink
+└── watch/
+    ├── config.rs               WatchConfig: debounce, emit configuration and the diagnostic policy
+    ├── mod.rs                  IncrementalCache, WatchState, re-analysis entry point, run_watch
+    └── watcher.rs              Debounced notify loop with a stop flag and a failure count
 ```
 
 ### Module dependency direction

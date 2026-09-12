@@ -42,6 +42,6 @@ cd meta-ast
 cargo build --release --all-features
 
 ./target/release/meta-ast inspect tests/fixtures/python
-./target/release/meta-ast graph tests/fixtures/mixed/three_lang_math --html
+./target/release/meta-ast graph tests/fixtures/mixed/three_lang_math --html  # writes three_lang_math.html
 ./target/release/meta-ast deploy tests/fixtures/mixed/three_lang_math --out ./deploy-out
 ```

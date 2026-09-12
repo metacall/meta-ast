@@ -35,7 +35,7 @@ Goals:
 
 - Extend model with optional data/flow nodes (DataNode, FlowEdge, DataScope, FlowKind).
 - Implement intra-procedural def-use extraction for Rust (let bindings, parameters).
-- Provide portable graph export contract with schema versioning. The graph document carries `SCHEMA_VERSION` and the shard format carries `SHARD_SCHEMA_VERSION` (4 as of this release).
+- Provide portable graph export contract with schema versioning. The graph document carries `SCHEMA_VERSION` and the shard format carries `SHARD_SCHEMA_VERSION` (5 as of this release).
 - Pluggable sink adapters (GraphSink trait + JsonSink).
 - CLI integration: `--datagraph` flag on graph subcommand.
 - Unified GraphOutput serialization (replaces separate datagraph module).

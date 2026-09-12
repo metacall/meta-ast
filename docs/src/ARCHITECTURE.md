@@ -87,7 +87,7 @@ Parallel parse + extract uses rayon per-file; graph assembly is sequential. See 
 The CLI supports JSON and YAML for programmatic consumption, plus an interactive HTML dashboard for visual analysis and datagraph JSON exports.
 
 - **JSON / YAML:** Controlled by the `-f, --format` flag. JSON is the default. YAML requires no extra setup - just pass `--format yaml`.
-- **HTML dashboard:** Separate concern, activated with `--html`. Generates a single `.html` file with an interactive Cytoscape.js graph loaded from a CDN (cached by the browser after first fetch). The browser auto-opens unless you redirect.
+- **HTML dashboard:** Separate concern, activated with `--html`. Generates a single `.html` file with an interactive Cytoscape.js graph whose bundle travels inside the document, so it renders without network access. The browser opens only with `--open`; without it the file is written and left alone.
 - **Datagraph JSON:** Activated with `--datagraph` (requires `--features dataflow`). Exports detailed data/flow node definitions and def-use relations.
 - **Language Filter:** Only analyze files detected as this language with `-l, --language <lang>`.
 
