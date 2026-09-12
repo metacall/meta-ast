@@ -41,10 +41,12 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 /// Upper bound for one extraction of the generated buffer below.
 ///
-/// The bound is a regression guard: it sits above the measured cost with room
-/// for allocator noise, and below the cost of a change that stops owning the
-/// per-node text, which is the point of the guard.
-const EXTRACTION_BUDGET: usize = 3_000;
+/// The bound is a regression guard. The buffer cost 3880 allocations before
+/// this branch, 2458 after the def-use work, and 3265 once the per-scope
+/// definition index and the import diagnostics landed, so the budget sits
+/// above the current cost with room for allocator noise and below the cost of
+/// the code this branch started from, which keeps it discriminating.
+const EXTRACTION_BUDGET: usize = 3_600;
 
 /// A Python buffer with 200 functions, 200 calls and 200 imports.
 fn source_buffer() -> String {
