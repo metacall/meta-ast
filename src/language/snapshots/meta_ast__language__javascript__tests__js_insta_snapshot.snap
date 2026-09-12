@@ -7,14 +7,14 @@ expression: symbols
     "name": "hello",
     "kind": "function",
     "source_range": {
-      "byte_start": 93,
-      "byte_end": 133,
+      "byte_start": 0,
+      "byte_end": 40,
       "start": {
-        "line": 1,
+        "line": 0,
         "column": 0
       },
       "end": {
-        "line": 3,
+        "line": 2,
         "column": 1
       }
     },
@@ -27,14 +27,14 @@ expression: symbols
     "name": "fetchData",
     "kind": "function",
     "source_range": {
-      "byte_start": 135,
-      "byte_end": 235,
+      "byte_start": 42,
+      "byte_end": 142,
       "start": {
-        "line": 5,
+        "line": 4,
         "column": 0
       },
       "end": {
-        "line": 8,
+        "line": 7,
         "column": 1
       }
     },
@@ -47,14 +47,14 @@ expression: symbols
     "name": "compute",
     "kind": "function",
     "source_range": {
-      "byte_start": 243,
-      "byte_end": 268,
+      "byte_start": 150,
+      "byte_end": 175,
       "start": {
-        "line": 10,
+        "line": 9,
         "column": 6
       },
       "end": {
-        "line": 10,
+        "line": 9,
         "column": 31
       }
     },
@@ -67,14 +67,14 @@ expression: symbols
     "name": "greet",
     "kind": "function",
     "source_range": {
-      "byte_start": 277,
-      "byte_end": 311,
+      "byte_start": 184,
+      "byte_end": 218,
       "start": {
-        "line": 12,
+        "line": 11,
         "column": 6
       },
       "end": {
-        "line": 12,
+        "line": 11,
         "column": 40
       }
     },
@@ -82,5 +82,25 @@ expression: symbols
     "signature": "(name)",
     "docstring": null,
     "is_async": false
+  },
+  {
+    "name": "demo",
+    "kind": "function",
+    "source_range": {
+      "byte_start": 228,
+      "byte_end": 354,
+      "start": {
+        "line": 13,
+        "column": 7
+      },
+      "end": {
+        "line": 16,
+        "column": 1
+      }
+    },
+    "visibility": "public",
+    "signature": "(url)",
+    "docstring": null,
+    "is_async": true
   }
 ]
