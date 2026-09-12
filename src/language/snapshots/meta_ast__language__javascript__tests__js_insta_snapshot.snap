@@ -1,6 +1,5 @@
 ---
 source: src/language/javascript.rs
-assertion_line: 214
 expression: symbols
 ---
 [
@@ -43,5 +42,45 @@ expression: symbols
     "signature": "(url)",
     "docstring": null,
     "is_async": true
+  },
+  {
+    "name": "compute",
+    "kind": "Function",
+    "source_range": {
+      "byte_start": 150,
+      "byte_end": 196,
+      "start": {
+        "line": 9,
+        "column": 6
+      },
+      "end": {
+        "line": 11,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": "(x, y)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "greet",
+    "kind": "Function",
+    "source_range": {
+      "byte_start": 205,
+      "byte_end": 239,
+      "start": {
+        "line": 13,
+        "column": 6
+      },
+      "end": {
+        "line": 13,
+        "column": 40
+      }
+    },
+    "visibility": null,
+    "signature": "(name)",
+    "docstring": null,
+    "is_async": false
   }
 ]
