@@ -5,7 +5,7 @@ expression: symbols
 [
   {
     "name": "Animal",
-    "kind": "Class",
+    "kind": "class",
     "source_range": {
       "byte_start": 19,
       "byte_end": 251,
@@ -25,7 +25,7 @@ expression: symbols
   },
   {
     "name": "Animal",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 46,
       "byte_end": 87,
@@ -45,7 +45,7 @@ expression: symbols
   },
   {
     "name": "~Animal",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 92,
       "byte_end": 120,
@@ -65,7 +65,7 @@ expression: symbols
   },
   {
     "name": "speak",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 126,
       "byte_end": 171,
@@ -85,7 +85,7 @@ expression: symbols
   },
   {
     "name": "get_name",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 176,
       "byte_end": 216,
@@ -105,7 +105,7 @@ expression: symbols
   },
   {
     "name": "Dog",
-    "kind": "Class",
+    "kind": "class",
     "source_range": {
       "byte_start": 254,
       "byte_end": 389,
@@ -125,7 +125,7 @@ expression: symbols
   },
   {
     "name": "Dog",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 294,
       "byte_end": 333,
@@ -145,7 +145,7 @@ expression: symbols
   },
   {
     "name": "speak",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 339,
       "byte_end": 387,

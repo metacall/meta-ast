@@ -101,6 +101,7 @@ pub struct SourceRange {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
+#[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
     Function,
     Method,
@@ -119,11 +120,45 @@ pub enum SymbolKind {
     Declaration,
 }
 
+impl SymbolKind {
+    /// Canonical lowercase name, shared by every writer: graph output, inspect
+    /// output and the stable shard names.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SymbolKind::Function => "function",
+            SymbolKind::Method => "method",
+            SymbolKind::Class => "class",
+            SymbolKind::Struct => "struct",
+            SymbolKind::Interface => "interface",
+            SymbolKind::Trait => "trait",
+            SymbolKind::Enum => "enum",
+            SymbolKind::Object => "object",
+            SymbolKind::Constant => "constant",
+            SymbolKind::Static => "static",
+            SymbolKind::Module => "module",
+            SymbolKind::Namespace => "namespace",
+            SymbolKind::TypeAlias => "type_alias",
+            SymbolKind::Declaration => "declaration",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
+#[serde(rename_all = "snake_case")]
 pub enum Visibility {
     Public,
     Private,
+}
+
+impl Visibility {
+    /// Canonical lowercase name, shared by every writer.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Visibility::Public => "public",
+            Visibility::Private => "private",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -143,6 +178,7 @@ pub struct Symbol {
 /// Classification of a data-bearing entity's visibility scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
+#[serde(rename_all = "snake_case")]
 pub enum DataScope {
     Local,
     Parameter,
@@ -186,6 +222,7 @@ pub struct FlowEdge {
 /// Semantic kind of a dataflow edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
+#[serde(rename_all = "snake_case")]
 pub enum FlowKind {
     DefUse,
     Argument,

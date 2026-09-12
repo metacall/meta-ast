@@ -292,8 +292,8 @@ impl GraphOutput {
             source_range: Some(symbol_node.source_range.clone()),
             language: None,
             name: Some(symbol_node.name.clone()),
-            symbol_kind: Some(format!("{:?}", symbol_node.kind)),
-            visibility: symbol_node.visibility.map(|v| format!("{:?}", v)),
+            symbol_kind: Some(symbol_node.kind.as_str().to_string()),
+            visibility: symbol_node.visibility.map(|v| v.as_str().to_string()),
             data_scope: None,
             type_hint: None,
         }

@@ -5,7 +5,7 @@ expression: symbols
 [
   {
     "name": "Props",
-    "kind": "Interface",
+    "kind": "interface",
     "source_range": {
       "byte_start": 28,
       "byte_end": 82,
@@ -25,7 +25,7 @@ expression: symbols
   },
   {
     "name": "Greeting",
-    "kind": "Function",
+    "kind": "function",
     "source_range": {
       "byte_start": 84,
       "byte_end": 176,
@@ -45,7 +45,7 @@ expression: symbols
   },
   {
     "name": "Welcome",
-    "kind": "Function",
+    "kind": "function",
     "source_range": {
       "byte_start": 184,
       "byte_end": 271,
@@ -65,7 +65,7 @@ expression: symbols
   },
   {
     "name": "App",
-    "kind": "Class",
+    "kind": "class",
     "source_range": {
       "byte_start": 281,
       "byte_end": 419,
@@ -78,14 +78,14 @@ expression: symbols
         "column": 1
       }
     },
-    "visibility": "Public",
+    "visibility": "public",
     "signature": null,
     "docstring": null,
     "is_async": false
   },
   {
     "name": "render",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 328,
       "byte_end": 417,
@@ -98,7 +98,7 @@ expression: symbols
         "column": 5
       }
     },
-    "visibility": "Public",
+    "visibility": "public",
     "signature": "()",
     "docstring": null,
     "is_async": false

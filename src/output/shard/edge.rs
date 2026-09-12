@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::graph::{CodeGraph, EdgeKind, NodeData};
 use crate::output::shard::error::ShardError;
 use crate::output::shard::file::SHARD_SCHEMA_VERSION;
-use crate::output::shard::name::stable_node_name;
+use crate::output::shard::name::StableNameIndex;
 
 /// Serialized cross-node edge in a shard file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -115,12 +115,13 @@ pub(crate) fn validate_edge(
 
 /// Restore persisted edges after `GraphBuilder::from_extractions` regenerates graph nodes.
 pub fn restore_shard_edges(graph: &mut CodeGraph, edges: &[ShardEdge]) -> Result<(), ShardError> {
-    let endpoint_index = graph
+    let names = StableNameIndex::new(graph)?;
+    let endpoint_index: HashMap<String, _> = graph
         .graph()
         .node_indices()
         .filter(|index| !matches!(graph.graph()[*index], NodeData::Data(_)))
-        .map(|index| stable_node_name(graph, index).map(|name| (name, index)))
-        .collect::<Result<HashMap<_, _>, ShardError>>()?;
+        .filter_map(|index| names.name_of(index).map(|name| (name.to_string(), index)))
+        .collect();
 
     for (edge_index, edge) in edges.iter().enumerate() {
         validate_edge(edge, 0, edge_index)?;

@@ -1,12 +1,11 @@
 ---
 source: src/language/typescript.rs
-assertion_line: 231
 expression: symbols
 ---
 [
   {
     "name": "Shape",
-    "kind": "Interface",
+    "kind": "interface",
     "source_range": {
       "byte_start": 0,
       "byte_end": 64,
@@ -26,7 +25,7 @@ expression: symbols
   },
   {
     "name": "Color",
-    "kind": "Interface",
+    "kind": "interface",
     "source_range": {
       "byte_start": 66,
       "byte_end": 121,
@@ -46,7 +45,7 @@ expression: symbols
   },
   {
     "name": "Point",
-    "kind": "TypeAlias",
+    "kind": "type_alias",
     "source_range": {
       "byte_start": 123,
       "byte_end": 170,
@@ -66,7 +65,7 @@ expression: symbols
   },
   {
     "name": "Vector",
-    "kind": "TypeAlias",
+    "kind": "type_alias",
     "source_range": {
       "byte_start": 172,
       "byte_end": 208,
@@ -86,7 +85,7 @@ expression: symbols
   },
   {
     "name": "Direction",
-    "kind": "Enum",
+    "kind": "enum",
     "source_range": {
       "byte_start": 210,
       "byte_end": 302,
@@ -106,7 +105,7 @@ expression: symbols
   },
   {
     "name": "Circle",
-    "kind": "Class",
+    "kind": "class",
     "source_range": {
       "byte_start": 304,
       "byte_end": 534,
@@ -126,7 +125,7 @@ expression: symbols
   },
   {
     "name": "constructor",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 340,
       "byte_end": 377,
@@ -146,7 +145,7 @@ expression: symbols
   },
   {
     "name": "area",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 383,
       "byte_end": 457,
@@ -166,7 +165,7 @@ expression: symbols
   },
   {
     "name": "perimeter",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 463,
       "byte_end": 532,

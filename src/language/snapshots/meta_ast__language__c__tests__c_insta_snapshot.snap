@@ -1,12 +1,11 @@
 ---
 source: src/language/c.rs
-assertion_line: 205
 expression: symbols
 ---
 [
   {
     "name": "add",
-    "kind": "Function",
+    "kind": "function",
     "source_range": {
       "byte_start": 20,
       "byte_end": 63,
@@ -26,7 +25,7 @@ expression: symbols
   },
   {
     "name": "print_hello",
-    "kind": "Function",
+    "kind": "function",
     "source_range": {
       "byte_start": 65,
       "byte_end": 122,
@@ -46,7 +45,7 @@ expression: symbols
   },
   {
     "name": "get_counter",
-    "kind": "Function",
+    "kind": "function",
     "source_range": {
       "byte_start": 149,
       "byte_end": 194,

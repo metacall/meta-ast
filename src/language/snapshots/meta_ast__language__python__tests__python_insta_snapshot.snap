@@ -5,7 +5,7 @@ expression: symbols
 [
   {
     "name": "hello",
-    "kind": "Function",
+    "kind": "function",
     "source_range": {
       "byte_start": 0,
       "byte_end": 21,
@@ -25,7 +25,7 @@ expression: symbols
   },
   {
     "name": "greet",
-    "kind": "Function",
+    "kind": "function",
     "source_range": {
       "byte_start": 24,
       "byte_end": 68,
@@ -45,7 +45,7 @@ expression: symbols
   },
   {
     "name": "fetch_data",
-    "kind": "Function",
+    "kind": "function",
     "source_range": {
       "byte_start": 71,
       "byte_end": 106,
@@ -65,7 +65,7 @@ expression: symbols
   },
   {
     "name": "add",
-    "kind": "Function",
+    "kind": "function",
     "source_range": {
       "byte_start": 109,
       "byte_end": 157,

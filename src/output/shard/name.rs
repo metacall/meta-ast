@@ -1,11 +1,12 @@
 //! Stable naming and descriptor generation for shard endpoints.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use petgraph::graph::NodeIndex;
 
 use crate::graph::{CodeGraph, NodeData};
-use crate::model::SymbolKind;
+use crate::model::FileId;
 use crate::output::shard::error::ShardError;
 
 pub(crate) fn node_belongs_to_file(graph: &CodeGraph, node_index: NodeIndex, path: &Path) -> bool {
@@ -18,133 +19,168 @@ pub(crate) fn node_belongs_to_file(graph: &CodeGraph, node_index: NodeIndex, pat
     }
 }
 
-pub(crate) fn stable_node_name(
-    graph: &CodeGraph,
-    node_index: NodeIndex,
-) -> Result<String, ShardError> {
-    let node = graph
-        .graph()
-        .node_weight(node_index)
-        .ok_or(ShardError::MissingNodeOwner {
-            node_index: node_index.index(),
-        })?;
-    match node {
-        NodeData::File(file) => Ok(format!(
-            "{} file {}",
-            file.language.as_ref(),
-            escape_component(&normalized_path(&file.path)?)
-        )),
-        NodeData::Symbol(_) => stable_symbol_name(graph, node_index),
-        NodeData::External(external) => Ok(format!(
-            "{} external {}",
-            external.language.as_ref(),
-            escape_component(&external.raw_path)
-        )),
-        NodeData::Data(_) => Err(ShardError::MissingNodeOwner {
-            node_index: node_index.index(),
-        }),
-    }
+/// Stable names for every node of one graph.
+///
+/// A shard export needs one name per edge endpoint, and a shard restore needs
+/// one per node. Answering a single lookup rescans the graph (parent and
+/// ordinal search), so the scan happens once here: parents come from a stack
+/// over range-sorted symbols, and ordinals from one sort per
+/// (parent, name, kind) group.
+pub(crate) struct StableNameIndex {
+    names: HashMap<NodeIndex, String>,
 }
 
-pub(crate) fn stable_symbol_name(
-    graph: &CodeGraph,
-    node_index: NodeIndex,
-) -> Result<String, ShardError> {
-    let NodeData::Symbol(symbol) = &graph.graph()[node_index] else {
-        return Err(ShardError::MissingNodeOwner {
-            node_index: node_index.index(),
-        });
-    };
-    let file = graph
-        .file_node(symbol.file_id)
-        .ok_or(ShardError::MissingNodeOwner {
-            node_index: node_index.index(),
-        })?;
-    let mut hierarchy = Vec::new();
-    let mut current = Some(node_index);
-    while let Some(index) = current {
-        hierarchy.push(index);
-        current = parent_symbol(graph, index);
-    }
-    hierarchy.reverse();
+impl StableNameIndex {
+    pub(crate) fn new(graph: &CodeGraph) -> Result<Self, ShardError> {
+        let missing = |index: NodeIndex| ShardError::MissingNodeOwner {
+            node_index: index.index(),
+        };
+        let g = graph.graph();
 
-    let descriptors = hierarchy
-        .into_iter()
-        .map(|index| symbol_descriptor(graph, index))
-        .collect::<Vec<_>>()
-        .join(" . ");
-    Ok(format!(
-        "{} {} . {} .",
-        file.language.as_ref(),
-        escape_component(&normalized_path(&file.path)?),
-        descriptors
-    ))
-}
-
-pub(crate) fn symbol_descriptor(graph: &CodeGraph, node_index: NodeIndex) -> String {
-    let NodeData::Symbol(symbol) = &graph.graph()[node_index] else {
-        return String::new();
-    };
-    let parent = parent_symbol(graph, node_index);
-    let ordinal = graph
-        .graph()
-        .node_indices()
-        .filter(|candidate_index| {
-            if *candidate_index == node_index {
-                return false;
+        // Range and identity of every symbol, and the symbols of each file.
+        let mut ranges: HashMap<NodeIndex, (usize, usize, u32)> = HashMap::new();
+        let mut by_file: HashMap<FileId, Vec<NodeIndex>> = HashMap::new();
+        let mut names: HashMap<NodeIndex, String> = HashMap::new();
+        for index in g.node_indices() {
+            match &g[index] {
+                NodeData::File(file) => {
+                    names.insert(
+                        index,
+                        format!(
+                            "{} file {}",
+                            file.language.as_ref(),
+                            escape_component(&normalized_path(&file.path)?)
+                        ),
+                    );
+                }
+                NodeData::External(external) => {
+                    names.insert(
+                        index,
+                        format!(
+                            "{} external {}",
+                            external.language.as_ref(),
+                            escape_component(&external.raw_path)
+                        ),
+                    );
+                }
+                NodeData::Symbol(symbol) => {
+                    ranges.insert(
+                        index,
+                        (
+                            symbol.source_range.byte_start,
+                            symbol.source_range.byte_end,
+                            symbol.id.to_raw(),
+                        ),
+                    );
+                    by_file.entry(symbol.file_id).or_default().push(index);
+                }
+                NodeData::Data(_) => {}
             }
-            let NodeData::Symbol(candidate) = &graph.graph()[*candidate_index] else {
-                return false;
+        }
+
+        let mut parents: HashMap<NodeIndex, Option<NodeIndex>> = HashMap::new();
+        let mut ordinals: HashMap<NodeIndex, usize> = HashMap::new();
+        for group in by_file.values_mut() {
+            // Outermost first: by start, then by the wider range.
+            group.sort_by_key(|index| {
+                let (start, end, id) = ranges.get(index).copied().unwrap_or_default();
+                (start, std::cmp::Reverse(end), id)
+            });
+
+            // A symbol's parent is the nearest enclosing symbol. The stack
+            // holds the enclosing chain of the previous symbol.
+            let mut stack: Vec<NodeIndex> = Vec::new();
+            for &index in group.iter() {
+                let (start, end, _) = ranges.get(&index).copied().unwrap_or_default();
+                while let Some(&candidate) = stack.last() {
+                    let (candidate_start, candidate_end, _) =
+                        ranges.get(&candidate).copied().unwrap_or_default();
+                    let contains = candidate_start <= start
+                        && candidate_end >= end
+                        && (candidate_start < start || candidate_end > end);
+                    if contains {
+                        break;
+                    }
+                    stack.pop();
+                }
+                parents.insert(index, stack.last().copied());
+                stack.push(index);
+            }
+
+            // Ordinal: position among the symbols that share a parent, a name
+            // and a kind, ordered by range and then by identifier.
+            let mut same_name: HashMap<(Option<NodeIndex>, String, &'static str), Vec<NodeIndex>> =
+                HashMap::new();
+            for &index in group.iter() {
+                let NodeData::Symbol(symbol) = &g[index] else {
+                    return Err(missing(index));
+                };
+                same_name
+                    .entry((
+                        parents.get(&index).copied().flatten(),
+                        symbol.name.clone(),
+                        symbol.kind.as_str(),
+                    ))
+                    .or_default()
+                    .push(index);
+            }
+            for members in same_name.values_mut() {
+                members.sort_by_key(|index| ranges.get(index).copied().unwrap_or_default());
+                for (ordinal, &index) in members.iter().enumerate() {
+                    ordinals.insert(index, ordinal);
+                }
+            }
+        }
+
+        for &index in ranges.keys() {
+            let NodeData::Symbol(symbol) = &g[index] else {
+                return Err(missing(index));
             };
-            if candidate.file_id != symbol.file_id
-                || candidate.name != symbol.name
-                || candidate.kind != symbol.kind
-            {
-                return false;
-            }
-            if parent_symbol(graph, *candidate_index) != parent {
-                return false;
-            }
-            candidate.source_range.byte_start < symbol.source_range.byte_start
-                || (candidate.source_range.byte_start == symbol.source_range.byte_start
-                    && (candidate.source_range.byte_end < symbol.source_range.byte_end
-                        || (candidate.source_range.byte_end == symbol.source_range.byte_end
-                            && candidate.id < symbol.id)))
-        })
-        .count();
-    format!(
-        "{}#{}!{ordinal}",
-        escape_component(&symbol.name),
-        symbol_kind_name(symbol.kind)
-    )
-}
+            let file = graph
+                .file_node(symbol.file_id)
+                .ok_or_else(|| missing(index))?;
 
-pub(crate) fn parent_symbol(graph: &CodeGraph, node_index: NodeIndex) -> Option<NodeIndex> {
-    let NodeData::Symbol(symbol) = &graph.graph()[node_index] else {
-        return None;
-    };
-    graph
-        .graph()
-        .node_indices()
-        .filter(|candidate_index| *candidate_index != node_index)
-        .filter_map(|candidate_index| {
-            let NodeData::Symbol(candidate) = &graph.graph()[candidate_index] else {
-                return None;
-            };
-            let contains = candidate.file_id == symbol.file_id
-                && candidate.source_range.byte_start <= symbol.source_range.byte_start
-                && candidate.source_range.byte_end >= symbol.source_range.byte_end
-                && (candidate.source_range.byte_start < symbol.source_range.byte_start
-                    || candidate.source_range.byte_end > symbol.source_range.byte_end);
-            contains.then_some((
-                candidate.source_range.byte_end - candidate.source_range.byte_start,
-                candidate.source_range.byte_start,
-                candidate.source_range.byte_end,
-                candidate_index,
-            ))
-        })
-        .min_by_key(|(span, start, end, _)| (*span, *start, *end))
-        .map(|(_, _, _, index)| index)
+            let mut hierarchy = vec![index];
+            let mut ancestor = parents.get(&index).copied().flatten();
+            while let Some(current) = ancestor {
+                hierarchy.push(current);
+                ancestor = parents.get(&current).copied().flatten();
+            }
+            hierarchy.reverse();
+
+            let descriptors = hierarchy
+                .iter()
+                .map(|&current| {
+                    let NodeData::Symbol(ancestor_symbol) = &g[current] else {
+                        return String::new();
+                    };
+                    format!(
+                        "{}#{}!{}",
+                        escape_component(&ancestor_symbol.name),
+                        ancestor_symbol.kind.as_str(),
+                        ordinals.get(&current).copied().unwrap_or_default()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" . ");
+            names.insert(
+                index,
+                format!(
+                    "{} {} . {} .",
+                    file.language.as_ref(),
+                    escape_component(&normalized_path(&file.path)?),
+                    descriptors
+                ),
+            );
+        }
+
+        Ok(Self { names })
+    }
+
+    /// Stable name of a node. `None` for a data node or an unknown index.
+    pub(crate) fn name_of(&self, node_index: NodeIndex) -> Option<&str> {
+        self.names.get(&node_index).map(String::as_str)
+    }
 }
 
 pub(crate) fn normalized_path(path: &Path) -> Result<String, ShardError> {
@@ -170,23 +206,4 @@ pub(crate) fn escape_component(value: &str) -> String {
         }
     }
     escaped
-}
-
-pub(crate) fn symbol_kind_name(kind: SymbolKind) -> &'static str {
-    match kind {
-        SymbolKind::Function => "function",
-        SymbolKind::Method => "method",
-        SymbolKind::Class => "class",
-        SymbolKind::Struct => "struct",
-        SymbolKind::Interface => "interface",
-        SymbolKind::Trait => "trait",
-        SymbolKind::Enum => "enum",
-        SymbolKind::Object => "object",
-        SymbolKind::Constant => "constant",
-        SymbolKind::Static => "static",
-        SymbolKind::Module => "module",
-        SymbolKind::Namespace => "namespace",
-        SymbolKind::TypeAlias => "type_alias",
-        SymbolKind::Declaration => "declaration",
-    }
 }

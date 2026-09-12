@@ -1,12 +1,11 @@
 ---
 source: src/language/ruby.rs
-assertion_line: 324
 expression: symbols
 ---
 [
   {
     "name": "Widget",
-    "kind": "Module",
+    "kind": "module",
     "source_range": {
       "byte_start": 127,
       "byte_end": 911,
@@ -26,7 +25,7 @@ expression: symbols
   },
   {
     "name": "VERSION",
-    "kind": "Constant",
+    "kind": "constant",
     "source_range": {
       "byte_start": 143,
       "byte_end": 167,
@@ -46,7 +45,7 @@ expression: symbols
   },
   {
     "name": "Report",
-    "kind": "Class",
+    "kind": "class",
     "source_range": {
       "byte_start": 224,
       "byte_end": 907,
@@ -66,7 +65,7 @@ expression: symbols
   },
   {
     "name": "FORMATS",
-    "kind": "Constant",
+    "kind": "constant",
     "source_range": {
       "byte_start": 241,
       "byte_end": 271,
@@ -86,7 +85,7 @@ expression: symbols
   },
   {
     "name": "initialize",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 277,
       "byte_end": 357,
@@ -106,7 +105,7 @@ expression: symbols
   },
   {
     "name": "total",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 410,
       "byte_end": 443,
@@ -126,7 +125,7 @@ expression: symbols
   },
   {
     "name": "render",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 505,
       "byte_end": 548,
@@ -146,7 +145,7 @@ expression: symbols
   },
   {
     "name": "to_json",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 601,
       "byte_end": 649,
@@ -166,7 +165,7 @@ expression: symbols
   },
   {
     "name": "from_file",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 709,
       "byte_end": 757,
@@ -186,7 +185,7 @@ expression: symbols
   },
   {
     "name": "payload",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 776,
       "byte_end": 832,
@@ -206,7 +205,7 @@ expression: symbols
   },
   {
     "name": "format_rows",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 838,
       "byte_end": 901,
@@ -226,7 +225,7 @@ expression: symbols
   },
   {
     "name": "Auth",
-    "kind": "Module",
+    "kind": "module",
     "source_range": {
       "byte_start": 965,
       "byte_end": 1293,
@@ -246,7 +245,7 @@ expression: symbols
   },
   {
     "name": "ENDPOINT",
-    "kind": "Constant",
+    "kind": "constant",
     "source_range": {
       "byte_start": 979,
       "byte_end": 1023,
@@ -266,7 +265,7 @@ expression: symbols
   },
   {
     "name": "Token",
-    "kind": "Class",
+    "kind": "class",
     "source_range": {
       "byte_start": 1073,
       "byte_end": 1289,
@@ -286,7 +285,7 @@ expression: symbols
   },
   {
     "name": "initialize",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 1089,
       "byte_end": 1178,
@@ -306,7 +305,7 @@ expression: symbols
   },
   {
     "name": "fresh?",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 1184,
       "byte_end": 1231,
@@ -326,7 +325,7 @@ expression: symbols
   },
   {
     "name": "for",
-    "kind": "Method",
+    "kind": "method",
     "source_range": {
       "byte_start": 1237,
       "byte_end": 1283,
