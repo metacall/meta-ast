@@ -32,6 +32,7 @@
 
 pub mod builder;
 pub mod edge;
+pub mod naming;
 pub mod node;
 pub mod resolver;
 pub mod scc;
@@ -196,23 +197,7 @@ impl CodeGraph {
         kind: EdgeKind,
         confidence: f32,
     ) {
-        let confidence = confidence.clamp(0.0, 1.0);
-        let key = (source, target, kind);
-        if let Some(&edge_idx) = self.edge_index.get(&key) {
-            let edge = &mut self.graph[edge_idx];
-            edge.confidence = edge.confidence.max(confidence);
-            return;
-        }
-        let edge_idx = self.graph.add_edge(
-            source,
-            target,
-            EdgeData {
-                kind,
-                confidence,
-                flow_kind: None,
-            },
-        );
-        self.edge_index.insert(key, edge_idx);
+        self.add_edge_normalized_with_flow(source, target, kind, confidence, None);
     }
 
     /// Adds a Flow edge with a specific flow kind, normalizing duplicates by
@@ -230,11 +215,7 @@ impl CodeGraph {
         let confidence = confidence.clamp(0.0, 1.0);
         let key = (source, target, kind);
         if let Some(&edge_idx) = self.edge_index.get(&key) {
-            let edge = &mut self.graph[edge_idx];
-            edge.confidence = edge.confidence.max(confidence);
-            if edge.flow_kind.is_none() {
-                edge.flow_kind = flow_kind;
-            }
+            self.graph[edge_idx].merge_repeated(confidence, flow_kind);
             return;
         }
         let edge_idx = self.graph.add_edge(

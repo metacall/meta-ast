@@ -310,6 +310,13 @@ where
         }
     }
 
+    // One extraction lookup per path, instead of a scan per resolved site.
+    let path_to_extraction: HashMap<&Path, &FileExtraction> = extractions
+        .iter()
+        .map(std::borrow::Borrow::borrow)
+        .map(|extraction| (extraction.path.as_path(), extraction))
+        .collect();
+
     let mut file_edges = Vec::with_capacity(resolved.len());
     let mut symbol_edges = Vec::with_capacity(resolved.len());
     for call in resolved {
@@ -319,9 +326,11 @@ where
         ) {
             file_edges.push((caller_idx, target_idx, call.confidence));
         }
-        if let Some(caller) =
-            enclosing_symbol(extractions, &call.source_file, call.source_range.as_ref())
-        {
+        if let Some(caller) = enclosing_symbol(
+            &path_to_extraction,
+            &call.source_file,
+            call.source_range.as_ref(),
+        ) {
             symbol_edges.push((caller, call.target, call.confidence));
         }
     }
@@ -333,19 +342,13 @@ where
     }
 }
 
-fn enclosing_symbol<F>(
-    extractions: &[F],
+fn enclosing_symbol(
+    path_to_extraction: &HashMap<&Path, &FileExtraction>,
     path: &Path,
     range: Option<&crate::model::SourceRange>,
-) -> Option<SymbolId>
-where
-    F: std::borrow::Borrow<FileExtraction>,
-{
+) -> Option<SymbolId> {
     let range = range?;
-    let file = extractions
-        .iter()
-        .map(std::borrow::Borrow::borrow)
-        .find(|file| file.path == path)?;
+    let file = path_to_extraction.get(path)?;
     file.symbols
         .iter()
         .filter(|symbol| {

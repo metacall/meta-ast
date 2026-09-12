@@ -133,6 +133,21 @@ impl EdgeData {
     pub fn participates_in_scc(&self) -> bool {
         self.kind.participates_in_scc()
     }
+
+    /// Merges a repeated `(source, target, kind)` edge into this one.
+    ///
+    /// The stronger confidence wins and the first flow kind is kept. This is
+    /// the only copy of the rule; every writer calls it.
+    pub(crate) fn merge_repeated(
+        &mut self,
+        confidence: f32,
+        flow_kind: Option<crate::model::FlowKind>,
+    ) {
+        self.confidence = self.confidence.max(confidence.clamp(0.0, 1.0));
+        if self.flow_kind.is_none() {
+            self.flow_kind = flow_kind;
+        }
+    }
 }
 
 impl Default for EdgeData {

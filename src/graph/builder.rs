@@ -248,8 +248,8 @@ impl GraphBuilder {
         self.insert_edge(source, target, kind, confidence, flow_kind);
     }
 
-    /// The one normalization rule: max merge confidence on a repeated triple,
-    /// and the first flow kind wins.
+    /// Adds an edge through the one normalization rule: a repeated triple
+    /// merges into the existing edge.
     fn insert_edge(
         &mut self,
         source: NodeIndex,
@@ -261,11 +261,7 @@ impl GraphBuilder {
         let confidence = confidence.clamp(0.0, 1.0);
         let key = (source, target, kind);
         if let Some(&edge_idx) = self.edge_index.get(&key) {
-            let edge = &mut self.graph[edge_idx];
-            edge.confidence = edge.confidence.max(confidence);
-            if edge.flow_kind.is_none() {
-                edge.flow_kind = flow_kind;
-            }
+            self.graph[edge_idx].merge_repeated(confidence, flow_kind);
             return;
         }
         let mut edge_data = EdgeData::with_confidence(kind, confidence);
@@ -397,156 +393,232 @@ impl GraphBuilder {
     {
         let mut builder = Self::new(snapshot_id);
 
-        // Register all files
-        for file in extractions {
-            let file = file.borrow();
-            builder.add_file(file.path.clone(), file.lang);
-        }
-
-        // Register all symbols; symbol errors are non-fatal
-        for file in extractions {
-            let file = file.borrow();
-            for symbol in &file.symbols {
-                if let Err(e) = builder.add_symbol(symbol) {
-                    diagnostics.push(crate::error::Diagnostic {
-                        path: file.path.clone(),
-                        severity: crate::error::Severity::Warning,
-                        message: format!("failed to add symbol to graph: {e}"),
-                        source_range: None,
-                    });
-                }
-            }
-        }
-
-        // Register data nodes and flow edges from dataflow extraction
+        register_files(&mut builder, extractions);
+        register_symbols(&mut builder, extractions, diagnostics);
         #[cfg(feature = "dataflow")]
-        {
-            for file in extractions {
-                let file = file.borrow();
-                for data_node in &file.data_nodes {
-                    builder.add_data_node(data_node);
-                }
-            }
-            for file in extractions {
-                let file = file.borrow();
-                for flow_edge in &file.flow_edges {
-                    builder.add_flow_edge(
-                        flow_edge.source,
-                        flow_edge.target,
-                        flow_edge.kind,
-                        flow_edge.confidence,
-                    );
-                }
-            }
-        }
+        register_dataflow(&mut builder, extractions);
 
-        // Build path -> FileId map needed by the resolver
-        let path_to_file_id: HashMap<std::path::PathBuf, crate::model::FileId> = extractions
-            .iter()
-            .filter_map(|f| {
-                let f = f.borrow();
-                builder
-                    .file_id_for_path(&f.path)
-                    .map(|fid| (f.path.clone(), fid))
-            })
-            .collect();
-
-        // Resolve language-specific import paths and add import edges
-        let mut resolvers = HashMap::new();
-        for lang in crate::language::LangId::all() {
-            resolvers.insert(lang, crate::language::import_resolver::make_resolver(lang));
-        }
-
-        for file in extractions {
-            let file = file.borrow();
-            let Some(&source_fid) = path_to_file_id.get(&file.path) else {
-                continue;
-            };
-            let source_dir = file.path.parent().unwrap_or(std::path::Path::new("."));
-            let Some(resolver) = resolvers.get(&file.lang) else {
-                continue;
-            };
-            for import in &file.imports {
-                let specifier = import_specifier_for(file.lang, import);
-                match resolver.resolve(&specifier, source_dir, root) {
-                    Some(target) => builder.add_import(source_fid, target),
-                    None if is_relative_specifier(&specifier) => {
-                        diagnostics.push(crate::error::Diagnostic {
-                            path: file.path.clone(),
-                            severity: crate::error::Severity::Warning,
-                            message: format!("unresolved relative import: {specifier}"),
-                            source_range: Some(import.range.clone()),
-                        });
-                    }
-                    None => builder.add_import(
-                        source_fid,
-                        std::path::PathBuf::from(external_name(file.lang, &specifier)),
-                    ),
-                }
-            }
-        }
-
-        // Cross-file reference resolution via FlattenedScopeCache
-        let import_adjacency = builder.import_adjacency();
-        let ctx = crate::graph::resolver::ResolutionContext::from_extractions(
+        let path_to_file_id = path_to_file_id(&builder, extractions);
+        resolve_imports(
+            &mut builder,
             extractions,
+            root,
             &path_to_file_id,
-            import_adjacency,
-        );
-        let scope_cache = crate::graph::resolver::FlattenedScopeCache::build(&ctx, diagnostics);
-        let ref_edges = crate::graph::resolver::resolve_all_references(
-            extractions,
-            &path_to_file_id,
-            &scope_cache,
             diagnostics,
         );
-        for (from, to, confidence) in ref_edges {
-            builder.add_reference(from, to, confidence);
-        }
+        let scope_cache =
+            resolve_references(&mut builder, extractions, &path_to_file_id, diagnostics);
 
-        // Finalize and compute SCC
         let graph = builder.build();
         #[cfg(feature = "metacall-deploy")]
         let mut graph = graph;
-
-        // Client-call edges are resolved after the graph exists, because
-        // resolution needs file and symbol nodes. They are ordinary Reference
-        // edges, so navigation and SCC see them.
         #[cfg(feature = "metacall-deploy")]
-        {
-            let call_sites: Vec<crate::deploy::scanner::CallSite> = extractions
-                .iter()
-                .flat_map(|file| file.borrow().call_sites.iter().cloned())
-                .collect();
-            if !call_sites.is_empty() {
-                let projections = crate::deploy::client_call::resolve_client_call_projections(
-                    &graph,
-                    extractions,
-                    &call_sites,
-                    root,
-                );
-                diagnostics.extend(projections.diagnostics);
-                for (from_idx, to_idx, confidence) in projections.file_edges {
-                    graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Reference, confidence);
-                }
-                for (from, to, confidence) in projections.symbol_edges {
-                    if let (Some(from_idx), Some(to_idx)) =
-                        (graph.symbol_node_index(from), graph.symbol_node_index(to))
-                    {
-                        graph.add_edge_normalized(
-                            from_idx,
-                            to_idx,
-                            EdgeKind::Reference,
-                            confidence,
-                        );
-                    }
-                }
-            }
-        }
+        inject_client_call_edges(&mut graph, extractions, root, diagnostics);
 
         let scc = crate::graph::SccAnalysis::analyze(graph.graph());
 
         (graph, scc, scope_cache)
+    }
+}
+/// Registers every file as a node.
+fn register_files<F>(builder: &mut GraphBuilder, extractions: &[F])
+where
+    F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
+{
+    for file in extractions {
+        let file = file.borrow();
+        builder.add_file(file.path.clone(), file.lang);
+    }
+}
+
+/// Registers every symbol and its ownership edge.
+///
+/// A symbol whose file was not registered is a warning: the extraction order
+/// broke, and the rest of the graph is still usable.
+fn register_symbols<F>(
+    builder: &mut GraphBuilder,
+    extractions: &[F],
+    diagnostics: &mut Vec<crate::error::Diagnostic>,
+) where
+    F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
+{
+    for file in extractions {
+        let file = file.borrow();
+        for symbol in &file.symbols {
+            if let Err(error) = builder.add_symbol(symbol) {
+                diagnostics.push(crate::error::Diagnostic {
+                    path: file.path.clone(),
+                    severity: crate::error::Severity::Warning,
+                    message: format!("failed to add symbol to graph: {error}"),
+                    source_range: None,
+                });
+            }
+        }
+    }
+}
+
+/// Registers data nodes first, then the flow edges that reference them.
+#[cfg(feature = "dataflow")]
+fn register_dataflow<F>(builder: &mut GraphBuilder, extractions: &[F])
+where
+    F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
+{
+    for file in extractions {
+        let file = file.borrow();
+        for data_node in &file.data_nodes {
+            builder.add_data_node(data_node);
+        }
+    }
+    for file in extractions {
+        let file = file.borrow();
+        for flow_edge in &file.flow_edges {
+            builder.add_flow_edge(
+                flow_edge.source,
+                flow_edge.target,
+                flow_edge.kind,
+                flow_edge.confidence,
+            );
+        }
+    }
+}
+
+/// Maps every registered file back to its identifier, for the resolver.
+fn path_to_file_id<F>(
+    builder: &GraphBuilder,
+    extractions: &[F],
+) -> HashMap<std::path::PathBuf, crate::model::FileId>
+where
+    F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
+{
+    extractions
+        .iter()
+        .filter_map(|file| {
+            let file = file.borrow();
+            builder
+                .file_id_for_path(&file.path)
+                .map(|id| (file.path.clone(), id))
+        })
+        .collect()
+}
+
+/// Resolves every import specifier and adds the import edges.
+///
+/// A specifier no resolver resolves becomes an external node, unless it is
+/// relative: a relative import that does not resolve is a warning, because the
+/// file it names is missing from the tree.
+fn resolve_imports<F>(
+    builder: &mut GraphBuilder,
+    extractions: &[F],
+    root: &std::path::Path,
+    path_to_file_id: &HashMap<std::path::PathBuf, crate::model::FileId>,
+    diagnostics: &mut Vec<crate::error::Diagnostic>,
+) where
+    F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
+{
+    let mut resolvers = HashMap::new();
+    for lang in crate::language::LangId::all() {
+        resolvers.insert(lang, crate::language::import_resolver::make_resolver(lang));
+    }
+
+    for file in extractions {
+        let file = file.borrow();
+        let Some(&source_id) = path_to_file_id.get(&file.path) else {
+            continue;
+        };
+        let source_dir = file
+            .path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let Some(resolver) = resolvers.get(&file.lang) else {
+            continue;
+        };
+        for import in &file.imports {
+            let specifier = import_specifier_for(file.lang, import);
+            match resolver.resolve(&specifier, source_dir, root) {
+                Some(target) => builder.add_import(source_id, target),
+                None if is_relative_specifier(&specifier) => {
+                    diagnostics.push(crate::error::Diagnostic {
+                        path: file.path.clone(),
+                        severity: crate::error::Severity::Warning,
+                        message: format!("unresolved relative import: {specifier}"),
+                        source_range: Some(import.range.clone()),
+                    });
+                }
+                None => builder.add_import(
+                    source_id,
+                    std::path::PathBuf::from(external_name(file.lang, &specifier)),
+                ),
+            }
+        }
+    }
+}
+
+/// Resolves cross-file references and returns the scope cache they were
+/// resolved against.
+fn resolve_references<F>(
+    builder: &mut GraphBuilder,
+    extractions: &[F],
+    path_to_file_id: &HashMap<std::path::PathBuf, crate::model::FileId>,
+    diagnostics: &mut Vec<crate::error::Diagnostic>,
+) -> crate::graph::resolver::FlattenedScopeCache
+where
+    F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
+{
+    let import_adjacency = builder.import_adjacency();
+    let context = crate::graph::resolver::ResolutionContext::from_extractions(
+        extractions,
+        path_to_file_id,
+        import_adjacency,
+    );
+    let scope_cache = crate::graph::resolver::FlattenedScopeCache::build(&context, diagnostics);
+    let reference_edges = crate::graph::resolver::resolve_all_references(
+        extractions,
+        path_to_file_id,
+        &scope_cache,
+        diagnostics,
+    );
+    for (from, to, confidence) in reference_edges {
+        builder.add_reference(from, to, confidence);
+    }
+    scope_cache
+}
+
+/// Adds the client-call projections as ordinary reference edges.
+///
+/// Resolution needs the file and symbol nodes, so this runs after the graph is
+/// built. Navigation and SCC see these edges like any other reference.
+#[cfg(feature = "metacall-deploy")]
+fn inject_client_call_edges<F>(
+    graph: &mut CodeGraph,
+    extractions: &[F],
+    root: &std::path::Path,
+    diagnostics: &mut Vec<crate::error::Diagnostic>,
+) where
+    F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
+{
+    let call_sites: Vec<crate::deploy::scanner::CallSite> = extractions
+        .iter()
+        .flat_map(|file| file.borrow().call_sites.iter().cloned())
+        .collect();
+    if call_sites.is_empty() {
+        return;
+    }
+    let projections = crate::deploy::client_call::resolve_client_call_projections(
+        graph,
+        extractions,
+        &call_sites,
+        root,
+    );
+    diagnostics.extend(projections.diagnostics);
+    for (from, to, confidence) in projections.file_edges {
+        graph.add_edge_normalized(from, to, EdgeKind::Reference, confidence);
+    }
+    for (from, to, confidence) in projections.symbol_edges {
+        if let (Some(from_idx), Some(to_idx)) =
+            (graph.symbol_node_index(from), graph.symbol_node_index(to))
+        {
+            graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Reference, confidence);
+        }
     }
 }
 
@@ -895,5 +967,214 @@ mod tests {
             !data_ownership_edges.is_empty(),
             "expected symbol→data ownership edge"
         );
+    }
+    /// Stage: registration. Files first, then each symbol owns its file node.
+    #[test]
+    fn registration_stage_adds_files_and_symbol_ownership() {
+        use crate::model::FileExtraction;
+        let mut file = FileExtraction::empty(PathBuf::from("/proj/a.py"), LangId::Python);
+        file.symbols = vec![symbol_for(1, "alpha", std::path::Path::new("/proj/a.py"))];
+        let extractions = vec![file];
+
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        let mut diagnostics = Vec::new();
+        register_files(&mut builder, &extractions);
+        register_symbols(&mut builder, &extractions, &mut diagnostics);
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(builder.node_count(), 2, "one file node and one symbol node");
+        assert_eq!(builder.edge_count(), 1, "the symbol owns its file");
+    }
+
+    /// Stage: dataflow. Nodes are registered before the edges that join them.
+    #[cfg(feature = "dataflow")]
+    #[test]
+    fn dataflow_stage_registers_nodes_and_flow_edges() {
+        use crate::model::{DataNodeId, FileExtraction, FlowEdge, FlowKind};
+        let mut file = FileExtraction::empty(PathBuf::from("/proj/a.py"), LangId::Python);
+        file.symbols = vec![symbol_for(1, "alpha", std::path::Path::new("/proj/a.py"))];
+        file.data_nodes = vec![data_node(1, "x"), data_node(2, "y")];
+        file.flow_edges = vec![FlowEdge {
+            source: DataNodeId::new(1).unwrap(),
+            target: DataNodeId::new(2).unwrap(),
+            kind: FlowKind::Argument,
+            confidence: 0.8,
+        }];
+        let extractions = vec![file];
+
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        register_files(&mut builder, &extractions);
+        register_symbols(&mut builder, &extractions, &mut Vec::new());
+        register_dataflow(&mut builder, &extractions);
+
+        assert_eq!(builder.node_count(), 4, "file, symbol and two data nodes");
+        let graph = builder.build();
+        assert_eq!(graph.edges_of_kind(EdgeKind::Flow).count(), 1);
+    }
+
+    /// Stage: imports. A project import joins two files, an unresolved
+    /// specifier becomes an external node.
+    #[test]
+    fn import_stage_resolves_project_and_external_targets() {
+        use crate::model::FileExtraction;
+        // The Python resolver checks the file system, so the project is real.
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        std::fs::write(root.join("a.py"), "import b\nimport requests\n").unwrap();
+        std::fs::write(root.join("b.py"), "def beta(): pass\n").unwrap();
+
+        let mut first = FileExtraction::empty(root.join("a.py"), LangId::Python);
+        first.imports = vec![import("b"), import("requests")];
+        let second = FileExtraction::empty(root.join("b.py"), LangId::Python);
+        let extractions = vec![first, second];
+
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        register_files(&mut builder, &extractions);
+        let file_ids = path_to_file_id(&builder, &extractions);
+        let mut diagnostics = Vec::new();
+        resolve_imports(
+            &mut builder,
+            &extractions,
+            root,
+            &file_ids,
+            &mut diagnostics,
+        );
+
+        assert!(diagnostics.is_empty(), "both imports resolve");
+        let graph = builder.build();
+        assert_eq!(graph.edges_of_kind(EdgeKind::Import).count(), 2);
+        assert_eq!(graph.external_count(), 1, "requests is an external node");
+    }
+
+    /// Stage: references. The returned cache resolves the imported name, and
+    /// the edge reaches the graph.
+    #[test]
+    fn reference_stage_returns_a_usable_scope_cache() {
+        use crate::model::{FileExtraction, UnresolvedReference};
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let first_path = root.join("a.py");
+        let second_path = root.join("b.py");
+        std::fs::write(&first_path, "def alpha(): pass\n").unwrap();
+        std::fs::write(&second_path, "import a\ndef beta(): return alpha()\n").unwrap();
+
+        let mut first = FileExtraction::empty(first_path.clone(), LangId::Python);
+        first.symbols = vec![symbol_for(1, "alpha", &first_path)];
+        let mut second = FileExtraction::empty(second_path.clone(), LangId::Python);
+        second.symbols = vec![symbol_for(2, "beta", &second_path)];
+        second.imports = vec![import("a")];
+        second.references = vec![UnresolvedReference {
+            name: "alpha".to_string(),
+            range: test_source_range(),
+        }];
+        let extractions = vec![first, second];
+
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        register_files(&mut builder, &extractions);
+        register_symbols(&mut builder, &extractions, &mut Vec::new());
+        let file_ids = path_to_file_id(&builder, &extractions);
+        let mut diagnostics = Vec::new();
+        resolve_imports(
+            &mut builder,
+            &extractions,
+            root,
+            &file_ids,
+            &mut diagnostics,
+        );
+        let scope = resolve_references(&mut builder, &extractions, &file_ids, &mut diagnostics);
+
+        assert_eq!(scope.iter_scopes().count(), 2);
+        let graph = builder.build();
+        assert_eq!(
+            graph.edges_of_kind(EdgeKind::Reference).count(),
+            1,
+            "beta references alpha"
+        );
+    }
+
+    /// Stage: client calls. Resolution runs after the graph exists, and the
+    /// call projects onto the symbol that encloses it.
+    #[cfg(feature = "metacall-deploy")]
+    #[test]
+    fn client_call_stage_projects_the_call_onto_its_symbol() {
+        use crate::deploy::scanner::CallSite;
+        use crate::model::FileExtraction;
+        let mut caller =
+            FileExtraction::empty(PathBuf::from("/proj/orchestrator.py"), LangId::Python);
+        caller.symbols = vec![symbol_for(
+            1,
+            "compute",
+            std::path::Path::new("/proj/orchestrator.py"),
+        )];
+        caller.call_sites = vec![CallSite::call(
+            PathBuf::from("/proj/orchestrator.py"),
+            LangId::Python,
+            "multiply".to_string(),
+            false,
+            Some(test_source_range()),
+            1.0,
+        )];
+        let mut callee = FileExtraction::empty(PathBuf::from("/proj/math.js"), LangId::JavaScript);
+        callee.symbols = vec![symbol_for(
+            2,
+            "multiply",
+            std::path::Path::new("/proj/math.js"),
+        )];
+        let extractions = vec![caller, callee];
+
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        register_files(&mut builder, &extractions);
+        register_symbols(&mut builder, &extractions, &mut Vec::new());
+        let mut graph = builder.build();
+        let mut diagnostics = Vec::new();
+        inject_client_call_edges(
+            &mut graph,
+            &extractions,
+            std::path::Path::new("/proj"),
+            &mut diagnostics,
+        );
+
+        assert!(
+            graph.reference_edges().count() >= 1,
+            "the invocation must project onto its symbol"
+        );
+    }
+
+    fn symbol_for(id: u32, name: &str, file_path: &std::path::Path) -> Symbol {
+        Symbol {
+            id: SymbolId::new(id).unwrap(),
+            name: name.to_string(),
+            kind: SymbolKind::Function,
+            language: LangId::Python,
+            file_path: file_path.to_path_buf(),
+            source_range: test_source_range(),
+            visibility: Some(Visibility::Public),
+            signature: None,
+            docstring: None,
+            is_async: false,
+        }
+    }
+
+    fn import(specifier: &str) -> crate::model::UnresolvedImport {
+        crate::model::UnresolvedImport {
+            import_specifier: specifier.to_string(),
+            alias: None,
+            symbol: None,
+            star: false,
+            range: test_source_range(),
+        }
+    }
+
+    #[cfg(feature = "dataflow")]
+    fn data_node(id: u32, name: &str) -> crate::model::DataNode {
+        use crate::model::{DataNodeId, DataScope};
+        crate::model::DataNode {
+            id: DataNodeId::new(id).unwrap(),
+            symbol_id: None,
+            name: Some(name.to_string()),
+            scope: DataScope::Local,
+            type_hint: None,
+            source_range: test_source_range(),
+        }
     }
 }
