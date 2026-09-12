@@ -15,7 +15,7 @@ use crate::model::{
 };
 use crate::output::shard::edge::{ShardEdge, validate_edge};
 use crate::output::shard::error::ShardError;
-use crate::output::shard::name::{StableNameIndex, node_belongs_to_file, normalized_path};
+use crate::output::shard::name::{StableNameIndex, node_owner_path, normalized_path};
 
 /// Shard payload version.
 ///
@@ -62,6 +62,9 @@ pub struct LoadedShard {
 
 impl ShardFile {
     /// Convert an in-memory `FileExtraction` and graph into a shard record.
+    ///
+    /// An edge is stored by the shard of its source owner only, so a
+    /// cross-file edge exists once in the index instead of once per endpoint.
     pub fn from_extraction(
         extraction: &FileExtraction,
         graph: &CodeGraph,
@@ -88,8 +91,9 @@ impl ShardFile {
             .filter(|edge| {
                 !matches!(graph.graph()[edge.source()], NodeData::Data(_))
                     && !matches!(graph.graph()[edge.target()], NodeData::Data(_))
-                    && (node_belongs_to_file(graph, edge.source(), &extraction.path)
-                        || node_belongs_to_file(graph, edge.target(), &extraction.path))
+                    && node_owner_path(graph, edge.source())
+                        .or_else(|| node_owner_path(graph, edge.target()))
+                        == Some(extraction.path.as_path())
             })
             .map(|edge| {
                 let source_name = names

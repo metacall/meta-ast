@@ -1,21 +1,32 @@
 //! Stable naming and descriptor generation for shard endpoints.
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 
 use petgraph::graph::NodeIndex;
 
+use crate::error::{Diagnostic, Severity};
 use crate::graph::{CodeGraph, NodeData};
 use crate::model::FileId;
 use crate::output::shard::error::ShardError;
 
-pub(crate) fn node_belongs_to_file(graph: &CodeGraph, node_index: NodeIndex, path: &Path) -> bool {
-    match graph.graph().node_weight(node_index) {
-        Some(NodeData::File(file)) => file.path == path,
-        Some(NodeData::Symbol(symbol)) => graph
+/// Suffix of every shard file.
+const SHARD_SUFFIX: &str = ".jsonl";
+/// Longest escaped component kept verbatim in a name. The suffix and a
+/// collision marker must still fit the common 255 byte file name limit.
+const MAX_COMPONENT_BYTES: usize = 200;
+/// Digest length used when an escaped path is too long to name a file.
+const LONG_COMPONENT_DIGEST: usize = 32;
+
+/// Path of the file that owns a node: the file itself, or the file that holds
+/// a symbol. `None` for an external node, a data node, or an unknown index.
+pub(crate) fn node_owner_path(graph: &CodeGraph, node_index: NodeIndex) -> Option<&Path> {
+    match graph.graph().node_weight(node_index)? {
+        NodeData::File(file) => Some(file.path.as_path()),
+        NodeData::Symbol(symbol) => graph
             .file_node(symbol.file_id)
-            .is_some_and(|file| file.path == path),
-        Some(NodeData::External(_) | NodeData::Data(_)) | None => false,
+            .map(|file| file.path.as_path()),
+        NodeData::External(_) | NodeData::Data(_) => None,
     }
 }
 
@@ -206,4 +217,165 @@ pub(crate) fn escape_component(value: &str) -> String {
         }
     }
     escaped
+}
+
+/// Key that two written names share when one file system would treat them as
+/// one file: case folding, and the trailing dot or space that Windows strips.
+///
+/// A shard writer percent-encodes before a name reaches the file system, which
+/// removes every other ambiguity, so Unicode normalization is not part of the
+/// key.
+pub fn collision_key(name: &str) -> String {
+    name.trim_end_matches(['.', ' ']).to_lowercase()
+}
+
+/// Windows reserves these names whatever extension follows them.
+pub(crate) fn is_device_stem(stem: &str) -> bool {
+    const NAMES: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+    if NAMES.iter().any(|name| stem.eq_ignore_ascii_case(name)) {
+        return true;
+    }
+    let bytes = stem.as_bytes();
+    bytes.len() == 4
+        && bytes[3].is_ascii_digit()
+        && (bytes[..3].eq_ignore_ascii_case(b"COM") || bytes[..3].eq_ignore_ascii_case(b"LPT"))
+}
+
+/// One shard file name per source path, in input order.
+#[derive(Debug, Clone)]
+pub struct ShardNamePlan {
+    pub names: Vec<String>,
+    /// One warning per name that had to change, naming the paths involved.
+    pub warnings: Vec<Diagnostic>,
+}
+
+/// Escaped shard component and the two reasons it can differ from the path.
+struct ShardComponent {
+    name: String,
+    /// The escaped path was too long, so the name is a digest.
+    hashed: bool,
+    /// A reserved device stem was escaped.
+    device: bool,
+}
+
+/// Choose a shard file name for every source path.
+///
+/// Paths are expected relative to the index root; an absolute path still
+/// produces a valid name. Two paths that one file system folds into one name
+/// get a deterministic suffix instead of sharing a file, so the index also
+/// loads after it moves to a platform with different file name rules.
+pub fn plan_shard_file_names(paths: &[PathBuf]) -> Result<ShardNamePlan, ShardError> {
+    let mut names = Vec::with_capacity(paths.len());
+    let mut warnings = Vec::new();
+    let mut taken: BTreeMap<String, PathBuf> = BTreeMap::new();
+
+    for (position, path) in paths.iter().enumerate() {
+        let component = shard_component(path)?;
+        let name = format!("shards/{}{SHARD_SUFFIX}", component.name);
+        if component.device {
+            warnings.push(Diagnostic {
+                path: path.clone(),
+                severity: Severity::Warning,
+                message: format!(
+                    "{} names a Windows device, so the shard is written as {name}",
+                    path.display()
+                ),
+                source_range: None,
+            });
+        }
+        if component.hashed {
+            taken.insert(collision_key(&name), path.clone());
+            names.push(name);
+            continue;
+        }
+
+        let Some(first) = taken.get(&collision_key(&name)).cloned() else {
+            taken.insert(collision_key(&name), path.clone());
+            names.push(name);
+            continue;
+        };
+
+        let resolved = disambiguated(&name, &first, position, &taken)?;
+        taken.insert(collision_key(&resolved), path.clone());
+        warnings.push(Diagnostic {
+            path: path.clone(),
+            severity: Severity::Warning,
+            message: format!(
+                "{} and {} differ only by case or a trailing mark, so the shard is written as {resolved}",
+                first.display(),
+                path.display()
+            ),
+            source_range: None,
+        });
+        names.push(resolved);
+    }
+
+    Ok(ShardNamePlan { names, warnings })
+}
+
+/// Escaped form of the last path component, portable on every file system.
+fn shard_component(path: &Path) -> Result<ShardComponent, ShardError> {
+    let normalized = normalized_path(path)?;
+    let (directory, file) = match normalized.rsplit_once('/') {
+        Some((directory, file)) => (Some(directory), file),
+        None => (None, normalized.as_str()),
+    };
+    let (escaped_file, device) = escaped_file_component(file);
+    let component = match directory {
+        Some(directory) => format!("{}%2F{escaped_file}", escape_component(directory)),
+        None => escaped_file,
+    };
+    if component.len() <= MAX_COMPONENT_BYTES {
+        return Ok(ShardComponent {
+            name: component,
+            hashed: false,
+            device,
+        });
+    }
+    let digest = blake3::hash(normalized.as_bytes()).to_hex().to_string();
+    Ok(ShardComponent {
+        name: digest[..LONG_COMPONENT_DIGEST].to_string(),
+        hashed: true,
+        device,
+    })
+}
+
+/// Escape a file name so it can be created on Windows, macOS and Linux: a
+/// trailing dot is escaped because Windows strips it, and a device stem is
+/// escaped because Windows reserves it whatever the extension is. The second
+/// value reports the device rewrite.
+fn escaped_file_component(file: &str) -> (String, bool) {
+    let mut escaped = escape_component(file);
+    if escaped.ends_with('.') {
+        escaped.truncate(escaped.len() - 1);
+        escaped.push_str("%2E");
+    }
+    let stem_end = escaped.find('.').unwrap_or(escaped.len());
+    if !is_device_stem(&escaped[..stem_end]) {
+        return (escaped, false);
+    }
+    let first = escaped.as_bytes()[0];
+    (format!("%{first:02X}{}", &escaped[1..]), true)
+}
+
+/// Deterministic marker that separates two names the file system folds.
+fn disambiguated(
+    name: &str,
+    first: &Path,
+    position: usize,
+    taken: &BTreeMap<String, PathBuf>,
+) -> Result<String, ShardError> {
+    let stem = name.strip_suffix(SHARD_SUFFIX).unwrap_or(name);
+    let seed = format!("{}\u{0}{name}\u{0}{position}", first.display());
+    let digest = blake3::hash(seed.as_bytes()).to_hex().to_string();
+    for width in [8usize, 16, 32, 64] {
+        let candidate = format!("{stem}.{}{SHARD_SUFFIX}", &digest[..width]);
+        if !taken.contains_key(&collision_key(&candidate)) {
+            return Ok(candidate);
+        }
+    }
+    Err(ShardError::UnwritableShardName {
+        name: name.to_string(),
+        reason: "no digest separates this name from the names already planned",
+    })
 }
