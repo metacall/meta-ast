@@ -38,50 +38,82 @@ pub struct CallSite {
     pub confidence: f32,
 }
 
+/// Load entry point suffixes: `metacall_load_from_<suffix>` in the script
+/// ports, `<Suffix>` after `LoadFrom` in Go, and `from_<suffix>` in the Rust port.
+const LOAD_SUFFIXES: [&str; 5] = ["file", "single_file", "memory", "package", "configuration"];
+
+/// Exact client call names across the ports.
+const CLIENT_NAMES: [&str; 20] = [
+    "metacall",
+    "metacall_await",
+    "metacall_await_s",
+    "metacall_no_arg",
+    "metacall_untyped",
+    "metacall_untyped_no_arg",
+    "metacallfms",
+    "metacallfms_await",
+    "metacallv",
+    "metacallv_s",
+    "metacallt",
+    "metacallt_s",
+    "metacall_function",
+    "Call",
+    "CallUnsafe",
+    "Await",
+    "AwaitUnsafe",
+    "LoadFromFile",
+    "LoadFromMemory",
+    "LoadFromPackage",
+];
+
+/// The one alternation every query predicate and `from_str` share.
+static FUNCTION_NAME_PATTERN: LazyLock<String> = LazyLock::new(|| {
+    let mut alternatives: Vec<String> = CLIENT_NAMES
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect();
+    alternatives.push("metacall_load_from_.*".to_string());
+    alternatives.push("load_from_.*".to_string());
+    alternatives.push("from_(file|single_file|memory|package|configuration)".to_string());
+    alternatives.push("LoadFrom(File|Memory|Package|Configuration)".to_string());
+    format!("^({})$", alternatives.join("|"))
+});
+
+/// Fill the shared function name predicate into a query template.
+fn deploy_source(template: &str) -> String {
+    template.replace("@FN@", &FUNCTION_NAME_PATTERN)
+}
+
+fn load_variant(suffix: &str) -> Option<CallSiteVariant> {
+    match suffix {
+        "file" | "single_file" => Some(CallSiteVariant::LoadFromFile),
+        "memory" => Some(CallSiteVariant::LoadFromMemory),
+        "package" => Some(CallSiteVariant::LoadFromPackage),
+        "configuration" => Some(CallSiteVariant::LoadFromConfiguration),
+        _ => None,
+    }
+}
+
 impl CallSiteVariant {
     fn from_str(s: &str) -> Option<Self> {
-        if s.contains("load_from_file") || s.contains("LoadFromFile") {
-            Some(Self::LoadFromFile)
-        } else if s.contains("load_from_memory") || s.contains("LoadFromMemory") {
-            Some(Self::LoadFromMemory)
-        } else if s.contains("load_from_package") || s.contains("LoadFromPackage") {
-            Some(Self::LoadFromPackage)
-        } else if s.contains("load_from_configuration") || s.contains("LoadFromConfiguration") {
-            Some(Self::LoadFromConfiguration)
-        } else if s.contains("from_file") || s.contains("from_single_file") {
-            Some(Self::LoadFromFile)
-        } else if s.contains("from_memory") {
-            Some(Self::LoadFromMemory)
-        } else if s.contains("from_package") {
-            Some(Self::LoadFromPackage)
-        } else if s.contains("from_configuration") {
-            Some(Self::LoadFromConfiguration)
-        } else if matches!(
-            s,
-            "metacall"
-                | "metacall_await"
-                | "metacall_await_s"
-                | "metacall_no_arg"
-                | "metacall_untyped"
-                | "metacall_untyped_no_arg"
-                | "metacallfms"
-                | "metacallfms_await"
-                | "metacallv"
-                | "metacallv_s"
-                | "metacallt"
-                | "metacallt_s"
-                | "metacall_function"
-                | "Call"
-                | "CallUnsafe"
-                | "Await"
-                | "AwaitUnsafe"
-        ) {
-            // metacall_handle excluded: its argument layout differs per port
-            // (tag first in C/Node, handle first in Rust).
-            Some(Self::ClientCall)
-        } else {
-            None
+        if let Some(suffix) = s.strip_prefix("metacall_load_from_") {
+            return load_variant(suffix);
         }
+        if let Some(suffix) = s.strip_prefix("from_") {
+            return load_variant(suffix);
+        }
+        if let Some(suffix) = s.strip_prefix("load_from_") {
+            return load_variant(suffix);
+        }
+        if let Some(suffix) = s.strip_prefix("LoadFrom") {
+            return load_variant(&suffix.to_lowercase());
+        }
+        // metacall_handle excluded: its argument layout differs per port
+        // (tag first in C/Node, handle first in Rust).
+        if CLIENT_NAMES.contains(&s) {
+            return Some(Self::ClientCall);
+        }
+        None
     }
 }
 
@@ -131,12 +163,14 @@ fn collect_strings_recursive(node: Node, source: &[u8], scripts: &mut Vec<String
 static PYTHON_QUERY: LazyLock<Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
         &tree_sitter_python::LANGUAGE.into(),
-        r#"
+        &deploy_source(
+            r#"
 (call
   function: (identifier) @fn_name
   arguments: (argument_list) @args
-  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacallfms)$"))
+  (#match? @fn_name "@FN@"))
 "#,
+        ),
         "Python deploy",
     )
 });
@@ -144,12 +178,14 @@ static PYTHON_QUERY: LazyLock<Query> = LazyLock::new(|| {
 static JS_QUERY: LazyLock<Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
         &tree_sitter_javascript::LANGUAGE.into(),
-        r#"
+        &deploy_source(
+            r#"
 (call_expression
   function: (identifier) @fn_name
   arguments: (arguments) @args
-  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacallfms)$"))
+  (#match? @fn_name "@FN@"))
 "#,
+        ),
         "JS deploy",
     )
 });
@@ -157,12 +193,14 @@ static JS_QUERY: LazyLock<Query> = LazyLock::new(|| {
 static TS_QUERY: LazyLock<Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
         &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        r#"
+        &deploy_source(
+            r#"
 (call_expression
   function: (identifier) @fn_name
   arguments: (arguments) @args
-  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacallfms)$"))
+  (#match? @fn_name "@FN@"))
 "#,
+        ),
         "TS deploy",
     )
 });
@@ -170,12 +208,14 @@ static TS_QUERY: LazyLock<Query> = LazyLock::new(|| {
 static TSX_QUERY: LazyLock<Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
         &tree_sitter_typescript::LANGUAGE_TSX.into(),
-        r#"
+        &deploy_source(
+            r#"
 (call_expression
   function: (identifier) @fn_name
   arguments: (arguments) @args
-  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacallfms)$"))
+  (#match? @fn_name "@FN@"))
 "#,
+        ),
         "TSX deploy",
     )
 });
@@ -183,12 +223,14 @@ static TSX_QUERY: LazyLock<Query> = LazyLock::new(|| {
 static C_QUERY: LazyLock<Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
         &tree_sitter_c::LANGUAGE.into(),
-        r#"
+        &deploy_source(
+            r#"
 (call_expression
   function: (identifier) @fn_name
   arguments: (argument_list) @args
-  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacall_await_s|metacallfms|metacallfms_await|metacallv|metacallv_s|metacallt|metacallt_s|metacall_function)$"))
+  (#match? @fn_name "@FN@"))
 "#,
+        ),
         "C deploy",
     )
 });
@@ -196,12 +238,14 @@ static C_QUERY: LazyLock<Query> = LazyLock::new(|| {
 static CPP_QUERY: LazyLock<Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
         &tree_sitter_cpp::LANGUAGE.into(),
-        r#"
+        &deploy_source(
+            r#"
 (call_expression
   function: (identifier) @fn_name
   arguments: (argument_list) @args
-  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacall_await_s|metacallfms|metacallfms_await|metacallv|metacallv_s|metacallt|metacallt_s|metacall_function)$"))
+  (#match? @fn_name "@FN@"))
 "#,
+        ),
         "CPP deploy",
     )
 });
@@ -209,7 +253,8 @@ static CPP_QUERY: LazyLock<Query> = LazyLock::new(|| {
 static RUST_QUERY: LazyLock<Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
         &tree_sitter_rust::LANGUAGE.into(),
-        r#"
+        &deploy_source(
+            r#"
 (call_expression
   function: [
     (scoped_identifier
@@ -220,8 +265,10 @@ static RUST_QUERY: LazyLock<Query> = LazyLock::new(|| {
         name: (identifier) @fn_name)
     (identifier) @fn_name
   ]
-  arguments: (arguments) @args)
+  arguments: (arguments) @args
+  (#match? @fn_name "@FN@"))
 "#,
+        ),
         "Rust deploy",
     )
 });
@@ -229,15 +276,26 @@ static RUST_QUERY: LazyLock<Query> = LazyLock::new(|| {
 static GO_QUERY: LazyLock<Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
         &tree_sitter_go::LANGUAGE.into(),
-        r#"
+        &deploy_source(
+            r#"
 (call_expression
   function: (selector_expression
     operand: (identifier) @pkg_name
     field: (field_identifier) @fn_name)
   arguments: (argument_list) @args
-  (#match? @pkg_name "metacall")
-  (#match? @fn_name "^(LoadFrom.*|Call|CallUnsafe|Await|AwaitUnsafe)$"))
+  (#match? @pkg_name "^metacall$")
+  (#match? @fn_name "@FN@"))
+
+; A one argument call parses as a type conversion in this grammar.
+(type_conversion_expression
+  (qualified_type
+    (package_identifier) @pkg_name
+    (type_identifier) @fn_name)
+  operand: (_) @args
+  (#match? @pkg_name "^metacall$")
+  (#match? @fn_name "@FN@"))
 "#,
+        ),
         "Go deploy",
     )
 });
@@ -245,12 +303,14 @@ static GO_QUERY: LazyLock<Query> = LazyLock::new(|| {
 static RUBY_QUERY: LazyLock<Query> = LazyLock::new(|| {
     crate::language::common::compile_query(
         &tree_sitter_ruby::LANGUAGE.into(),
-        r#"
+        &deploy_source(
+            r#"
 (call
   method: (identifier) @fn_name
   arguments: (argument_list) @args
-  (#match? @fn_name "^(metacall_load_from_.*|metacall|metacall_await|metacallfms)$"))
+  (#match? @fn_name "@FN@"))
 "#,
+        ),
         "Ruby deploy",
     )
 });
@@ -799,6 +859,17 @@ metacall_await_s("x", 1)
     ///
     /// Two arguments are required: with one argument tree-sitter-go parses
     /// `pkg.Fn(x)` as a type conversion, not a call.
+    #[test]
+    fn test_scan_go_single_argument_call_is_detected() {
+        // This grammar parses a one argument call as a type conversion.
+        let source = b"package main\nfunc main() { metacall.Call(handler) }";
+        let tree = parse(LangId::Go, source);
+        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
+        assert_eq!(sites[0].function_name.as_deref(), Some("handler"));
+    }
+
     #[test]
     fn test_scan_go_rejects_a_lookalike_package() {
         let source = b"metacallmock.Call(\"x\", 1)";
