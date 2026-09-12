@@ -1,8 +1,8 @@
+use crate::language::LangId;
 use crate::language::pack::define_language_pack;
 use crate::language::{DefaultVisibility, DocCommentConfig};
 use crate::model::Visibility;
 use std::path::{Path, PathBuf};
-use crate::language::LangId;
 
 fn resolve_go_import(raw: &str, _source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
     use crate::language::import_resolver::{find_go_module, strip_import_quotes};

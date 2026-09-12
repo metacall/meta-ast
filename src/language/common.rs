@@ -13,6 +13,22 @@ use tree_sitter::StreamingIterator;
 /// A broken query is a programming error, but the release profile aborts on
 /// panic, so the failure travels as a value: the analysis turns it into a
 /// per-file diagnostic and the process keeps running.
+/// Imports, references and the diagnostics for text that cannot be decoded.
+///
+/// The diagnostic channel travels with the extraction so a file with an
+/// undecodable specifier reports it without a second pass.
+pub(crate) type ImportExtraction = (
+    Vec<crate::model::UnresolvedImport>,
+    Vec<crate::model::UnresolvedReference>,
+    Vec<crate::error::Diagnostic>,
+);
+
+/// Definitions for one enclosing scope, grouped by name in source order.
+type DefinitionsByScope<'a> = std::collections::HashMap<
+    usize,
+    std::collections::HashMap<&'a str, Vec<(usize, crate::model::DataNodeId)>>,
+>;
+
 pub(crate) fn compile_query_checked(
     lang: &tree_sitter::Language,
     src: &str,
@@ -441,14 +457,7 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     source: &'a [u8],
     spec: &LanguageSpec,
     file_path: &std::path::Path,
-) -> Result<
-    (
-        Vec<crate::model::UnresolvedImport>,
-        Vec<crate::model::UnresolvedReference>,
-        Vec<crate::error::Diagnostic>,
-    ),
-    crate::error::Error,
-> {
+) -> Result<ImportExtraction, crate::error::Error> {
     let query = (spec.import_ref_query_fn)()?;
     let Some(path_idx) = query.capture_index_for_name("import.path") else {
         return Ok((Vec::new(), Vec::new(), Vec::new()));
@@ -640,7 +649,7 @@ pub(crate) fn extract_def_use_dataflow(
     id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
 ) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
     use crate::graph::edge::CONFIDENCE_DEF_USE;
-    use crate::model::{DataNode, DataNodeId, DataScope, FlowEdge, FlowKind};
+    use crate::model::{DataNode, DataScope, FlowEdge, FlowKind};
     use tree_sitter::StreamingIterator;
 
     let mut cursor = tree_sitter::QueryCursor::new();
@@ -676,10 +685,7 @@ pub(crate) fn extract_def_use_dataflow(
     // a use looks up its own bucket instead of scanning every definition, and
     // the nearest preceding definition is the last entry before the use. The
     // name key borrows the source, so grouping allocates no text.
-    let mut defs_by_scope: std::collections::HashMap<
-        usize,
-        std::collections::HashMap<&str, Vec<(usize, DataNodeId)>>,
-    > = std::collections::HashMap::new();
+    let mut defs_by_scope: DefinitionsByScope<'_> = std::collections::HashMap::new();
     for (name, byte_pos, node, is_param) in defs {
         let scope = if is_param {
             DataScope::Parameter

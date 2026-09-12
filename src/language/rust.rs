@@ -1,7 +1,7 @@
+use crate::language::LangId;
 use crate::language::pack::define_language_pack;
 use crate::language::{DefaultVisibility, DocCommentConfig};
 use std::path::{Path, PathBuf};
-use crate::language::LangId;
 
 /// Resolve a module path against a base directory.
 ///
@@ -338,7 +338,6 @@ define_language_pack!(
 );
 
 // ── Dataflow extraction ─────────────────────────────────────────────
-
 
 /// Extract data nodes (definitions) and flow edges (def-use) from a Rust parse tree.
 ///

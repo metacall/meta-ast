@@ -1,8 +1,8 @@
 use crate::language::DefaultVisibility;
+use crate::language::LangId;
 use crate::language::pack::define_language_pack;
 use crate::model::Visibility;
 use std::path::{Path, PathBuf};
-use crate::language::LangId;
 
 fn resolve_js_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
     use crate::language::import_resolver::{JS_EXTS, resolve_js_family_import};
@@ -614,7 +614,6 @@ pub(crate) fn extract_js_family_dataflow_with_query(
     crate::language::common::extract_def_use_dataflow(tree, source, query, function_kinds, id_gen)
 }
 
-
 /// JavaScript AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]
 pub(crate) const JS_FUNCTION_KINDS: &[&str] = crate::language::common::JS_FAMILY_FUNCTION_KINDS;
@@ -629,11 +628,5 @@ pub fn extract_javascript_dataflow(
     let Some(query) = js_dataflow_query() else {
         return (Vec::new(), Vec::new());
     };
-    extract_js_family_dataflow_with_query(
-        tree,
-        source,
-        query,
-        JS_FUNCTION_KINDS,
-        id_gen,
-    )
+    extract_js_family_dataflow_with_query(tree, source, query, JS_FUNCTION_KINDS, id_gen)
 }

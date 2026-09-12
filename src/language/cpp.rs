@@ -1,8 +1,8 @@
 use crate::language::DefaultVisibility;
+use crate::language::LangId;
 use crate::language::c::{C_FAMILY_IMPORT_QUERY_STR, C_FAMILY_REFERENCE_QUERY_STR};
 use crate::language::pack::define_language_pack;
 use std::path::{Path, PathBuf};
-use crate::language::LangId;
 
 fn resolve_cpp_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
     crate::language::import_resolver::resolve_c_family_import(raw, source_dir)

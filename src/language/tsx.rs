@@ -1,11 +1,11 @@
 use crate::language::DefaultVisibility;
+use crate::language::LangId;
 use crate::language::pack::define_language_pack;
 use crate::language::typescript::{
     TS_FAMILY_IMPORT_QUERY, TS_FAMILY_QUERY, TS_FAMILY_REFERENCE_QUERY,
 };
 use crate::model::Visibility;
 use std::path::{Path, PathBuf};
-use crate::language::LangId;
 
 fn resolve_tsx_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
     use crate::language::import_resolver::{TS_EXTS, resolve_js_family_import};
@@ -198,7 +198,6 @@ define_language_pack!(
 );
 
 // ── Dataflow extraction ─────────────────────────────────────────────
-
 
 /// TSX AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]

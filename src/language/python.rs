@@ -1,7 +1,7 @@
 use crate::language::DefaultVisibility;
+use crate::language::LangId;
 use crate::language::pack::define_language_pack;
 use std::path::{Path, PathBuf};
-use crate::language::LangId;
 
 fn resolve_python_import(raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
     use crate::language::import_resolver::python_candidate_paths;
@@ -408,7 +408,6 @@ define_language_pack!(
 );
 
 // ── Dataflow extraction ─────────────────────────────────────────────
-
 
 /// Python AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]

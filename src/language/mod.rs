@@ -239,14 +239,7 @@ pub fn extract_imports_and_references_for_checked<'a>(
     tree: &'a tree_sitter::Tree,
     source: &'a [u8],
     file_path: &std::path::Path,
-) -> Result<
-    (
-        Vec<crate::model::UnresolvedImport>,
-        Vec<crate::model::UnresolvedReference>,
-        Vec<crate::error::Diagnostic>,
-    ),
-    crate::error::Error,
-> {
+) -> Result<common::ImportExtraction, crate::error::Error> {
     common::extract_imports_and_references_with_spec(tree, source, spec_for(id), file_path)
 }
 
