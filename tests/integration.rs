@@ -5,22 +5,27 @@ mod integration {
     #[cfg(feature = "metacall-deploy")]
     mod deploy_client_call_test;
     #[cfg(feature = "metacall-deploy")]
+    mod deploy_contracts_test;
+    #[cfg(feature = "metacall-deploy")]
     mod deploy_edge_cases_test;
     #[cfg(feature = "metacall-deploy")]
     mod deploy_mixed_test;
     #[cfg(feature = "metacall-deploy")]
     mod deploy_test;
     mod edge_cases_test;
+    mod graph_contracts_test;
     mod graph_regression_test;
     mod import_hygiene_test;
     mod import_test;
     mod inspect_output_test;
     mod language_semantics_test;
+    mod model_contracts_test;
     mod output_defaults_test;
     mod output_format_test;
     mod pipeline_equivalence_test;
     mod pipeline_test;
     mod reanalyze_api_test;
+    mod shard_golden_test;
     mod shard_hygiene_test;
     mod shard_index_test;
     mod shard_test;

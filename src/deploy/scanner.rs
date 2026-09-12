@@ -38,6 +38,78 @@ pub struct CallSite {
     pub confidence: f32,
 }
 
+impl CallSite {
+    /// A load call site: the loaded scripts and, when the source spells one,
+    /// the loader tag. A load never carries an invocation target.
+    pub fn load(
+        source_file: PathBuf,
+        caller_lang: LangId,
+        variant: CallSiteVariant,
+        target_lang: Option<String>,
+        scripts: Vec<String>,
+        source_range: Option<crate::model::SourceRange>,
+        confidence: f32,
+    ) -> Self {
+        Self {
+            source_file,
+            caller_lang,
+            variant,
+            target_lang,
+            scripts,
+            function_name: None,
+            is_async: false,
+            source_range,
+            confidence,
+        }
+    }
+
+    /// A client invocation: the target name is mandatory and no scripts apply.
+    pub fn call(
+        source_file: PathBuf,
+        caller_lang: LangId,
+        function_name: String,
+        is_async: bool,
+        source_range: Option<crate::model::SourceRange>,
+        confidence: f32,
+    ) -> Self {
+        Self {
+            source_file,
+            caller_lang,
+            variant: CallSiteVariant::ClientCall,
+            target_lang: None,
+            scripts: Vec::new(),
+            function_name: Some(function_name),
+            is_async,
+            source_range,
+            confidence,
+        }
+    }
+
+    /// A client invocation whose target name is not visible in the source.
+    ///
+    /// The site is kept: it still proves the file calls into MetaCall, and
+    /// dropping it would hide the file from the deployment plan.
+    pub fn call_without_target(
+        source_file: PathBuf,
+        caller_lang: LangId,
+        is_async: bool,
+        source_range: Option<crate::model::SourceRange>,
+        confidence: f32,
+    ) -> Self {
+        Self {
+            source_file,
+            caller_lang,
+            variant: CallSiteVariant::ClientCall,
+            target_lang: None,
+            scripts: Vec::new(),
+            function_name: None,
+            is_async,
+            source_range,
+            confidence,
+        }
+    }
+}
+
 /// Exact client call names across the ports.
 const CLIENT_NAMES: [&str; 20] = [
     "metacall",
@@ -428,17 +500,36 @@ pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<Cal
                 }
             }
 
-            call_sites.push(CallSite {
-                source_file: path.to_path_buf(),
-                caller_lang: id,
-                variant,
-                target_lang,
-                scripts,
-                function_name,
-                is_async,
-                source_range,
-                confidence,
-            });
+            let site = if variant == CallSiteVariant::ClientCall {
+                match function_name {
+                    Some(function_name) => CallSite::call(
+                        path.to_path_buf(),
+                        id,
+                        function_name,
+                        is_async,
+                        source_range,
+                        confidence,
+                    ),
+                    None => CallSite::call_without_target(
+                        path.to_path_buf(),
+                        id,
+                        is_async,
+                        source_range,
+                        confidence,
+                    ),
+                }
+            } else {
+                CallSite::load(
+                    path.to_path_buf(),
+                    id,
+                    variant,
+                    target_lang,
+                    scripts,
+                    source_range,
+                    confidence,
+                )
+            };
+            call_sites.push(site);
         }
     }
 

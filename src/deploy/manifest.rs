@@ -200,7 +200,7 @@ pub fn generate_pod_manifest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deploy::cut::{CutAnnotation, CutReason};
+    use crate::deploy::cut::{CutAnnotation, CutReason, PortablePath};
     use crate::deploy::metrics::PodMetrics;
     use crate::deploy::pod::{InterPodEdge, Pod, PodPartition};
     use crate::graph::EdgeKind;
@@ -294,8 +294,8 @@ mod tests {
             from_pod: 0,
             to_pod: 1,
             annotation: CutAnnotation {
-                from_file: "a.py".to_string(),
-                to_file: "b.js".to_string(),
+                from_file: PortablePath::from_path(std::path::Path::new("a.py")),
+                to_file: PortablePath::from_path(std::path::Path::new("b.js")),
                 cut_reason: reason,
                 original_confidence: confidence,
             },

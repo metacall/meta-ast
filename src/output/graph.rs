@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::graph::CodeGraph;
 use crate::graph::edge::EdgeKind;
-use crate::graph::node::{FileNode, NodeData, SymbolNode};
+use crate::graph::node::NodeData;
 use crate::graph::scc::{DeployabilityHint, SccAnalysis};
 
 /// Version of the graph export schema.
@@ -20,6 +20,7 @@ pub const SCHEMA_VERSION: u32 = 2;
 /// Serves both the CLI `graph` output (with SCC/deployability) and the
 /// `--datagraph` sink export (where SCC analysis is optional).
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct GraphOutput {
     /// Schema version for forward compatibility
     pub schema_version: u32,
@@ -37,6 +38,7 @@ pub struct GraphOutput {
 
 /// Metadata about the graph analysis.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct GraphMetadata {
     /// Snapshot identifier for this analysis
     pub snapshot_id: u64,
@@ -58,6 +60,7 @@ pub struct GraphMetadata {
 
 /// Serialized node representation.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct SerializedNode {
     /// Node index in the graph
     pub id: usize,
@@ -94,6 +97,7 @@ pub struct SerializedNode {
 
 /// Serialized edge representation.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct SerializedEdge {
     /// Source node index
     pub source: usize,
@@ -114,6 +118,7 @@ pub struct SerializedEdge {
 
 /// Serialized SCC representation.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct SerializedScc {
     /// Component index
     pub index: usize,
@@ -129,6 +134,7 @@ pub struct SerializedScc {
 
 /// Deployability statistics summary.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct DeployabilityStats {
     /// Number of cyclic clusters (size > 1 or self-loop)
     pub cyclic_clusters: usize,
@@ -228,75 +234,45 @@ impl GraphOutput {
     }
 
     fn serialize_node(graph: &CodeGraph, id: usize, node_data: &NodeData) -> SerializedNode {
-        match node_data {
-            NodeData::File(f) => Self::serialize_file_node(id, f),
-            NodeData::Symbol(s) => Self::serialize_symbol_node(graph, id, s),
-            NodeData::External(e) => SerializedNode {
-                id,
-                kind: "external".to_string(),
-                path: Some(e.raw_path.clone()),
-                file_path: None,
-                source_range: None,
-                language: Some(e.language.as_ref().to_string()),
-                name: None,
-                symbol_kind: None,
-                visibility: None,
-                data_scope: None,
-                type_hint: None,
-            },
-            NodeData::Data(d) => SerializedNode {
-                id,
-                kind: "data".to_string(),
-                path: None,
-                file_path: None,
-                source_range: None,
-                language: None,
-                name: d.name.clone(),
-                symbol_kind: None,
-                visibility: None,
-                data_scope: Some(d.scope.as_str().to_string()),
-                type_hint: d.type_hint.clone(),
-            },
-        }
-    }
-
-    fn serialize_file_node(id: usize, file_node: &FileNode) -> SerializedNode {
-        SerializedNode {
+        let mut node = SerializedNode {
             id,
-            kind: "file".to_string(),
-            path: Some(crate::input::portable_path(&file_node.path)),
+            kind: crate::graph::naming::node_kind_name(node_data).to_string(),
+            path: None,
             file_path: None,
             source_range: None,
-            language: Some(file_node.language.as_ref().to_string()),
-            name: None,
+            language: crate::graph::naming::node_language(node_data)
+                .map(|language| language.as_ref().to_string()),
+            name: crate::graph::naming::node_display_name(node_data).map(str::to_string),
             symbol_kind: None,
             visibility: None,
             data_scope: None,
             type_hint: None,
-        }
-    }
+        };
 
-    fn serialize_symbol_node(
-        graph: &CodeGraph,
-        id: usize,
-        symbol_node: &SymbolNode,
-    ) -> SerializedNode {
-        let file_path = graph
-            .file_node(symbol_node.file_id)
-            .map(|file| crate::input::portable_path(&file.path));
-        SerializedNode {
-            id,
-            kind: "symbol".to_string(),
-            path: None,
-            file_path,
-            source_range: Some(symbol_node.source_range.clone()),
-            language: None,
-            name: Some(symbol_node.name.clone()),
-            symbol_kind: Some(symbol_node.kind.as_str().to_string()),
-            visibility: symbol_node.visibility.map(|v| v.as_str().to_string()),
-            data_scope: None,
-            type_hint: None,
+        match node_data {
+            NodeData::File(file) => {
+                node.path = Some(crate::input::portable_path(&file.path));
+            }
+            NodeData::Symbol(symbol) => {
+                node.file_path = graph
+                    .file_node(symbol.file_id)
+                    .map(|file| crate::input::portable_path(&file.path));
+                node.source_range = Some(symbol.source_range.clone());
+                node.symbol_kind = Some(symbol.kind.as_str().to_string());
+                node.visibility = symbol
+                    .visibility
+                    .map(|visibility| visibility.as_str().to_string());
+            }
+            NodeData::External(external) => {
+                node.path = Some(external.raw_path.clone());
+            }
+            NodeData::Data(data) => {
+                node.data_scope = Some(data.scope.as_str().to_string());
+                node.type_hint = data.type_hint.clone();
+            }
         }
+
+        node
     }
 
     fn serialize_edges(graph: &CodeGraph) -> Vec<SerializedEdge> {
@@ -418,6 +394,7 @@ fn node_sort_key(node: &SerializedNode) -> (u8, &str, &str, usize) {
 mod tests {
     use super::*;
     use crate::graph::GraphBuilder;
+    use crate::graph::node::{FileNode, SymbolNode};
     use crate::language::LangId;
     use crate::model::{DataNodeId, DataScope, FlowKind, LineColumn, SnapshotId, SourceRange};
     use crate::output::OutputFormat;

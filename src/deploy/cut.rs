@@ -8,6 +8,7 @@
 //! is annotated.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use crate::deploy::pod::{Pod, PodPartition, node_to_file_id};
 use crate::graph::scc::SccAnalysis;
@@ -23,11 +24,43 @@ pub enum CutReason {
     OversizedPod { pod_size: usize, max_size: usize },
 }
 
+/// Path spelling written into a manifest annotation.
+///
+/// The two constructors are the only ways to make one, so an annotation never
+/// carries a raw platform path. Serialized transparently: the manifest keeps
+/// writing plain strings.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct PortablePath(String);
+
+impl PortablePath {
+    /// Portable spelling of a project path.
+    pub fn from_path(path: &Path) -> Self {
+        Self(crate::input::portable_path(path))
+    }
+
+    /// Synthetic endpoint for a file that has no node in the graph.
+    pub fn anchor(file_id: FileId) -> Self {
+        Self(format!("file#{}", file_id.to_raw()))
+    }
+
+    /// The endpoint as written into the manifest.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for PortablePath {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 /// Annotation attached to a cut edge in the manifest.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CutAnnotation {
-    pub from_file: String,
-    pub to_file: String,
+    pub from_file: PortablePath,
+    pub to_file: PortablePath,
     pub cut_reason: CutReason,
     pub original_confidence: f32,
 }
@@ -157,11 +190,11 @@ pub fn find_cross_language_cuts(
 
 /// A portable path for a file node. A missing node keeps the identifier form so
 /// the anomaly is visible instead of silently pointing at another file.
-fn file_label(graph: &CodeGraph, file_id: FileId) -> String {
+fn file_label(graph: &CodeGraph, file_id: FileId) -> PortablePath {
     graph
         .file_node(file_id)
-        .map(|file| crate::input::portable_path(&file.path))
-        .unwrap_or_else(|| format!("file#{}", file_id.to_raw()))
+        .map(|file| PortablePath::from_path(&file.path))
+        .unwrap_or_else(|| PortablePath::anchor(file_id))
 }
 
 /// Find the weakest internal edge in an oversized pod and mark it for splitting.
@@ -338,13 +371,13 @@ mod tests {
         // ADR 0003 traceability: the annotation must name the cut files so a
         // reader can find them. A numeric FileId is not traceable.
         assert!(
-            cut.annotation.from_file.ends_with("orch.py"),
-            "from_file must be the source path, got {:?}",
+            cut.annotation.from_file.as_str().ends_with("orch.py"),
+            "from_file must be the source path, got {}",
             cut.annotation.from_file
         );
         assert!(
-            cut.annotation.to_file.ends_with("auth.go"),
-            "to_file must be the target path, got {:?}",
+            cut.annotation.to_file.as_str().ends_with("auth.go"),
+            "to_file must be the target path, got {}",
             cut.annotation.to_file
         );
     }
