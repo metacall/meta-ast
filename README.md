@@ -131,8 +131,9 @@ view of their structure without executing any user code. Its objectives:
   co-deployment vs. independent-function decisions. Requires the feature-enabled
   install (`cargo install meta-ast --features metacall-deploy`).
 - **Documentation & visualization.** Emit an interactive Cytoscape.js dashboard
-  (`--html`, loaded from a CDN and cached by the browser) to explore ownership,
-  references, and deployment units visually.
+  (`--html`, self-contained: the vendored bundle travels inside the document, so
+  it renders offline) to explore ownership, references, and deployment units
+  visually.
 - **Library integration.** Consume `meta-ast` as a crate: `analyze_graph`
   returns a `GraphAnalysis` (`CodeGraph` + `SccAnalysis`) for custom tooling,
   linters, or report generators.
@@ -157,7 +158,8 @@ Builds the cross-file dependency graph, resolves imports, and runs Tarjan SCC to
 
 ```bash
 meta-ast graph <path> [-l language] [-f json|yaml] [-o graph.json]
-meta-ast graph <path> --html                    # interactive Cytoscape.js dashboard (CDN, browser-cached)
+meta-ast graph <path> --html                    # interactive Cytoscape.js dashboard (self-contained, <path>.html)
+meta-ast graph <path> --html --open             # write the dashboard and open it in the browser
 meta-ast graph <path> --datagraph               # export detailed datagraph.json (requires --features dataflow)
 meta-ast graph <path> --datagraph --datagraph-output dg.json   # choose the datagraph path
 meta-ast graph <path> --watch                   # watch mode: continuous re-analysis on file changes (requires --features watch)

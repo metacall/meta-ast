@@ -78,7 +78,7 @@ pub struct GraphArgs {
     /// Root directory to analyze
     pub path: std::path::PathBuf,
 
-    /// Output file path (prints to stdout if omitted)
+    /// Output file path (defaults to stdout, or `<path>.html` with --html)
     #[arg(short, long)]
     pub output: Option<std::path::PathBuf>,
 
@@ -97,6 +97,10 @@ pub struct GraphArgs {
     /// Generate an interactive HTML dashboard with graph visualization
     #[arg(long)]
     pub html: bool,
+
+    /// Open the written dashboard in the default browser (needs --html)
+    #[arg(long, requires = "html")]
+    pub open: bool,
 
     /// Also emit a portable datagraph export (requires --features dataflow)
     #[cfg(feature = "dataflow")]
@@ -185,5 +189,23 @@ mod tests {
     #[test]
     fn parse_language_empty_returns_err() {
         assert!(parse_language("").is_err());
+    }
+
+    #[test]
+    fn opening_the_dashboard_is_an_opt_in() {
+        let parsed = Cli::try_parse_from(["meta-ast", "graph", "demo", "--html", "--open"]);
+        assert!(
+            parsed.is_ok(),
+            "graph --html --open parses: {:?}",
+            parsed.as_ref().err()
+        );
+        assert!(
+            matches!(parsed, Ok(Cli::Graph(ref args)) if args.open),
+            "the flag reaches the parsed arguments"
+        );
+        assert!(
+            Cli::try_parse_from(["meta-ast", "graph", "demo", "--open"]).is_err(),
+            "--open without --html is a usage error"
+        );
     }
 }
