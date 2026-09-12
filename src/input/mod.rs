@@ -61,7 +61,9 @@ pub fn discover_files(
         if let Some(lang_id) = detect_language(root)
             && languages.is_none_or(|langs| langs.contains(&lang_id))
         {
-            results.push((root.to_path_buf(), lang_id));
+            // The walk branch strips the Windows verbatim prefix; the single file
+            // branch must hand out the same key form.
+            results.push((simplified_path(root), lang_id));
         }
         return Ok(results);
     }

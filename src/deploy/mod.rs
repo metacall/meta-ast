@@ -174,7 +174,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     // 6c. Report orphaned MetaCall configuration files and surface every
     // diagnostic collected during analysis and edge injection.
     diagnostics.extend(orphaned_config_diagnostics(&config.root, &all_call_sites));
-    diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
+    diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
     diagnostics.dedup_by(|a, b| a.path == b.path && a.message == b.message);
     for diag in &diagnostics {
         tracing::warn!(

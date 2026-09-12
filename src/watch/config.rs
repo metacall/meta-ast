@@ -6,6 +6,10 @@ use std::time::Duration;
 use crate::language::LangId;
 use crate::output::OutputFormat;
 
+/// Floor for the debounce duration. Zero turns the watcher into a hot loop on
+/// chatty file systems.
+pub const MIN_DEBOUNCE: Duration = Duration::from_millis(50);
+
 /// Configuration parameters governing the debounced file-system watcher.
 #[derive(Debug, Clone)]
 pub struct WatchConfig {
@@ -35,6 +39,11 @@ impl WatchConfig {
             languages: None,
         }
     }
+
+    /// Effective debounce duration, never below [`MIN_DEBOUNCE`].
+    pub fn debounce(&self) -> Duration {
+        self.debounce.max(MIN_DEBOUNCE)
+    }
 }
 
 impl Default for WatchConfig {
@@ -51,10 +60,20 @@ mod tests {
     fn watch_config_default_values() {
         let cfg = WatchConfig::default();
         assert_eq!(cfg.debounce, Duration::from_millis(200));
+        assert_eq!(cfg.debounce(), Duration::from_millis(200));
         assert_eq!(cfg.format, OutputFormat::Json);
         assert!(cfg.output.is_none());
         assert!(!cfg.html);
         assert!(cfg.open_browser);
         assert!(cfg.languages.is_none());
+    }
+
+    #[test]
+    fn debounce_has_a_floor() {
+        let cfg = WatchConfig {
+            debounce: Duration::ZERO,
+            ..WatchConfig::new()
+        };
+        assert_eq!(cfg.debounce(), MIN_DEBOUNCE);
     }
 }

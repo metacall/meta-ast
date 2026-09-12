@@ -7,7 +7,7 @@
 //! This module is not gated by the `watch` feature. Only the OS watcher in
 //! [`crate::watch`] needs that feature.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -81,9 +81,12 @@ impl WatchState {
     }
 
     /// Allocate the next monotonic snapshot ID.
-    pub(crate) fn next_snapshot_id(&mut self) -> SnapshotId {
-        self.snapshot_counter += 1;
-        SnapshotId::new(self.snapshot_counter).expect("snapshot counter exhausted (> u32::MAX)")
+    pub(crate) fn next_snapshot_id(&mut self) -> Result<SnapshotId, crate::Error> {
+        self.snapshot_counter = self
+            .snapshot_counter
+            .checked_add(1)
+            .ok_or(crate::Error::IdExhausted)?;
+        SnapshotId::new(self.snapshot_counter).ok_or(crate::Error::IdExhausted)
     }
 }
 
@@ -109,15 +112,17 @@ pub fn reanalyze_extractions(
 ) -> Result<ReanalysisOutput, crate::Error> {
     let files = input::discover_files(root, languages)?;
 
-    let overlay_by_path: HashMap<&Path, &Overlay> = overlays
+    // Key every overlay by the same path form the walk produces, so one file
+    // never enters the target set under two keys.
+    let overlay_by_path: HashMap<PathBuf, &Overlay> = overlays
         .iter()
-        .filter(|overlay| overlay.path.starts_with(root))
-        .map(|overlay| (overlay.path.as_path(), overlay))
+        .map(|overlay| (input::simplified_path(&overlay.path), overlay))
+        .filter(|(path, _)| path.starts_with(root))
         .collect();
 
     let mut targets: BTreeMap<PathBuf, LangId> = files.into_iter().collect();
-    for overlay in overlay_by_path.values() {
-        targets.entry(overlay.path.clone()).or_insert(overlay.lang);
+    for (path, overlay) in &overlay_by_path {
+        targets.entry(path.clone()).or_insert(overlay.lang);
     }
 
     let (current_fingerprints, read_diagnostics): (HashMap<PathBuf, Fingerprint>, Vec<Diagnostic>) =
@@ -126,7 +131,7 @@ pub fn reanalyze_extractions(
             .fold(
                 || (HashMap::new(), Vec::new()),
                 |(mut map, mut diags), (path, _)| {
-                    match overlay_by_path.get(path.as_path()) {
+                    match overlay_by_path.get(path) {
                         Some(overlay) => {
                             map.insert(path.clone(), Fingerprint::of(overlay.text.as_bytes()));
                         }
@@ -156,10 +161,20 @@ pub fn reanalyze_extractions(
 
     let mut change_set = ChangeSet::default();
     let mut changed_disk: Vec<(PathBuf, LangId)> = Vec::new();
-    let mut changed_overlays: Vec<&Overlay> = Vec::new();
+    let mut changed_overlays: Vec<(PathBuf, &Overlay)> = Vec::new();
+
+    // A file that cannot be read keeps its cached extraction. Its fingerprint is
+    // missing, so the stale sweep must not treat it as deleted.
+    let failed_reads: HashSet<PathBuf> = read_diagnostics
+        .iter()
+        .map(|diag| diag.path.clone())
+        .collect();
 
     for (path, lang) in &targets {
         let Some(curr_fp) = current_fingerprints.get(path) else {
+            if failed_reads.contains(path) {
+                change_set.files_unchanged += 1;
+            }
             continue;
         };
         let changed = match state.cache.fingerprint_of(path) {
@@ -179,8 +194,8 @@ pub fn reanalyze_extractions(
         if !changed {
             continue;
         }
-        match overlay_by_path.get(path.as_path()) {
-            Some(overlay) => changed_overlays.push(*overlay),
+        match overlay_by_path.get(path) {
+            Some(overlay) => changed_overlays.push((path.clone(), overlay)),
             None => changed_disk.push((path.clone(), *lang)),
         }
     }
@@ -188,7 +203,7 @@ pub fn reanalyze_extractions(
     let stale: Vec<PathBuf> = state
         .cache
         .paths()
-        .filter(|path| !current_fingerprints.contains_key(*path))
+        .filter(|path| !current_fingerprints.contains_key(*path) && !failed_reads.contains(*path))
         .cloned()
         .collect();
     if !stale.is_empty() {
@@ -199,12 +214,17 @@ pub fn reanalyze_extractions(
     }
 
     let max_id = state.cache.max_symbol_id();
+    let next_symbol_id = max_id.checked_add(1).ok_or(crate::Error::IdExhausted)?;
     #[cfg(feature = "dataflow")]
-    let max_data_id = state.cache.max_data_node_id();
+    let next_data_id = state
+        .cache
+        .max_data_node_id()
+        .checked_add(1)
+        .ok_or(crate::Error::IdExhausted)?;
     #[cfg(feature = "dataflow")]
-    let id_generators = ExtractionIdGenerators::with_starts(max_id + 1, max_data_id + 1);
+    let id_generators = ExtractionIdGenerators::with_starts(next_symbol_id, next_data_id);
     #[cfg(not(feature = "dataflow"))]
-    let id_generators = ExtractionIdGenerators::with_symbol_start(max_id + 1);
+    let id_generators = ExtractionIdGenerators::with_symbol_start(next_symbol_id);
 
     let options = ExtractOptions {
         skip_imports_and_refs: false,
@@ -217,7 +237,7 @@ pub fn reanalyze_extractions(
     };
 
     let mut overlay_diagnostics: Vec<Diagnostic> = Vec::new();
-    for overlay in &changed_overlays {
+    for (path, overlay) in &changed_overlays {
         match extractor::extract_text_with_id_gen(
             InMemorySource {
                 uri: overlay.uri.as_str(),
@@ -228,27 +248,29 @@ pub fn reanalyze_extractions(
             &options,
             &id_generators,
         ) {
-            Ok(versioned) => new_extractions.push(versioned.file),
+            Ok(mut versioned) => {
+                versioned.file.path = path.clone();
+                new_extractions.push(versioned.file);
+            }
             Err(error) => {
                 let message = error.to_string();
                 overlay_diagnostics.push(Diagnostic {
-                    path: overlay.path.clone(),
+                    path: path.clone(),
                     severity: Severity::Error,
                     message: message.clone(),
                     source_range: None,
                 });
-                new_extractions.push(FileExtraction::failed(
-                    overlay.path.clone(),
-                    overlay.lang,
-                    message,
-                ));
+                new_extractions.push(FileExtraction::failed(path.clone(), overlay.lang, message));
             }
         }
     }
 
     let mut merged: Vec<Arc<FileExtraction>> =
         Vec::with_capacity(state.cache.len() + new_extractions.len());
-    for (path, fp) in &current_fingerprints {
+    for path in targets.keys() {
+        let Some(fp) = current_fingerprints.get(path) else {
+            continue;
+        };
         if state.cache.fingerprint_of(path) == Some(*fp)
             && let Some(extraction) = state.cache.get(path)
         {
@@ -269,10 +291,10 @@ pub fn reanalyze_extractions(
         .flat_map(|file| file.diagnostics.iter().cloned())
         .collect();
     let mut read_diagnostics = read_diagnostics;
-    read_diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
+    read_diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
     diagnostics.extend(read_diagnostics);
     diagnostics.extend(overlay_diagnostics);
-    diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
+    diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
 
     Ok((merged, change_set, diagnostics))
 }
@@ -292,9 +314,9 @@ pub fn incremental_reanalyze(
     let started = Instant::now();
     let (merged, change_set, mut diagnostics) = reanalyze_extractions(root, languages, &[], state)?;
 
-    let snapshot_id = state.next_snapshot_id();
+    let snapshot_id = state.next_snapshot_id()?;
     let (graph, scc) = GraphBuilder::from_extractions(&merged, root, snapshot_id, &mut diagnostics);
-    diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
+    diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
 
     tracing::info!(
         total = merged.len(),
@@ -757,9 +779,16 @@ mod tests {
     #[test]
     fn snapshot_id_allocation_is_monotonic() {
         let mut state = WatchState::new();
-        let s1 = state.next_snapshot_id();
-        let s2 = state.next_snapshot_id();
+        let s1 = state.next_snapshot_id().unwrap();
+        let s2 = state.next_snapshot_id().unwrap();
         assert_eq!(s1.to_raw(), 1);
         assert_eq!(s2.to_raw(), 2);
+    }
+
+    #[test]
+    fn snapshot_counter_exhaustion_is_an_error() {
+        let mut state = WatchState::new();
+        state.snapshot_counter = u32::MAX;
+        assert!(state.next_snapshot_id().is_err());
     }
 }
