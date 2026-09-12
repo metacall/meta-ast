@@ -117,51 +117,47 @@ where
     // tag (when present) constrains Phase A candidates to that language.
     let mut loaded_by_source: HashMap<PathBuf, Vec<(FileId, Option<LangId>)>> = HashMap::new();
     for site in call_sites {
-        let (scripts, tag): (Vec<String>, Option<LangId>) = match site.variant {
+        let (scripts, tag, base): (Vec<String>, Option<LangId>, PathBuf) = match site.variant {
             CallSiteVariant::LoadFromFile => (
                 site.scripts.clone(),
                 site.target_lang
                     .as_deref()
                     .and_then(crate::deploy::tags::from_metacall_tag),
+                root.to_path_buf(),
             ),
             CallSiteVariant::LoadFromConfiguration => {
                 let Some(config_script) = site.scripts.first() else {
                     continue;
                 };
                 let config_file = root.join(config_script);
-                let config_json = match std::fs::read_to_string(&config_file).and_then(|s| {
-                    serde_json::from_str::<serde_json::Value>(&s)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                }) {
-                    Ok(json) => json,
-                    Err(_) => {
-                        // A referenced config that cannot be read or parsed
-                        // loads nothing: surface it instead of dropping it.
-                        diagnostics.push(Diagnostic {
-                            path: config_file,
-                            severity: Severity::Warning,
-                            message: format!(
-                                "unreadable or unparseable MetaCall configuration referenced by {}",
-                                site.source_file.display()
-                            ),
-                            source_range: site.source_range.clone(),
-                        });
+                let bytes = match std::fs::read(&config_file) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        diagnostics.push(super::config::config_diagnostic(
+                            &config_file,
+                            site.source_range.as_ref(),
+                            format!("unreadable MetaCall configuration: {error}"),
+                        ));
                         continue;
                     }
                 };
-                let Some(scripts_arr) = config_json.get("scripts").and_then(|v| v.as_array())
-                else {
-                    continue;
+                let parsed = match super::config::parse_load_configuration(&bytes) {
+                    Ok(parsed) => parsed,
+                    Err(message) => {
+                        diagnostics.push(super::config::config_diagnostic(
+                            &config_file,
+                            site.source_range.as_ref(),
+                            message,
+                        ));
+                        continue;
+                    }
                 };
-                (
-                    scripts_arr
-                        .iter()
-                        .filter_map(|item| item.as_str().map(str::to_string))
-                        .collect(),
-                    // The config declares the language per entry; no per-call
-                    // tag constraint is known here.
-                    None,
-                )
+                let tag = parsed
+                    .language_id
+                    .as_deref()
+                    .and_then(crate::deploy::tags::from_metacall_tag);
+                let base = super::config::script_base(&config_file, &parsed, root);
+                (parsed.scripts.clone(), tag, base)
             }
             _ => continue,
         };
@@ -170,7 +166,7 @@ where
             .or_default();
         for script in scripts {
             let Some(file_idx) =
-                resolve_script_to_file(root, &script, &site.source_file, &path_to_idx)
+                resolve_script_to_file(&base, &script, &site.source_file, &path_to_idx)
             else {
                 continue;
             };
