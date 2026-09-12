@@ -5,6 +5,8 @@ mod integration {
     #[cfg(feature = "metacall-deploy")]
     mod deploy_client_call_test;
     #[cfg(feature = "metacall-deploy")]
+    mod deploy_contracts_test;
+    #[cfg(feature = "metacall-deploy")]
     mod deploy_edge_cases_test;
     #[cfg(feature = "metacall-deploy")]
     mod deploy_mixed_test;

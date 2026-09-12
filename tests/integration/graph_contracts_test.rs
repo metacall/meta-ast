@@ -4,7 +4,7 @@
 //! second copy of either is the defect. The scan is narrow: it looks for the
 //! exact expression each rule is written with.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use meta_ast::LangId;
 use meta_ast::graph::{CodeGraph, EdgeKind};
@@ -176,7 +176,7 @@ fn graph_output_is_deterministic() {
 #[test]
 fn client_call_resolution_indexes_extractions_by_path() {
     let source = read_source("src/deploy/client_call.rs");
-    let enclosing = function_body(&source, "fn enclosing_symbol<F>(");
+    let enclosing = function_body(&source, "fn enclosing_symbol(");
     assert!(
         !enclosing.contains(".find(|file| file.path"),
         "enclosing_symbol must take its file from an index built once, not a per-call scan"

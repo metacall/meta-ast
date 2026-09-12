@@ -23,12 +23,22 @@ fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// Relative to the crate root, so every exported path stays project relative
+/// and the golden is the same on any checkout.
 fn fixture() -> PathBuf {
-    repository_root().join("tests/fixtures/python")
+    PathBuf::from("tests/fixtures/python")
 }
 
 fn golden_path() -> PathBuf {
     repository_root().join("tests/fixtures/shard/golden.json")
+}
+
+/// Replaces the checkout prefix, because the exporter records the path it was
+/// handed and the golden must be the same on any machine.
+fn portable(text: &str) -> String {
+    let root = repository_root();
+    let root = root.to_string_lossy();
+    text.replace(root.as_ref(), "<root>")
 }
 
 /// Exports the fixture and returns every artifact as text, keyed by name.
@@ -78,13 +88,16 @@ fn export(root: &Path) -> BTreeMap<String, String> {
     let mut document = BTreeMap::new();
     document.insert(
         "header.json".to_string(),
-        String::from_utf8(header).unwrap(),
+        portable(&String::from_utf8(header).unwrap()),
     );
     document.insert(
         "manifest.jsonl".to_string(),
-        String::from_utf8(manifest).unwrap(),
+        portable(&String::from_utf8(manifest).unwrap()),
     );
-    document.insert(SHARD_NAME.to_string(), String::from_utf8(payload).unwrap());
+    document.insert(
+        SHARD_NAME.to_string(),
+        portable(&String::from_utf8(payload).unwrap()),
+    );
     document
 }
 

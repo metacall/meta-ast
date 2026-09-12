@@ -54,14 +54,24 @@ fn file_extraction_is_constructed_through_one_constructor() {
     );
 
     let model = read_source("src/model/mod.rs");
-    assert!(
-        model.contains("pub fn empty("),
-        "the constructor stays public"
+    assert_eq!(
+        model.matches("pub fn empty(").count(),
+        1,
+        "exactly one constructor builds a file extraction"
     );
-    assert!(
-        model.contains("#[cfg(feature = \"metacall-deploy\")]\n            call_sites:"),
-        "the gated field is set inside the constructor"
-    );
+    // Every gated field must be set inside that constructor. A gated field
+    // added to the struct but missed here would break the feature matrix.
+    for (feature, field) in [
+        ("metacall-deploy", "call_sites"),
+        ("dataflow", "data_nodes"),
+        ("dataflow", "flow_edges"),
+    ] {
+        let marker = format!("#[cfg(feature = \"{feature}\")]\n            {field}:");
+        assert!(
+            model.contains(&marker),
+            "the constructor must set the gated field {field}"
+        );
+    }
 }
 
 #[test]
