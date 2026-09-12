@@ -90,10 +90,15 @@ pub struct GraphArgs {
     #[arg(long)]
     pub html: bool,
 
-    /// Also emit a portable datagraph.json export (requires --features dataflow)
+    /// Also emit a portable datagraph export (requires --features dataflow)
     #[cfg(feature = "dataflow")]
     #[arg(long)]
     pub datagraph: bool,
+
+    /// Output file for the datagraph export (defaults to <output stem>.datagraph.json)
+    #[cfg(feature = "dataflow")]
+    #[arg(long)]
+    pub datagraph_output: Option<std::path::PathBuf>,
 
     /// Enter watch mode: monitor the project and re-analyze on file changes
     #[cfg(feature = "watch")]

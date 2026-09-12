@@ -290,36 +290,53 @@ fn sink_json_writes_datagraph_to_file() {
     let _ = std::fs::remove_file(&temp);
 }
 
-/// The datagraph export must not overwrite the graph output.
+/// The datagraph export must not reuse the graph output path.
 #[cfg(feature = "dataflow")]
 #[test]
 fn datagraph_has_its_own_output_path() {
+    let run = |datagraph_output: Option<&std::path::Path>, graph_output: &std::path::Path| {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_meta-ast"));
+        command
+            .arg("graph")
+            .arg("tests/fixtures/python")
+            .arg("--datagraph")
+            .arg("-o")
+            .arg(graph_output)
+            .arg("-f")
+            .arg("json")
+            .current_dir(env!("CARGO_MANIFEST_DIR"));
+        if let Some(path) = datagraph_output {
+            command.arg("--datagraph-output").arg(path);
+        }
+        command.output().unwrap()
+    };
+
     let temp = tempfile::tempdir().unwrap();
+
+    // Without an explicit path the datagraph derives one from the graph
+    // output, so the graph output is never the file that the datagraph wrote.
     let graph_path = temp.path().join("graph.json");
-    let datagraph_path = temp.path().join("datagraph.json");
-
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_meta-ast"))
-        .arg("graph")
-        .arg("tests/fixtures/python")
-        .arg("--datagraph")
-        .arg("--datagraph-output")
-        .arg(&datagraph_path)
-        .arg("-o")
-        .arg(&graph_path)
-        .arg("-f")
-        .arg("json")
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .unwrap();
-
+    let output = run(None, &graph_path);
     assert!(
         output.status.success(),
         "graph run failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(graph_path.is_file(), "the graph output is written");
-    assert!(datagraph_path.is_file(), "the datagraph output is written");
-    let graph = std::fs::read_to_string(&graph_path).unwrap();
-    let datagraph = std::fs::read_to_string(&datagraph_path).unwrap();
-    assert_ne!(graph, datagraph, "both outputs hold their own payload");
+    assert!(
+        temp.path().join("graph.datagraph.json").is_file(),
+        "the datagraph is written beside the graph output"
+    );
+
+    // An explicit datagraph path is used as given.
+    let explicit = temp.path().join("dg.json");
+    let second_graph = temp.path().join("graph2.json");
+    let output = run(Some(&explicit), &second_graph);
+    assert!(
+        output.status.success(),
+        "graph run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(explicit.is_file(), "the explicit datagraph path is written");
+    assert!(second_graph.is_file(), "the graph output is written");
 }

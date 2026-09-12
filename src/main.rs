@@ -161,9 +161,21 @@ fn main() -> anyhow::Result<()> {
                     "Exporting datagraph"
                 );
 
-                let output_path = args
-                    .output
-                    .unwrap_or_else(|| std::path::PathBuf::from("datagraph.json"));
+                // The datagraph has its own path. Reusing -o would make the two
+                // exports overwrite each other, and deriving only the file name
+                // would drop the graph output's directory.
+                let output_path = match (&args.datagraph_output, &args.output) {
+                    (Some(explicit), _) => explicit.clone(),
+                    (None, Some(graph_output)) => {
+                        let stem = graph_output
+                            .file_stem()
+                            .map(|stem| stem.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "datagraph".to_string());
+                        graph_output.with_file_name(format!("{stem}.datagraph.json"))
+                    }
+                    (None, None) => std::path::PathBuf::from("datagraph.json"),
+                };
+                tracing::info!(path = %output_path.display(), "Writing datagraph export");
                 let sink = meta_ast::sink::JsonSink::new(Some(output_path));
                 sink.emit(&export)?;
             }
