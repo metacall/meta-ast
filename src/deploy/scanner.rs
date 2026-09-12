@@ -38,10 +38,6 @@ pub struct CallSite {
     pub confidence: f32,
 }
 
-/// Load entry point suffixes: `metacall_load_from_<suffix>` in the script
-/// ports, `<Suffix>` after `LoadFrom` in Go, and `from_<suffix>` in the Rust port.
-const LOAD_SUFFIXES: [&str; 5] = ["file", "single_file", "memory", "package", "configuration"];
-
 /// Exact client call names across the ports.
 const CLIENT_NAMES: [&str; 20] = [
     "metacall",

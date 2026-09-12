@@ -406,10 +406,10 @@ fn parse_version_from_lockfile(path: &Path, package: &str) -> Option<String> {
             if let Some(version) = version_assignment(trimmed) {
                 return Some(version);
             }
-            if trimmed.contains("==") || trimmed.contains(">=") || trimmed.contains("~=") {
-                if let Some(version) = extract_semver(trimmed) {
-                    return Some(version);
-                }
+            if (trimmed.contains("==") || trimmed.contains(">=") || trimmed.contains("~="))
+                && let Some(version) = extract_semver(trimmed)
+            {
+                return Some(version);
             }
             inside_entry = true;
             continue;

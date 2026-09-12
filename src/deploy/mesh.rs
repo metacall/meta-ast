@@ -306,9 +306,8 @@ pub fn generate_mesh_annotation(
 
     // Canonical order: a caller reads the same document for the same tree.
     for unit in &mut deployment_units {
-        unit.symbols.sort_by(|a, b| {
-            (&a.file, &a.name, &a.kind).cmp(&(&b.file, &b.name, &b.kind))
-        });
+        unit.symbols
+            .sort_by(|a, b| (&a.file, &a.name, &a.kind).cmp(&(&b.file, &b.name, &b.kind)));
     }
     cross_language_edges.sort_by(|a, b| {
         (a.from_unit, a.to_unit, &a.from_language, &a.to_language).cmp(&(

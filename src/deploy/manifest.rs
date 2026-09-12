@@ -148,12 +148,6 @@ pub fn generate_pod_manifest(
         .collect();
 
     // Mark cut edges that weren't already in inter_pod_edges as rpc_stub edges.
-    let inter_pod_pairs: std::collections::HashSet<(usize, usize)> = partition
-        .inter_pod_edges
-        .iter()
-        .map(|ip| (ip.from_pod, ip.to_pod))
-        .collect();
-
     // Every cut pair must surface as one `rpc_stub` edge (ADR 0003: a forced
     // split is only safe if the call boundary is explicitly represented). The
     // pair carries every annotation, and a repeated pair does not add a stub.
@@ -258,6 +252,41 @@ mod tests {
             file_languages: HashMap::from([(py, LangId::Python), (js, LangId::JavaScript)]),
         };
         (partition, graph)
+    }
+
+    #[test]
+    fn pod_file_without_a_graph_node_is_counted() {
+        let (mut partition, graph) = test_partition();
+        let missing = FileId::new(99).unwrap();
+        partition.pods[0].files.push(missing);
+
+        let metrics = vec![
+            PodMetrics {
+                total_ast_nodes: 1,
+                file_count: 1,
+                symbol_count: 0,
+            },
+            PodMetrics {
+                total_ast_nodes: 1,
+                file_count: 1,
+                symbol_count: 0,
+            },
+        ];
+
+        let manifest = generate_pod_manifest(&partition, &metrics, &[], &HashMap::new(), &graph);
+
+        assert_eq!(
+            manifest.metrics.dropped_files, 1,
+            "a pod file with no graph node must be counted"
+        );
+        assert!(
+            !manifest.deployments[0]
+                .files
+                .iter()
+                .any(|file| file.contains("99")),
+            "the missing file must not appear in the deployment: {:?}",
+            manifest.deployments[0].files
+        );
     }
 
     fn cut(reason: CutReason, confidence: f32) -> CutEdge {
