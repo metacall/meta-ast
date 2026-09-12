@@ -8,6 +8,7 @@
 //! symbol listing is needed (e.g. inspect mode); skips the import and
 //! reference query passes, roughly halving per-file extraction time.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
@@ -105,16 +106,96 @@ pub fn extract_with_id_gen(
     opts: &ExtractOptions,
     id_generators: &ExtractionIdGenerators,
 ) -> ExtractionResult {
-    let mut file_extractions: Vec<_> = files
+    // Phase one parses in parallel with file-local numbering, so no atomic
+    // ordering reaches the output. Phase two numbers the files in path order.
+    let mut file_extractions: Vec<FileExtraction> = files
         .par_iter()
-        .map(|(path, lang)| extract_single_file(path, lang, id_generators, opts))
+        .map(|(path, lang)| {
+            let local = ExtractionIdGenerators::new();
+            extract_single_file(path, lang, &local, opts)
+        })
         .collect();
 
     file_extractions.sort_by(|a, b| a.path.cmp(&b.path));
 
+    for file in &mut file_extractions {
+        renumber(file, id_generators);
+    }
+
     ExtractionResult {
         files: file_extractions,
     }
+}
+
+/// Map the file-local identifiers onto the shared generator.
+///
+/// The new numbering follows the symbol and data node order inside the file,
+/// which is deterministic for identical input.
+fn renumber(file: &mut FileExtraction, id_generators: &ExtractionIdGenerators) {
+    let symbol_map = if file.symbols.is_empty() {
+        HashMap::new()
+    } else {
+        let counter = IdGenerator::<SymbolId>::with_start(
+            id_generators.symbols.reserve(file.symbols.len() as u32),
+        );
+        let mut map = HashMap::with_capacity(file.symbols.len());
+        for symbol in &mut file.symbols {
+            let next = counter.next();
+            map.insert(symbol.id.to_raw(), next.to_raw());
+            symbol.id = next;
+        }
+        map
+    };
+
+    #[cfg(feature = "dataflow")]
+    renumber_data_nodes(file, id_generators, &symbol_map);
+
+    #[cfg(not(feature = "dataflow"))]
+    drop(symbol_map);
+}
+
+#[cfg(feature = "dataflow")]
+fn renumber_data_nodes(
+    file: &mut FileExtraction,
+    id_generators: &ExtractionIdGenerators,
+    symbol_map: &HashMap<u32, u32>,
+) {
+    use crate::model::DataNodeId;
+
+    if file.data_nodes.is_empty() {
+        file.flow_edges.clear();
+        return;
+    }
+
+    let counter = IdGenerator::<DataNodeId>::with_start(
+        id_generators.data_nodes.reserve(file.data_nodes.len() as u32),
+    );
+    let mut node_map = HashMap::with_capacity(file.data_nodes.len());
+    for node in &mut file.data_nodes {
+        let next = counter.next();
+        node_map.insert(node.id.to_raw(), next.to_raw());
+        node.id = next;
+        node.symbol_id = node
+            .symbol_id
+            .and_then(|id| symbol_map.get(&id.to_raw()).copied())
+            .and_then(SymbolId::new);
+    }
+
+    let node_ids: HashMap<u32, DataNodeId> = node_map
+        .iter()
+        .filter_map(|(&old, &new)| Some((old, DataNodeId::new(new)?)))
+        .collect();
+    file.flow_edges.retain_mut(|edge| {
+        let (Some(source), Some(target)) = (
+            node_ids.get(&edge.source.to_raw()).copied(),
+            node_ids.get(&edge.target.to_raw()).copied(),
+        ) else {
+            return false;
+        };
+        edge.source = source;
+        edge.target = target;
+        true
+    });
 }
 
 fn extract_single_file(

@@ -85,6 +85,23 @@ impl<T> IdGenerator<T> {
             .expect("IdGenerator exhausted u32 space (allocated > u32::MAX ids)");
         T::from(nz)
     }
+
+    /// Reserve `count` contiguous identifiers and return the first slot.
+    ///
+    /// A caller that numbers a whole unit of work reserves one block, so the
+    /// block order follows the caller's order and never the thread timing.
+    /// An empty reservation returns the next slot without consuming it.
+    pub fn reserve(&self, count: u32) -> u32 {
+        if count == 0 {
+            return self.counter.load(Ordering::SeqCst);
+        }
+        let start = self.counter.fetch_add(count, Ordering::SeqCst);
+        assert!(
+            start != 0 && start.checked_add(count - 1).is_some(),
+            "IdGenerator exhausted u32 space (reserved > u32::MAX ids)"
+        );
+        start
+    }
 }
 
 impl<T> Default for IdGenerator<T> {
