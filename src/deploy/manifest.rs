@@ -42,8 +42,8 @@ pub struct ManifestEdge {
     pub kind: String,
     pub confidence: f32,
     pub is_cross_language: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cut_annotation: Option<CutAnnotation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cut_annotations: Vec<CutAnnotation>,
 }
 
 /// Global aggregate metrics for the entire manifest.
@@ -52,6 +52,9 @@ pub struct GlobalMetrics {
     pub total_pods: usize,
     pub cross_language_edges: usize,
     pub total_ast_nodes: usize,
+    /// Pod files the graph or the metrics pass could not resolve.
+    #[serde(default)]
+    pub dropped_files: usize,
 }
 
 /// Generate a `PodManifest` from partition, metrics, cuts, and dependencies.
@@ -63,25 +66,42 @@ pub fn generate_pod_manifest(
     graph: &CodeGraph,
 ) -> PodManifest {
     let mut deployments = Vec::with_capacity(partition.pods.len());
+    let mut dropped_files = 0usize;
 
     for (i, pod) in partition.pods.iter().enumerate() {
         let tag = crate::deploy::tags::metacall_tag(pod.language);
+        let mut dropped = 0usize;
         let files: Vec<String> = pod
             .files
             .iter()
-            .filter_map(|fid| {
-                graph
-                    .file_node(*fid)
-                    .map(|f| crate::input::portable_path(&f.path))
+            .filter_map(|fid| match graph.file_node(*fid) {
+                Some(file) => Some(crate::input::portable_path(&file.path)),
+                None => {
+                    dropped += 1;
+                    tracing::warn!(
+                        pod = pod.id,
+                        file = fid.to_raw(),
+                        "pod file has no graph node"
+                    );
+                    None
+                }
             })
             .collect();
 
         let deps = dependencies.get(&pod.id).cloned().unwrap_or_default();
-        let pm = pod_metrics.get(i).cloned().unwrap_or(PodMetrics {
-            total_ast_nodes: 0,
-            file_count: 0,
-            symbol_count: 0,
-        });
+        let pm = match pod_metrics.get(i).cloned() {
+            Some(metrics) => metrics,
+            None => {
+                dropped += 1;
+                tracing::warn!(pod = pod.id, "pod has no metrics entry");
+                PodMetrics {
+                    total_ast_nodes: 0,
+                    file_count: 0,
+                    symbol_count: 0,
+                }
+            }
+        };
+        dropped_files += dropped;
 
         deployments.push(PodDeployment {
             id: pod.id,
@@ -92,10 +112,14 @@ pub fn generate_pod_manifest(
         });
     }
 
-    // Build inter-pod edges, annotating cuts where applicable.
-    let mut cut_lookup: HashMap<(usize, usize), &CutAnnotation> = HashMap::new();
+    // Build inter-pod edges, annotating cuts where applicable. A pod pair can
+    // carry more than one cut, so the annotations merge into a list.
+    let mut cut_lookup: HashMap<(usize, usize), Vec<CutAnnotation>> = HashMap::new();
     for cut in cuts {
-        cut_lookup.insert((cut.from_pod, cut.to_pod), &cut.annotation);
+        cut_lookup
+            .entry((cut.from_pod, cut.to_pod))
+            .or_default()
+            .push(cut.annotation.clone());
     }
 
     let mut edges: Vec<ManifestEdge> = partition
@@ -108,72 +132,67 @@ pub fn generate_pod_manifest(
                 crate::graph::EdgeKind::Ownership => "ownership".to_string(),
                 crate::graph::EdgeKind::Flow => "flow".to_string(),
             };
-            let annotation = cut_lookup
+            let annotations = cut_lookup
                 .get(&(ip.from_pod, ip.to_pod))
-                .map(|a| (*a).clone());
+                .cloned()
+                .unwrap_or_default();
             ManifestEdge {
                 from_pod: ip.from_pod,
                 to_pod: ip.to_pod,
                 kind,
                 confidence: ip.confidence,
                 is_cross_language: ip.is_cross_language,
-                cut_annotation: annotation,
+                cut_annotations: annotations,
             }
         })
         .collect();
 
     // Mark cut edges that weren't already in inter_pod_edges as rpc_stub edges.
-    let inter_pod_pairs: std::collections::HashSet<(usize, usize)> = partition
-        .inter_pod_edges
-        .iter()
-        .map(|ip| (ip.from_pod, ip.to_pod))
-        .collect();
-
-    for cut in cuts {
-        // Every cut must surface as a `rpc_stub` edge (ADR 0003: a forced
-        // split is only safe if the call boundary is explicitly represented).
-        // This holds even when an `import` edge for the same pod pair already
-        // exists - the import edge keeps its annotation, and a distinct
-        // `rpc_stub` edge records the split boundary.
-        edges.push(ManifestEdge {
-            from_pod: cut.from_pod,
-            to_pod: cut.to_pod,
-            kind: "rpc_stub".to_string(),
-            confidence: cut.annotation.original_confidence,
-            is_cross_language: matches!(
-                cut.annotation.cut_reason,
-                crate::deploy::cut::CutReason::CrossLanguageScc
-            ),
-            cut_annotation: Some(cut.annotation.clone()),
-        });
-
-        // Also annotate the matching import/reference edge so the existing
-        // cross-language link carries the cut reason.
-        if inter_pod_pairs.contains(&(cut.from_pod, cut.to_pod)) {
-            for edge in &mut edges {
-                if edge.from_pod == cut.from_pod
-                    && edge.to_pod == cut.to_pod
-                    && edge.cut_annotation.is_none()
-                {
-                    edge.cut_annotation = Some(cut.annotation.clone());
-                }
-            }
+    // Every cut pair must surface as one `rpc_stub` edge (ADR 0003: a forced
+    // split is only safe if the call boundary is explicitly represented). The
+    // pair carries every annotation, and a repeated pair does not add a stub.
+    for (pair, annotations) in &cut_lookup {
+        if edges
+            .iter()
+            .any(|edge| edge.kind == "rpc_stub" && edge.from_pod == pair.0 && edge.to_pod == pair.1)
+        {
+            continue;
         }
+        let confidence = annotations
+            .iter()
+            .map(|annotation| annotation.original_confidence)
+            .fold(f32::INFINITY, f32::min);
+        edges.push(ManifestEdge {
+            from_pod: pair.0,
+            to_pod: pair.1,
+            kind: "rpc_stub".to_string(),
+            confidence,
+            is_cross_language: annotations.iter().any(|annotation| {
+                matches!(
+                    annotation.cut_reason,
+                    crate::deploy::cut::CutReason::CrossLanguageScc
+                )
+            }),
+            cut_annotations: annotations.clone(),
+        });
     }
 
     edges.sort_by(|a, b| (a.from_pod, a.to_pod, &a.kind).cmp(&(b.from_pod, b.to_pod, &b.kind)));
-    let total_ast_nodes = pod_metrics.iter().map(|m| m.total_ast_nodes).sum();
+    let total_ast_nodes = pod_metrics.iter().fold(0usize, |total, metrics| {
+        total.saturating_add(metrics.total_ast_nodes)
+    });
     let cross_language_edges = edges.iter().filter(|e| e.is_cross_language).count();
     let total_pods = deployments.len();
 
     PodManifest {
-        version: "1.0".to_string(),
+        version: "1.1".to_string(),
         deployments,
         edges,
         metrics: GlobalMetrics {
             total_pods,
             cross_language_edges,
             total_ast_nodes,
+            dropped_files,
         },
     }
 }
@@ -233,6 +252,41 @@ mod tests {
             file_languages: HashMap::from([(py, LangId::Python), (js, LangId::JavaScript)]),
         };
         (partition, graph)
+    }
+
+    #[test]
+    fn pod_file_without_a_graph_node_is_counted() {
+        let (mut partition, graph) = test_partition();
+        let missing = FileId::new(99).unwrap();
+        partition.pods[0].files.push(missing);
+
+        let metrics = vec![
+            PodMetrics {
+                total_ast_nodes: 1,
+                file_count: 1,
+                symbol_count: 0,
+            },
+            PodMetrics {
+                total_ast_nodes: 1,
+                file_count: 1,
+                symbol_count: 0,
+            },
+        ];
+
+        let manifest = generate_pod_manifest(&partition, &metrics, &[], &HashMap::new(), &graph);
+
+        assert_eq!(
+            manifest.metrics.dropped_files, 1,
+            "a pod file with no graph node must be counted"
+        );
+        assert!(
+            !manifest.deployments[0]
+                .files
+                .iter()
+                .any(|file| file.contains("99")),
+            "the missing file must not appear in the deployment: {:?}",
+            manifest.deployments[0].files
+        );
     }
 
     fn cut(reason: CutReason, confidence: f32) -> CutEdge {

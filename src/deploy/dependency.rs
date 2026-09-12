@@ -120,10 +120,13 @@ fn classify_python(external: &ExternalNode, root: &Path) -> ExternalClassificati
         root.join("Pipfile.lock"),
     ];
     for lf in &lockfiles {
-        if lf.exists() {
+        if !lf.exists() {
+            continue;
+        }
+        if let Some(version) = parse_version_from_lockfile(lf, &external.raw_path) {
             return ExternalClassification::Classified {
                 package_name: external.raw_path.clone(),
-                version: parse_version_from_lockfile(lf, &external.raw_path),
+                version: Some(version),
                 language: LangId::Python,
                 source: DependencySource::Lockfile,
             };
@@ -177,10 +180,13 @@ fn classify_node_ecosystem(external: &ExternalNode, root: &Path) -> ExternalClas
         root.join("pnpm-lock.yaml"),
     ];
     for lf in &lockfiles {
-        if lf.exists() {
+        if !lf.exists() {
+            continue;
+        }
+        if let Some(version) = parse_version_from_lockfile(lf, &external.raw_path) {
             return ExternalClassification::Classified {
                 package_name: external.raw_path.clone(),
-                version: parse_version_from_lockfile(lf, &external.raw_path),
+                version: Some(version),
                 language: external.language,
                 source: DependencySource::Lockfile,
             };
@@ -205,10 +211,12 @@ fn classify_node_ecosystem(external: &ExternalNode, root: &Path) -> ExternalClas
                 continue;
             }
             let lock_path = subdir.join("package-lock.json");
-            if lock_path.exists() {
+            if lock_path.exists()
+                && let Some(version) = parse_version_from_lockfile(&lock_path, &external.raw_path)
+            {
                 return ExternalClassification::Classified {
                     package_name: external.raw_path.clone(),
-                    version: parse_version_from_lockfile(&lock_path, &external.raw_path),
+                    version: Some(version),
                     language: external.language,
                     source: DependencySource::Lockfile,
                 };
@@ -260,10 +268,12 @@ fn classify_rust(external: &ExternalNode, root: &Path) -> ExternalClassification
 
 fn classify_go(external: &ExternalNode, root: &Path) -> ExternalClassification {
     let lf = root.join("go.sum");
-    if lf.exists() {
+    if lf.exists()
+        && let Some(version) = parse_version_from_go_sum(&lf, &external.raw_path)
+    {
         return ExternalClassification::Classified {
             package_name: external.raw_path.clone(),
-            version: parse_version_from_go_sum(&lf, &external.raw_path),
+            version: Some(version),
             language: LangId::Go,
             source: DependencySource::Lockfile,
         };
@@ -273,7 +283,7 @@ fn classify_go(external: &ExternalNode, root: &Path) -> ExternalClassification {
     if mf.exists() {
         return ExternalClassification::Classified {
             package_name: external.raw_path.clone(),
-            version: None,
+            version: parse_version_from_go_mod(&mf, &external.raw_path),
             language: LangId::Go,
             source: DependencySource::Manifest,
         };
@@ -344,18 +354,76 @@ fn classify_c_cpp_best_effort(external: &ExternalNode, root: &Path) -> ExternalC
 /// Best-effort version extraction from a lockfile by searching for the
 /// package name followed by a version-like string. Returns None if the
 /// package isn't found or the file can't be read.
+/// True when the line names exactly this entry, in any lockfile grammar:
+/// `name = "x"`, `x==1.2.3`, `"x": {`, `x (1.2.3)`, `"x@^1.2.3":`.
+fn names_entry(line: &str, package: &str) -> bool {
+    let trimmed = line.trim().trim_start_matches('-').trim();
+    for token in trimmed.split(|c: char| {
+        matches!(
+            c,
+            '=' | ' ' | '"' | '(' | ')' | '[' | ']' | ':' | ',' | '\'' | '{'
+        )
+    }) {
+        let token = token.trim();
+        if token == package {
+            return true;
+        }
+        if let Some(rest) = token.strip_prefix(package)
+            && matches!(
+                rest.chars().next(),
+                Some('@') | Some('^') | Some('~') | Some('>')
+            )
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// A `version = "x.y.z"` style assignment, whatever the surrounding syntax.
+fn version_assignment(line: &str) -> Option<String> {
+    let trimmed = line.trim().trim_start_matches('-').trim();
+    let rest = trimmed.strip_prefix("version")?.trim_start();
+    if !(rest.starts_with('=') || rest.starts_with(':') || rest.starts_with('"')) {
+        return None;
+    }
+    extract_semver(rest)
+}
+
 fn parse_version_from_lockfile(path: &Path, package: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
-    // Search for the package name, then grab the next quoted/hyphenated
-    // version-like token on the same or next line.
+    let mut inside_entry = false;
+
     for line in content.lines() {
-        if line.contains(package) {
-            // Look for a semver-like pattern on this line or the next few.
-            for candidate in content.lines().skip_while(|l| !l.contains(package)).take(5) {
-                if let Some(v) = extract_semver(candidate) {
-                    return Some(v);
-                }
+        let trimmed = line.trim();
+
+        // A new section or entry header closes the open entry.
+        if trimmed.starts_with('[') {
+            inside_entry = false;
+        }
+
+        if names_entry(trimmed, package) {
+            if let Some(version) = version_assignment(trimmed) {
+                return Some(version);
             }
+            if (trimmed.contains("==") || trimmed.contains(">=") || trimmed.contains("~="))
+                && let Some(version) = extract_semver(trimmed)
+            {
+                return Some(version);
+            }
+            inside_entry = true;
+            continue;
+        }
+
+        if !inside_entry {
+            continue;
+        }
+        if let Some(version) = version_assignment(trimmed) {
+            return Some(version);
+        }
+        // A blank line ends a TOML entry that carried no version.
+        if trimmed.is_empty() {
+            inside_entry = false;
         }
     }
     None
@@ -398,14 +466,47 @@ fn parse_version_from_cargo_lock(path: &Path, package: &str) -> Option<String> {
 
 fn parse_version_from_go_sum(path: &Path, package: &str) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
-    // go.sum format: <module> <version> <hash>
-    // Take the first line matching the package.
+    // go.sum format: <module> <version> <hash>, one line per module version.
     for line in content.lines() {
-        if line.starts_with(package) {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                return Some(parts[1].to_string());
-            }
+        let mut parts = line.split_whitespace();
+        if parts.next() != Some(package) {
+            continue;
+        }
+        if let Some(version) = parts.next() {
+            return Some(version.to_string());
+        }
+    }
+    None
+}
+
+/// Read a `require` line, in single or block form, and drop the `v` prefix.
+fn parse_version_from_go_mod(path: &Path, module: &str) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut inside_block = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("require (") {
+            inside_block = true;
+            continue;
+        }
+        if inside_block && trimmed.starts_with(')') {
+            inside_block = false;
+            continue;
+        }
+        let entry = if let Some(rest) = trimmed.strip_prefix("require ") {
+            rest
+        } else if inside_block {
+            trimmed
+        } else {
+            continue;
+        };
+        let mut parts = entry.split_whitespace();
+        if parts.next() != Some(module) {
+            continue;
+        }
+        if let Some(version) = parts.next() {
+            return Some(version.trim_start_matches('v').to_string());
         }
     }
     None

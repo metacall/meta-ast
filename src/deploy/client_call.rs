@@ -23,6 +23,24 @@ pub(crate) fn resolve_script_to_file(
     source_file: &Path,
     path_to_idx: &HashMap<PathBuf, NodeIndex>,
 ) -> Option<NodeIndex> {
+    if let Some(idx) = resolve_script_candidate(root, script, source_file, path_to_idx) {
+        return Some(idx);
+    }
+    // A script written on Windows uses backslashes, which are not separators on
+    // Unix, so the normalized form is a second candidate.
+    let normalized = script.replace('\\', "/");
+    if normalized != script {
+        return resolve_script_candidate(root, &normalized, source_file, path_to_idx);
+    }
+    None
+}
+
+fn resolve_script_candidate(
+    root: &Path,
+    script: &str,
+    source_file: &Path,
+    path_to_idx: &HashMap<PathBuf, NodeIndex>,
+) -> Option<NodeIndex> {
     // Strategy 1: root-relative.
     let candidate = root.join(script);
     if let Some(&idx) = path_to_idx.get(&candidate) {

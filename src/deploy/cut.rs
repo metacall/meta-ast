@@ -129,14 +129,22 @@ pub fn find_cross_language_cuts(
         }
 
         if let Some((src, dst, conf)) = best_edge {
-            let from_pod = file_to_pod.get(&src).copied().unwrap_or(0);
-            let to_pod = file_to_pod.get(&dst).copied().unwrap_or(0);
+            let (Some(&from_pod), Some(&to_pod)) = (file_to_pod.get(&src), file_to_pod.get(&dst))
+            else {
+                // A cut anchored at pod zero would blame an unrelated pod.
+                tracing::warn!(
+                    from = src.to_raw(),
+                    to = dst.to_raw(),
+                    "cut skipped: an endpoint has no pod"
+                );
+                continue;
+            };
             cuts.push(CutEdge {
                 from_pod,
                 to_pod,
                 annotation: CutAnnotation {
-                    from_file: src.to_raw().to_string(),
-                    to_file: dst.to_raw().to_string(),
+                    from_file: file_label(graph, src),
+                    to_file: file_label(graph, dst),
                     cut_reason: CutReason::CrossLanguageScc,
                     original_confidence: conf,
                 },
@@ -145,6 +153,15 @@ pub fn find_cross_language_cuts(
     }
 
     cuts
+}
+
+/// A portable path for a file node. A missing node keeps the identifier form so
+/// the anomaly is visible instead of silently pointing at another file.
+fn file_label(graph: &CodeGraph, file_id: FileId) -> String {
+    graph
+        .file_node(file_id)
+        .map(|file| crate::input::portable_path(&file.path))
+        .unwrap_or_else(|| format!("file#{}", file_id.to_raw()))
 }
 
 /// Find the weakest internal edge in an oversized pod and mark it for splitting.
@@ -190,8 +207,8 @@ pub fn find_oversized_pod_cut(pod: &Pod, graph: &CodeGraph, max_size: usize) -> 
         from_pod: pod.id,
         to_pod: pod.id,
         annotation: CutAnnotation {
-            from_file: src.to_raw().to_string(),
-            to_file: dst.to_raw().to_string(),
+            from_file: file_label(graph, src),
+            to_file: file_label(graph, dst),
             cut_reason: CutReason::OversizedPod {
                 pod_size: pod.files.len(),
                 max_size,

@@ -37,7 +37,7 @@ pub struct CrossLanguageEdge {
     pub from_language: String,
     pub to_language: String,
     pub call_site: Option<String>,
-    pub confidence: f64,
+    pub confidence: f32,
 }
 
 #[derive(Serialize, Default)]
@@ -298,11 +298,25 @@ pub fn generate_mesh_annotation(
                     from_language: u_lang.to_string(),
                     to_language: v_lang.to_string(),
                     call_site: call_site_file,
-                    confidence: weight.confidence as f64,
+                    confidence: weight.confidence,
                 });
             }
         }
     }
+
+    // Canonical order: a caller reads the same document for the same tree.
+    for unit in &mut deployment_units {
+        unit.symbols
+            .sort_by(|a, b| (&a.file, &a.name, &a.kind).cmp(&(&b.file, &b.name, &b.kind)));
+    }
+    cross_language_edges.sort_by(|a, b| {
+        (a.from_unit, a.to_unit, &a.from_language, &a.to_language).cmp(&(
+            b.from_unit,
+            b.to_unit,
+            &b.from_language,
+            &b.to_language,
+        ))
+    });
 
     let total_units = deployment_units.len();
     let mut language_list: Vec<String> = languages.into_iter().collect();

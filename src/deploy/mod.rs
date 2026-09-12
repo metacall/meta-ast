@@ -121,6 +121,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
             add_metacall_edge(
                 &base,
                 from_idx,
+                CallSiteVariant::LoadFromConfiguration,
                 target_lang,
                 script,
                 site.confidence,
@@ -142,12 +143,31 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
             continue;
         };
         let Some(target_lang) = crate::deploy::tags::from_metacall_tag(target_lang_tag) else {
+            diagnostics.push(Diagnostic {
+                path: site.source_file.clone(),
+                severity: Severity::Warning,
+                message: format!("unknown MetaCall load tag '{target_lang_tag}'"),
+                source_range: site.source_range.clone(),
+            });
             continue;
         };
+        if !crate::deploy::tags::has_loader(target_lang) {
+            diagnostics.push(Diagnostic {
+                path: site.source_file.clone(),
+                severity: Severity::Warning,
+                message: format!(
+                    "no MetaCall loader for language '{}', the tag '{}' is a meta-ast tag",
+                    target_lang.as_ref(),
+                    target_lang_tag
+                ),
+                source_range: site.source_range.clone(),
+            });
+        }
         for script in &site.scripts {
             add_metacall_edge(
                 &config.root,
                 from_idx,
+                site.variant.clone(),
                 target_lang,
                 script,
                 site.confidence,
@@ -201,11 +221,14 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
         cut::find_cross_language_cuts(&analysis.scc, &analysis.graph, &lang_map, &partition);
 
     // 10. Rebalance oversized pods
-    for pod in &partition.pods {
-        if let Some(cut) = cut::find_oversized_pod_cut(pod, &analysis.graph, config.max_pod_size) {
-            all_cuts.push(cut);
-        }
-    }
+    rebalance_oversized_pods(
+        &partition,
+        &analysis.graph,
+        config.max_pod_size,
+        &config.root,
+        &mut all_cuts,
+        &mut diagnostics,
+    );
 
     // 11. Resolve external dependencies and scope per pod
     let dependencies = dependency::resolve_dependencies(&analysis.graph, &partition, &config.root);
@@ -226,14 +249,18 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     if !config.check {
         std::fs::create_dir_all(&config.out)?;
 
-        let manifest_json = serde_json::to_string_pretty(&pod_manifest)?;
+        let extension = config.format.extension();
+        let manifest_text = config.format.serialize(&pod_manifest)?;
         crate::output::write_atomic(
-            &config.out.join("metacall.pods.json"),
-            manifest_json.as_bytes(),
+            &config.out.join(format!("metacall.pods.{extension}")),
+            manifest_text.as_bytes(),
         )?;
 
-        let mesh_json = serde_json::to_string_pretty(&mesh)?;
-        crate::output::write_atomic(&config.out.join("metacall.mesh.json"), mesh_json.as_bytes())?;
+        let mesh_text = config.format.serialize(&mesh)?;
+        crate::output::write_atomic(
+            &config.out.join(format!("metacall.mesh.{extension}")),
+            mesh_text.as_bytes(),
+        )?;
 
         tracing::info!(
             "Generated pod manifest with {} deployments and {} inter-pod edges.",
@@ -312,9 +339,50 @@ fn orphaned_config_diagnostics(root: &Path, call_sites: &[CallSite]) -> Vec<Diag
 /// Edges and external nodes are added through `CodeGraph` helpers so injected
 /// edges obey the same dedup/confidence invariant as builder-constructed ones
 /// and `external_index` stays consistent across repeated loads.
+/// Cut every oversized pod, and report the pods that cannot be cut.
+///
+/// A pod can exceed the limit with no internal edge to cut, for example when a
+/// hand-built partition disagrees with the graph. Staying silent would hide a
+/// deployment unit that the limit was meant to bound.
+fn rebalance_oversized_pods(
+    partition: &crate::deploy::pod::PodPartition,
+    graph: &crate::graph::CodeGraph,
+    max_pod_size: usize,
+    root: &std::path::Path,
+    cuts: &mut Vec<cut::CutEdge>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for pod in &partition.pods {
+        match cut::find_oversized_pod_cut(pod, graph, max_pod_size) {
+            Some(cut) => cuts.push(cut),
+            None if pod.files.len() > max_pod_size => {
+                let path = pod
+                    .files
+                    .first()
+                    .and_then(|fid| graph.file_node(*fid))
+                    .map(|file| file.path.clone())
+                    .unwrap_or_else(|| root.to_path_buf());
+                diagnostics.push(Diagnostic {
+                    path,
+                    severity: Severity::Warning,
+                    message: format!(
+                        "pod {} holds {} files above the limit {} and has no internal edge to cut",
+                        pod.id,
+                        pod.files.len(),
+                        max_pod_size
+                    ),
+                    source_range: None,
+                });
+            }
+            None => {}
+        }
+    }
+}
+
 fn add_metacall_edge(
     base: &std::path::Path,
     from_idx: petgraph::graph::NodeIndex,
+    variant: CallSiteVariant,
     target_lang: crate::language::LangId,
     script: &str,
     confidence: f32,
@@ -327,14 +395,129 @@ fn add_metacall_edge(
         crate::graph::node::NodeData::File(f) => f.path.clone(),
         _ => return,
     };
-    if let Some(to_idx) =
-        client_call::resolve_script_to_file(base, script, &source_file, path_to_idx)
-    {
+
+    // A memory load carries inline code and a package load carries a package
+    // name, so neither may resolve to a project file.
+    let resolved = match variant {
+        CallSiteVariant::LoadFromMemory | CallSiteVariant::LoadFromPackage => None,
+        _ => client_call::resolve_script_to_file(base, script, &source_file, path_to_idx),
+    };
+    if let Some(to_idx) = resolved {
         graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Import, confidence);
         return;
     }
 
     // No match: create or reuse ExternalNode (keeps external_index consistent).
-    let to_idx = graph.get_or_create_external_node(script.to_string(), target_lang);
+    // The code text of a memory load is not a name.
+    let name = match variant {
+        CallSiteVariant::LoadFromMemory => {
+            format!(
+                "<memory:{}>",
+                crate::deploy::tags::metacall_tag(target_lang)
+            )
+        }
+        _ => script.to_string(),
+    };
+    let to_idx = graph.get_or_create_external_node(name, target_lang);
     graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Import, confidence);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deploy::pod::{Pod, PodPartition};
+    use crate::graph::node::{FileNode, NodeData};
+    use crate::language::LangId;
+    use crate::model::{FileId, SnapshotId};
+
+    #[test]
+    fn unsplittable_oversized_pod_is_reported() {
+        let mut graph = crate::graph::CodeGraph::new(SnapshotId::new(1).unwrap());
+        let mut files = Vec::new();
+        for id in 1..=4 {
+            let fid = FileId::new(id).unwrap();
+            let idx = graph.add_node(NodeData::File(FileNode::new(
+                fid,
+                std::path::PathBuf::from(format!("f{id}.py")),
+                LangId::Python,
+                SnapshotId::new(1).unwrap(),
+            )));
+            graph.file_to_index.insert(fid, idx);
+            files.push(fid);
+        }
+        // One pod over the limit, with no dependency edge inside it.
+        let partition = PodPartition {
+            pods: vec![Pod {
+                id: 0,
+                files,
+                language: LangId::Python,
+            }],
+            inter_pod_edges: Vec::new(),
+            file_languages: HashMap::new(),
+        };
+
+        let mut cuts = Vec::new();
+        let mut diagnostics = Vec::new();
+        rebalance_oversized_pods(
+            &partition,
+            &graph,
+            2,
+            std::path::Path::new("."),
+            &mut cuts,
+            &mut diagnostics,
+        );
+
+        assert!(cuts.is_empty());
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(
+            diagnostics[0].message.contains("no internal edge to cut"),
+            "{}",
+            diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn oversized_pod_with_an_internal_edge_is_cut() {
+        let mut graph = crate::graph::CodeGraph::new(SnapshotId::new(1).unwrap());
+        let mut files = Vec::new();
+        let mut indices = Vec::new();
+        for id in 1..=3 {
+            let fid = FileId::new(id).unwrap();
+            let idx = graph.add_node(NodeData::File(FileNode::new(
+                fid,
+                std::path::PathBuf::from(format!("f{id}.py")),
+                LangId::Python,
+                SnapshotId::new(1).unwrap(),
+            )));
+            graph.file_to_index.insert(fid, idx);
+            files.push(fid);
+            indices.push(idx);
+        }
+        graph.add_edge_normalized(indices[0], indices[1], EdgeKind::Import, 0.5);
+
+        let partition = PodPartition {
+            pods: vec![Pod {
+                id: 0,
+                files,
+                language: LangId::Python,
+            }],
+            inter_pod_edges: Vec::new(),
+            file_languages: HashMap::new(),
+        };
+
+        let mut cuts = Vec::new();
+        let mut diagnostics = Vec::new();
+        rebalance_oversized_pods(
+            &partition,
+            &graph,
+            2,
+            std::path::Path::new("."),
+            &mut cuts,
+            &mut diagnostics,
+        );
+
+        assert_eq!(cuts.len(), 1, "the internal edge must be cut");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
 }

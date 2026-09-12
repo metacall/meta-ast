@@ -72,11 +72,17 @@ pub fn compute_pod_metrics(
         let mut symbol_count = 0usize;
 
         for &fid in &pod.files {
-            if let Some(path) = fid_to_path.get(&fid)
-                && let Some(fm) = file_metrics.get(path)
+            match fid_to_path
+                .get(&fid)
+                .and_then(|path| file_metrics.get(path))
             {
-                total_ast_nodes += fm.ast_node_count;
-                symbol_count += fm.symbol_count;
+                Some(metrics) => {
+                    total_ast_nodes = total_ast_nodes.saturating_add(metrics.ast_node_count);
+                    symbol_count = symbol_count.saturating_add(metrics.symbol_count);
+                }
+                None => {
+                    tracing::warn!(pod = pod.id, file = fid.to_raw(), "pod file has no metrics")
+                }
             }
         }
 

@@ -12,8 +12,8 @@ use crate::deploy::manifest::PodManifest;
 /// Verify that every cut edge has a corresponding manifest entry.
 ///
 /// Principles (aligned with ADR 0003):
-/// - Every cut edge must appear in `manifest.edges[]` with `cut_annotation`.
-/// - No non-cut edge may have a `cut_annotation`.
+/// - Every cut edge must appear in `manifest.edges[]` with cut annotations.
+/// - No non-cut edge may carry cut annotations.
 /// - Every cut edge must have `kind: "rpc_stub"`.
 pub fn check_cut_fairness(manifest: &PodManifest, cuts: &[CutEdge]) -> Vec<String> {
     let mut diagnostics = Vec::new();
@@ -22,11 +22,11 @@ pub fn check_cut_fairness(manifest: &PodManifest, cuts: &[CutEdge]) -> Vec<Strin
 
     for cut in cuts {
         let present = manifest.edges.iter().any(|e| {
-            e.from_pod == cut.from_pod && e.to_pod == cut.to_pod && e.cut_annotation.is_some()
+            e.from_pod == cut.from_pod && e.to_pod == cut.to_pod && !e.cut_annotations.is_empty()
         });
         if !present {
             diagnostics.push(format!(
-                "cut edge ({}, {}) missing from manifest or missing cut_annotation",
+                "cut edge ({}, {}) missing from manifest or missing cut annotation",
                 cut.from_pod, cut.to_pod
             ));
         }
@@ -49,9 +49,9 @@ pub fn check_cut_fairness(manifest: &PodManifest, cuts: &[CutEdge]) -> Vec<Strin
     }
 
     for edge in &manifest.edges {
-        if edge.cut_annotation.is_some() && !cut_pairs.contains(&(edge.from_pod, edge.to_pod)) {
+        if !edge.cut_annotations.is_empty() && !cut_pairs.contains(&(edge.from_pod, edge.to_pod)) {
             diagnostics.push(format!(
-                "edge ({}, {}) has cut_annotation but is not in the cut list",
+                "edge ({}, {}) has cut annotations but is not in the cut list",
                 edge.from_pod, edge.to_pod
             ));
         }

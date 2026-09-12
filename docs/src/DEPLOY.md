@@ -7,9 +7,13 @@ Feature-gated. Build with `--features metacall-deploy`.
 The `deploy` subcommand scans polyglot projects for MetaCall load and client call sites. It partitions files into same-language pods, resolves external dependencies from lockfiles, and generates two deployment artifacts:
 
 | Artifact | Description |
-|---|---|
-| `metacall.pods.json` | Pod manifest with deployment units, inter-pod edges, dependency lists, and AST metrics |
+| --- | --- |
+| `metacall.pods.json` | Pod manifest (version 1.1) with deployment units, inter-pod edges, per-pair cut annotations, dependency lists, and AST metrics |
 | `metacall.mesh.json` | Function Mesh topology with SCC deployment units and call-site attribution |
+
+With `-f yaml` the same documents are written as `metacall.pods.yaml` and
+`metacall.mesh.yaml`. MetaCall core reads JSON only, so the YAML form is a
+meta-ast artifact for people and for tooling that prefers YAML.
 
 ## Usage
 
@@ -27,7 +31,7 @@ meta-ast deploy <path> --check
 ### Options
 
 | Flag | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `-o, --out <dir>` | `.` | Directory to write generated artifacts |
 | `-f, --format <json\|yaml>` | `json` | Serialization format |
 | `--check` | off | Fairness check mode: exits non-zero on missing RPC stubs |
@@ -81,7 +85,7 @@ src/deploy/
 ### Supported variants
 
 | Variant | Detected functions |
-|---|---|
+| --- | --- |
 | `LoadFromFile` | `metacall_load_from_file`, `LoadFromFile` (Go), bare `use` import (Rust), `load::from_single_file` (Rust) |
 | `LoadFromMemory` | `metacall_load_from_memory`, `LoadFromMemory` |
 | `LoadFromPackage` | `metacall_load_from_package`, `LoadFromPackage` |
@@ -91,7 +95,7 @@ src/deploy/
 ### Confidence scoring
 
 | Case | Score |
-|---|---|
+| --- | --- |
 | String literal argument | `1.0` |
 | Unique match in load-confirmed files (Phase A) | `1.0` |
 | Multiple matches in load-confirmed files (Phase A) | `0.8` |
@@ -124,12 +128,12 @@ Files sharing the same `LangId` and connected by Import or Reference edges join 
 
 ### Confidence fusion
 
-When both an Import edge and a Reference edge connect the same pod pair, confidence scores multiply to form a combined weight in [0.0, 1.0]. If only one edge type exists, its confidence is used directly.
+When an Import edge and a Reference edge connect the same pod pair, the fusion keeps the stronger confidence (`max`), never the product. A repeated `(source, target, kind)` triple merges the same way.
 
 ### Language tag mapping
 
 | Language | Tag |
-|---|---|
+| --- | --- |
 | Python | `py` |
 | JavaScript | `node` |
 | TypeScript / TSX | `ts` |
@@ -156,7 +160,7 @@ C and C++ share the `c` loader (libclang). Go has no MetaCall loader yet; deploy
 `dependency::resolve_dependencies` collects external imports per pod and inspects project lockfiles and manifests.
 
 | Language(s) | Resolver | Lockfile (preferred) | Manifest (fallback) |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Python | `classify_python` | `uv.lock`, `poetry.lock`, `Pipfile.lock` | `pyproject.toml`, `requirements.txt` |
 | JS / TS / TSX | `classify_node_ecosystem` | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | `package.json` |
 | Rust | `classify_rust` | `Cargo.lock` | `Cargo.toml` |
@@ -173,7 +177,7 @@ Lockfiles supply pinned versions (`source: "Lockfile"`). Manifest fallbacks set 
 
 ```json
 {
-  "version": "1.0",
+  "version": "1.1",
   "deployments": [
     {
       "id": 0,
@@ -201,7 +205,7 @@ Lockfiles supply pinned versions (`source: "Lockfile"`). Manifest fallbacks set 
       "kind": "import",
       "confidence": 1.0,
       "is_cross_language": true,
-      "cut_annotation": null
+      "cut_annotations": []
     }
   ],
   "metrics": {
@@ -252,9 +256,9 @@ Units with `is_mesh_candidate = true` and `is_cross_language = false` deploy ind
 
 `check::check_cut_fairness` validates RPC stub contracts:
 
-1. Every cut edge appears in `manifest.edges[]` with a `cut_annotation`.
+1. Every cut edge appears in `manifest.edges[]` with cut annotations.
 2. Cut edges have `kind: "rpc_stub"`.
-3. Non-cut edges omit `cut_annotation`.
+3. Non-cut edges carry no cut annotation.
 
 `run_deploy` exits non-zero if fairness checks fail.
 
