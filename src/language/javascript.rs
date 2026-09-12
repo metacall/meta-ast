@@ -359,6 +359,28 @@ mod tests {
     }
 
     #[test]
+    fn js_plain_line_comment_is_not_a_docstring() {
+        let note = b"// note for readers\nfunction noted() {}";
+        let tree = parse(note);
+        let symbols = extract_symbols_for(LangId::JavaScript, &tree, note);
+        let func = symbols.iter().find(|s| s.name == "noted").unwrap();
+        assert!(
+            func.docstring.is_none(),
+            "a plain line comment must stay a comment"
+        );
+
+        let documented = b"/// line doc\nfunction lined() {}";
+        let tree = parse(documented);
+        let symbols = extract_symbols_for(LangId::JavaScript, &tree, documented);
+        let func = symbols.iter().find(|s| s.name == "lined").unwrap();
+        assert_eq!(
+            func.docstring.as_deref(),
+            Some("line doc"),
+            "the documenting line form is ///"
+        );
+    }
+
+    #[test]
     fn js_docstring_extraction() {
         let src = b"/** JSDoc comment. */\nfunction documented() {}";
         let tree = parse(src);

@@ -146,6 +146,24 @@ mod tests {
     }
 
     #[test]
+    fn c_plain_line_comment_is_not_a_docstring() {
+        let note = b"// note for readers\nint noted(void) { return 0; }";
+        let tree = parse(note);
+        let symbols = extract_symbols_for(LangId::C, &tree, note);
+        let func = symbols.iter().find(|s| s.name == "noted").unwrap();
+        assert!(
+            func.docstring.is_none(),
+            "a plain line comment must stay a comment"
+        );
+
+        let documented = b"/// line doc\nint lined(void) { return 0; }";
+        let tree = parse(documented);
+        let symbols = extract_symbols_for(LangId::C, &tree, documented);
+        let func = symbols.iter().find(|s| s.name == "lined").unwrap();
+        assert_eq!(func.docstring.as_deref(), Some("line doc"));
+    }
+
+    #[test]
     fn c_docstring_extraction() {
         let src = b"/** Doxygen comment. */\nint documented() {}";
         let tree = parse(src);

@@ -54,8 +54,13 @@ pub enum DefaultVisibility {
 /// Shared JSDoc/C-style doc comment config.
 ///
 /// Used by JS, TS, TSX, C, C++ specs. Only Rust, Go, Ruby, Python differ.
+///
+/// A plain `//` line is a note, not documentation: it stays a comment and never
+/// becomes a symbol docstring. The documenting line forms are `///` and `//!`,
+/// and the block form is `/** */`. Go and Ruby keep their own convention, where
+/// a plain `//` or `#` line does document the symbol below it.
 pub const C_LIKE_DOC_COMMENT: DocCommentConfig = DocCommentConfig {
-    line_prefixes: &["//"],
+    line_prefixes: &["///", "//!"],
     block_open: Some("/**"),
     block_close: "*/",
     strip_continuation_marker: true,
