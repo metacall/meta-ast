@@ -71,7 +71,7 @@ src/
 │
 └── interface/                CLI layer
     ├── mod.rs                CLI module root
-    └── args.rs               Clap derive structs (Inspect, Graph, Deploy + -l, --format, --html, --datagraph, --watch, --watch-debounce, -o, --check)
+    └── args.rs               Clap derive structs (Inspect, Graph, Deploy + -l, --format, --html, --datagraph, --datagraph-output, --watch, --watch-debounce, -o, --check)
 │
 ├── watch/                     [feature: watch]
 │   └── mod.rs                 IncrementalCache, WatchState, incremental_reanalyze, run_watch

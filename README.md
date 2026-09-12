@@ -156,6 +156,7 @@ Builds the cross-file dependency graph, resolves imports, and runs Tarjan SCC to
 meta-ast graph <path> [-l language] [-f json|yaml] [-o graph.json]
 meta-ast graph <path> --html                    # interactive Cytoscape.js dashboard (CDN, browser-cached)
 meta-ast graph <path> --datagraph               # export detailed datagraph.json (requires --features dataflow)
+meta-ast graph <path> --datagraph --datagraph-output dg.json   # choose the datagraph path
 meta-ast graph <path> --watch                   # watch mode: continuous re-analysis on file changes (requires --features watch)
 meta-ast graph <path> --watch --watch-debounce 100 --html -o graph.html
 ```
@@ -183,7 +184,7 @@ meta-ast deploy <path> --check                  # CI validation: verify every cu
 Generates two artifacts:
 
 | File | Description |
-|---|---|
+| --- | --- |
 | `metacall.pods.json` | Pod manifest: language-based deployment units, inter-pod edges with confidence scores, per-pod dependency lists with pinned versions, and AST node metrics |
 | `metacall.mesh.json` | SCC-derived Function Mesh topology annotation with cross-language call-site attribution |
 
@@ -196,7 +197,7 @@ See [docs/src/DEPLOY.md](docs/src/DEPLOY.md) for scanner details, confidence sco
 ## Documentation
 
 | Document | Description |
-|---|---|
+| --- | --- |
 | [docs/src/DEMO.md](docs/src/DEMO.md) | Recorded walkthroughs of every subcommand (GIFs) |
 | [docs/src/BENCHMARKS.md](docs/src/BENCHMARKS.md) | Criterion benchmark results |
 | [docs/src/FINAL_REPORT.md](docs/src/FINAL_REPORT.md) | GSoC 2026 completion report |
@@ -216,7 +217,6 @@ All docs are also published as an [mdbook site](https://metacall.github.io/meta-
 ## Roadmap
 
 The core GSoC 2026 milestones (Phases 1-7) are complete with release `v0.5.0`. Full details and post-v1 initiatives are tracked in [docs/src/ROADMAP.md](docs/src/ROADMAP.md).
-
 
 ### Post-v1 Active Roadmap
 
