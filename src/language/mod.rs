@@ -136,13 +136,13 @@ pub struct RawSymbol<'a> {
 pub struct LanguageSpec {
     pub extensions: &'static [&'static str],
     pub grammar_fn: fn() -> tree_sitter::Language,
-    pub query_fn: fn() -> &'static Query,
+    pub query_fn: fn() -> Result<&'static Query, crate::error::Error>,
     pub import_path_resolver: fn(
         raw: &str,
         source_dir: &std::path::Path,
         project_root: &std::path::Path,
     ) -> Option<std::path::PathBuf>,
-    pub import_ref_query_fn: fn() -> &'static Query,
+    pub import_ref_query_fn: fn() -> Result<&'static Query, crate::error::Error>,
     pub class_like_parents: &'static [&'static str],
     pub ancestor_visibility_rules: &'static [(&'static str, Visibility)],
     pub visibility_from_name: Option<fn(&str) -> Option<Visibility>>,
@@ -170,22 +170,51 @@ pub fn grammar_for(id: LangId) -> tree_sitter::Language {
 }
 
 /// Eagerly initialize all language query statics.
-/// Call at startup to fail fast on query compilation bugs.
+///
+/// Call at startup so a broken query is reported before the first file. A
+/// failure is logged, not fatal: the per-file path turns it into a diagnostic.
 pub fn validate_queries() {
     for id in LangId::all() {
-        let _ = (spec_for(id).query_fn)();
-        let _ = (spec_for(id).import_ref_query_fn)();
+        let spec = spec_for(id);
+        for (label, outcome) in [
+            ("symbols", (spec.query_fn)()),
+            ("imports and references", (spec.import_ref_query_fn)()),
+        ] {
+            if let Err(error) = outcome {
+                tracing::error!(language = ?id, query = label, %error, "query failed to compile");
+            }
+        }
     }
 }
 
+/// Extract symbols, reporting a query failure as an empty result.
+///
+/// The analysis path uses [`extract_symbols_for_checked`] so the failure
+/// reaches the file diagnostics; this wrapper serves callers that only need
+/// the symbols.
 pub fn extract_symbols_for<'a>(
     id: LangId,
     tree: &'a tree_sitter::Tree,
     source: &'a [u8],
 ) -> Vec<RawSymbol<'a>> {
+    match extract_symbols_for_checked(id, tree, source) {
+        Ok(symbols) => symbols,
+        Err(error) => {
+            tracing::error!(language = ?id, %error, "symbol extraction skipped");
+            Vec::new()
+        }
+    }
+}
+
+pub fn extract_symbols_for_checked<'a>(
+    id: LangId,
+    tree: &'a tree_sitter::Tree,
+    source: &'a [u8],
+) -> Result<Vec<RawSymbol<'a>>, crate::error::Error> {
     common::extract_with_spec(tree, source, spec_for(id))
 }
 
+/// Extract imports and references, reporting a query failure as empty results.
 pub fn extract_imports_and_references_for<'a>(
     id: LangId,
     tree: &'a tree_sitter::Tree,
@@ -196,6 +225,28 @@ pub fn extract_imports_and_references_for<'a>(
     Vec<crate::model::UnresolvedReference>,
     Vec<crate::error::Diagnostic>,
 ) {
+    match extract_imports_and_references_for_checked(id, tree, source, file_path) {
+        Ok(extracted) => extracted,
+        Err(error) => {
+            tracing::error!(language = ?id, %error, "import and reference extraction skipped");
+            (Vec::new(), Vec::new(), Vec::new())
+        }
+    }
+}
+
+pub fn extract_imports_and_references_for_checked<'a>(
+    id: LangId,
+    tree: &'a tree_sitter::Tree,
+    source: &'a [u8],
+    file_path: &std::path::Path,
+) -> Result<
+    (
+        Vec<crate::model::UnresolvedImport>,
+        Vec<crate::model::UnresolvedReference>,
+        Vec<crate::error::Diagnostic>,
+    ),
+    crate::error::Error,
+> {
     common::extract_imports_and_references_with_spec(tree, source, spec_for(id), file_path)
 }
 

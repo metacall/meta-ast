@@ -5,6 +5,7 @@ use crate::language::typescript::{
 };
 use crate::model::Visibility;
 use std::path::{Path, PathBuf};
+use crate::language::LangId;
 
 fn resolve_tsx_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
     use crate::language::import_resolver::{TS_EXTS, resolve_js_family_import};
@@ -30,6 +31,11 @@ define_language_pack!(
         accessor: tsx_import_ref_query,
         import: TS_FAMILY_IMPORT_QUERY,
         reference: TS_FAMILY_REFERENCE_QUERY,
+    },
+    dataflow: {
+        static: TSX_DATAFLOW_QUERY,
+        accessor: tsx_dataflow_query,
+        query: crate::language::javascript::TS_FAMILY_DATAFLOW_QUERY,
     },
     import_statement_kinds: ["import_statement"],
     class_like_parents: ["class_declaration", "class"],
@@ -193,15 +199,6 @@ define_language_pack!(
 
 // ── Dataflow extraction ─────────────────────────────────────────────
 
-#[cfg(feature = "dataflow")]
-static TSX_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> =
-    std::sync::LazyLock::new(|| {
-        crate::language::common::compile_query(
-            &tree_sitter_typescript::LANGUAGE_TSX.into(),
-            crate::language::javascript::TS_FAMILY_DATAFLOW_QUERY,
-            "TSX dataflow",
-        )
-    });
 
 /// TSX AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]
@@ -214,10 +211,13 @@ pub fn extract_tsx_dataflow(
     source: &[u8],
     id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
 ) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+    let Some(query) = tsx_dataflow_query() else {
+        return (Vec::new(), Vec::new());
+    };
     crate::language::javascript::extract_js_family_dataflow_with_query(
         tree,
         source,
-        &TSX_DATAFLOW_QUERY,
+        query,
         TSX_FUNCTION_KINDS,
         id_gen,
     )

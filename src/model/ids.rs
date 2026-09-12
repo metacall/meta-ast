@@ -55,6 +55,9 @@ define_id_type!(DataNodeId);
 /// Zero is never handed out: it is the niche value that makes `Option<Id>`
 /// free (4 bytes, not 8). Allocation panics only after exhausting the full
 /// `u32` space (>4 billion ids), which is treated as a programmer limit.
+///
+/// The counter uses `Relaxed` ordering: uniqueness needs the atomicity of the
+/// read-modify-write, not an ordering edge to any other memory location.
 #[derive(Debug)]
 pub struct IdGenerator<T> {
     counter: AtomicU32,
@@ -80,7 +83,7 @@ impl<T> IdGenerator<T> {
     where
         T: From<NonZeroU32>,
     {
-        let val = self.counter.fetch_add(1, Ordering::SeqCst);
+        let val = self.counter.fetch_add(1, Ordering::Relaxed);
         let nz = NonZeroU32::new(val)
             .expect("IdGenerator exhausted u32 space (allocated > u32::MAX ids)");
         T::from(nz)
@@ -93,9 +96,9 @@ impl<T> IdGenerator<T> {
     /// An empty reservation returns the next slot without consuming it.
     pub fn reserve(&self, count: u32) -> u32 {
         if count == 0 {
-            return self.counter.load(Ordering::SeqCst);
+            return self.counter.load(Ordering::Relaxed);
         }
-        let start = self.counter.fetch_add(count, Ordering::SeqCst);
+        let start = self.counter.fetch_add(count, Ordering::Relaxed);
         assert!(
             start != 0 && start.checked_add(count - 1).is_some(),
             "IdGenerator exhausted u32 space (reserved > u32::MAX ids)"

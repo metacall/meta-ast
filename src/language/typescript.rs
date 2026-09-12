@@ -2,6 +2,7 @@ use crate::language::DefaultVisibility;
 use crate::language::pack::define_language_pack;
 use crate::model::Visibility;
 use std::path::{Path, PathBuf};
+use crate::language::LangId;
 
 fn resolve_ts_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
     use crate::language::import_resolver::{TS_EXTS, resolve_js_family_import};
@@ -137,6 +138,11 @@ define_language_pack!(
         accessor: ts_import_ref_query,
         import: TS_FAMILY_IMPORT_QUERY,
         reference: TS_FAMILY_REFERENCE_QUERY,
+    },
+    dataflow: {
+        static: TS_DATAFLOW_QUERY,
+        accessor: ts_dataflow_query,
+        query: crate::language::javascript::TS_FAMILY_DATAFLOW_QUERY,
     },
     import_statement_kinds: ["import_statement"],
     class_like_parents: ["class_declaration", "class"],
@@ -418,15 +424,6 @@ define_language_pack!(
 
 // ── Dataflow extraction ─────────────────────────────────────────────
 
-#[cfg(feature = "dataflow")]
-static TS_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> =
-    std::sync::LazyLock::new(|| {
-        crate::language::common::compile_query(
-            &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-            crate::language::javascript::TS_FAMILY_DATAFLOW_QUERY,
-            "TypeScript dataflow",
-        )
-    });
 
 /// TypeScript AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]
@@ -439,10 +436,13 @@ pub fn extract_typescript_dataflow(
     source: &[u8],
     id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
 ) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+    let Some(query) = ts_dataflow_query() else {
+        return (Vec::new(), Vec::new());
+    };
     crate::language::javascript::extract_js_family_dataflow_with_query(
         tree,
         source,
-        &TS_DATAFLOW_QUERY,
+        query,
         TS_FUNCTION_KINDS,
         id_gen,
     )

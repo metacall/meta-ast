@@ -2,6 +2,7 @@ use crate::language::DefaultVisibility;
 use crate::language::pack::define_language_pack;
 use crate::model::Visibility;
 use std::path::{Path, PathBuf};
+use crate::language::LangId;
 
 fn resolve_js_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
     use crate::language::import_resolver::{JS_EXTS, resolve_js_family_import};
@@ -101,6 +102,11 @@ define_language_pack!(
         accessor: js_import_ref_query,
         import: JS_IMPORT_QUERY_STR,
         reference: JS_REFERENCE_QUERY_STR,
+    },
+    dataflow: {
+        static: JS_DATAFLOW_QUERY,
+        accessor: js_dataflow_query,
+        query: JS_DATAFLOW_QUERY_STR,
     },
     import_statement_kinds: ["import_statement"],
     class_like_parents: ["class_declaration", "class"],
@@ -608,15 +614,6 @@ pub(crate) fn extract_js_family_dataflow_with_query(
     crate::language::common::extract_def_use_dataflow(tree, source, query, function_kinds, id_gen)
 }
 
-#[cfg(feature = "dataflow")]
-static JS_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> =
-    std::sync::LazyLock::new(|| {
-        crate::language::common::compile_query(
-            &tree_sitter_javascript::LANGUAGE.into(),
-            JS_DATAFLOW_QUERY_STR,
-            "JavaScript dataflow",
-        )
-    });
 
 /// JavaScript AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]
@@ -629,10 +626,13 @@ pub fn extract_javascript_dataflow(
     source: &[u8],
     id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
 ) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+    let Some(query) = js_dataflow_query() else {
+        return (Vec::new(), Vec::new());
+    };
     extract_js_family_dataflow_with_query(
         tree,
         source,
-        &JS_DATAFLOW_QUERY,
+        query,
         JS_FUNCTION_KINDS,
         id_gen,
     )

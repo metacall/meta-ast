@@ -1,6 +1,7 @@
 use crate::language::pack::define_language_pack;
 use crate::language::{DefaultVisibility, DocCommentConfig};
 use std::path::{Path, PathBuf};
+use crate::language::LangId;
 
 /// Resolve a module path against a base directory.
 ///
@@ -144,6 +145,42 @@ define_language_pack!(
         accessor: rust_import_ref_query,
         import: RUST_IMPORT_QUERY_STR,
         reference: RUST_REFERENCE_QUERY_STR,
+    },
+    dataflow: {
+        static: RUST_DATAFLOW_QUERY,
+        accessor: rust_dataflow_query,
+        query: r#"
+; Let binding definitions: let x = expr;
+(let_declaration
+  pattern: (identifier) @def.var
+)
+
+; Identifier in let binding value (usage of a variable)
+(let_declaration
+  value: (identifier) @use.var
+)
+
+; Function parameters
+(function_item
+  parameters: (parameters
+    (parameter
+      pattern: (identifier) @def.param
+    )
+  )
+)
+
+; Identifier usages in expression context (calls, binary ops, returns, etc.)
+(call_expression
+  function: (identifier) @use.var)
+(binary_expression
+  (identifier) @use.var)
+(return_expression
+  (identifier) @use.var)
+(assignment_expression
+  right: (identifier) @use.var)
+(field_expression
+  value: (identifier) @use.var)
+"#,
     },
     import_statement_kinds: ["use_declaration"],
     class_like_parents: ["impl_item"],
@@ -302,46 +339,6 @@ define_language_pack!(
 
 // ── Dataflow extraction ─────────────────────────────────────────────
 
-#[cfg(feature = "dataflow")]
-static RUST_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> =
-    std::sync::LazyLock::new(|| {
-        crate::language::common::compile_query(
-            &tree_sitter_rust::LANGUAGE.into(),
-            r#"
-; Let binding definitions: let x = expr;
-(let_declaration
-  pattern: (identifier) @def.var
-)
-
-; Identifier in let binding value (usage of a variable)
-(let_declaration
-  value: (identifier) @use.var
-)
-
-; Function parameters
-(function_item
-  parameters: (parameters
-    (parameter
-      pattern: (identifier) @def.param
-    )
-  )
-)
-
-; Identifier usages in expression context (calls, binary ops, returns, etc.)
-(call_expression
-  function: (identifier) @use.var)
-(binary_expression
-  (identifier) @use.var)
-(return_expression
-  (identifier) @use.var)
-(assignment_expression
-  right: (identifier) @use.var)
-(field_expression
-  value: (identifier) @use.var)
-"#,
-            "Rust dataflow",
-        )
-    });
 
 /// Extract data nodes (definitions) and flow edges (def-use) from a Rust parse tree.
 ///
@@ -360,10 +357,13 @@ pub fn extract_rust_dataflow(
     source: &[u8],
     id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
 ) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+    let Some(query) = rust_dataflow_query() else {
+        return (Vec::new(), Vec::new());
+    };
     crate::language::common::extract_def_use_dataflow(
         tree,
         source,
-        &RUST_DATAFLOW_QUERY,
+        query,
         RUST_FUNCTION_KINDS,
         id_gen,
     )

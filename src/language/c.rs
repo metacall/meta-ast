@@ -1,6 +1,7 @@
 use crate::language::pack::define_language_pack;
 use crate::language::{C_LIKE_DOC_COMMENT, DefaultVisibility};
 use std::path::{Path, PathBuf};
+use crate::language::LangId;
 
 fn resolve_c_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
     crate::language::import_resolver::resolve_c_family_import(raw, source_dir)
