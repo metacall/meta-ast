@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 pub mod check;
 pub mod client_call;
+pub mod config;
 pub mod cut;
 pub mod dependency;
 pub mod manifest;
@@ -66,33 +67,62 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
             continue;
         };
         let config_file = config.root.join(config_script);
-        let Ok(config_json) = std::fs::read_to_string(&config_file).and_then(|s| {
-            serde_json::from_str::<serde_json::Value>(&s)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-        }) else {
+        let bytes = match std::fs::read(&config_file) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                diagnostics.push(config::config_diagnostic(
+                    &config_file,
+                    site.source_range.as_ref(),
+                    format!("unreadable MetaCall configuration: {error}"),
+                ));
+                continue;
+            }
+        };
+        let parsed = match config::parse_load_configuration(&bytes) {
+            Ok(parsed) => parsed,
+            Err(message) => {
+                diagnostics.push(config::config_diagnostic(
+                    &config_file,
+                    site.source_range.as_ref(),
+                    message,
+                ));
+                continue;
+            }
+        };
+        let Some(language_id) = parsed.language_id.as_deref() else {
+            diagnostics.push(config::config_diagnostic(
+                &config_file,
+                site.source_range.as_ref(),
+                "MetaCall configuration has no language_id".to_string(),
+            ));
             continue;
         };
-        let Some(lang) = config_json.get("language_id").and_then(|v| v.as_str()) else {
+        let Some(target_lang) = tags::from_metacall_tag(language_id) else {
+            diagnostics.push(config::config_diagnostic(
+                &config_file,
+                site.source_range.as_ref(),
+                format!("unknown MetaCall language_id '{language_id}'"),
+            ));
             continue;
         };
-        let Some(scripts_arr) = config_json.get("scripts").and_then(|v| v.as_array()) else {
+        if parsed.scripts.is_empty() {
+            diagnostics.push(config::config_diagnostic(
+                &config_file,
+                site.source_range.as_ref(),
+                "MetaCall configuration has no scripts".to_string(),
+            ));
             continue;
-        };
+        }
         let Some(&from_idx) = path_to_idx.get(&site.source_file) else {
             continue;
         };
-        let Some(target_lang) = crate::deploy::tags::from_metacall_tag(lang) else {
-            continue;
-        };
-        for script_item in scripts_arr {
-            let Some(script_str) = script_item.as_str() else {
-                continue;
-            };
+        let base = config::script_base(&config_file, &parsed, &config.root);
+        for script in &parsed.scripts {
             add_metacall_edge(
-                &config.root,
+                &base,
                 from_idx,
                 target_lang,
-                script_str,
+                script,
                 site.confidence,
                 &path_to_idx,
                 &mut analysis,
@@ -144,6 +174,8 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     // 6c. Report orphaned MetaCall configuration files and surface every
     // diagnostic collected during analysis and edge injection.
     diagnostics.extend(orphaned_config_diagnostics(&config.root, &all_call_sites));
+    diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
+    diagnostics.dedup_by(|a, b| a.path == b.path && a.message == b.message);
     for diag in &diagnostics {
         tracing::warn!(
             path = %diag.path.display(),
@@ -283,7 +315,7 @@ fn orphaned_config_diagnostics(root: &Path, call_sites: &[CallSite]) -> Vec<Diag
 ///
 /// Script resolution tries four strategies in order through
 /// [`client_call::resolve_script_to_file`]:
-/// 1. `root.join(script)` -- works when script is relative to project root
+/// 1. `base.join(script)` -- base is the project root or the configuration `path`
 /// 2. `source_dir.join(script)` -- resolves relative to the source file's directory
 /// 3. Filename match against any discovered file
 /// 4. Strip path prefix components from script until a matching file is found
@@ -292,7 +324,7 @@ fn orphaned_config_diagnostics(root: &Path, call_sites: &[CallSite]) -> Vec<Diag
 /// edges obey the same dedup/confidence invariant as builder-constructed ones
 /// and `external_index` stays consistent across repeated loads.
 fn add_metacall_edge(
-    root: &std::path::Path,
+    base: &std::path::Path,
     from_idx: petgraph::graph::NodeIndex,
     target_lang: crate::language::LangId,
     script: &str,
@@ -307,7 +339,7 @@ fn add_metacall_edge(
         _ => return,
     };
     if let Some(to_idx) =
-        client_call::resolve_script_to_file(root, script, &source_file, path_to_idx)
+        client_call::resolve_script_to_file(base, script, &source_file, path_to_idx)
     {
         graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Import, confidence);
         return;

@@ -150,6 +150,55 @@ mod deploy_tests {
         );
     }
 
+    #[test]
+    fn config_path_resolves_scripts_relative_to_the_configuration() {
+        let fixture = tempdir().unwrap();
+        let proj = fixture.path();
+        fs::create_dir_all(proj.join("cfg")).unwrap();
+        fs::create_dir_all(proj.join("lib")).unwrap();
+        fs::write(
+            proj.join("caller.py"),
+            "from metacall import metacall_load_from_configuration\nmetacall_load_from_configuration('cfg/deploy.json')\n",
+        )
+        .unwrap();
+        fs::write(
+            proj.join("cfg/deploy.json"),
+            r#"{"language_id":"node","path":"../lib","scripts":["extra.js"]}"#,
+        )
+        .unwrap();
+        fs::write(
+            proj.join("lib/extra.js"),
+            "function helper() { return 1; }\n",
+        )
+        .unwrap();
+
+        let out = tempdir().unwrap();
+        let config = DeployConfig {
+            root: proj.to_path_buf(),
+            out: out.path().to_path_buf(),
+            format: OutputFormat::Json,
+            check: false,
+            max_pod_size: 20,
+        };
+        run_deploy(config).expect("Deploy failed");
+
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(out.path().join("metacall.pods.json")).unwrap(),
+        )
+        .unwrap();
+        let files: Vec<&str> = manifest["deployments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|d| d["files"].as_array().unwrap().iter())
+            .filter_map(|f| f.as_str())
+            .collect();
+        assert!(
+            files.iter().any(|f| f.ends_with("lib/extra.js")),
+            "extra.js missing from pods: {files:?}"
+        );
+    }
+
     fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
         fs::create_dir_all(dst)?;
         for entry in fs::read_dir(src)? {
