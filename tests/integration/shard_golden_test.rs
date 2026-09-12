@@ -33,12 +33,15 @@ fn golden_path() -> PathBuf {
     repository_root().join("tests/fixtures/shard/golden.json")
 }
 
-/// Replaces the checkout prefix, because the exporter records the path it was
-/// handed and the golden must be the same on any machine.
+/// Replaces the checkout prefix and the path separator, because the exporter
+/// records the path it was handed and the golden must be the same on any
+/// machine. A Windows walk hands out backslashes, which the manifest keeps as
+/// the JSON escape `\\`; replacing that pair leaves other escapes such as
+/// `\n` inside a payload string alone.
 fn portable(text: &str) -> String {
     let root = repository_root();
     let root = root.to_string_lossy();
-    text.replace(root.as_ref(), "<root>")
+    text.replace(root.as_ref(), "<root>").replace("\\\\", "/")
 }
 
 /// Exports the fixture and returns every artifact as text, keyed by name.
