@@ -71,6 +71,20 @@ pub(crate) const TS_FAMILY_QUERY: &str = r#"
     ) @kind.type_alias
   ]
 )
+
+(variable_declarator
+  name: (identifier) @name
+  value: (arrow_function
+    "async"? @async
+    parameters: (formal_parameters) @signature)
+) @kind.function
+
+(variable_declarator
+  name: (identifier) @name
+  value: (function_expression
+    "async"? @async
+    parameters: (formal_parameters) @signature)
+) @kind.function
 "#;
 
 static TS_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {

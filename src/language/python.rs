@@ -61,6 +61,12 @@ static PYTHON_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     ) @kind.class
   ]
 )
+
+(module
+  (expression_statement
+    (assignment
+      left: (identifier) @name) @kind.constant)
+)
 "#,
         "Python",
     )

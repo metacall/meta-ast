@@ -1,6 +1,5 @@
 ---
 source: src/language/tsx.rs
-assertion_line: 210
 expression: symbols
 ---
 [
@@ -41,6 +40,26 @@ expression: symbols
     },
     "visibility": null,
     "signature": "(props: Props)",
+    "docstring": null,
+    "is_async": false
+  },
+  {
+    "name": "Welcome",
+    "kind": "Function",
+    "source_range": {
+      "byte_start": 184,
+      "byte_end": 271,
+      "start": {
+        "line": 11,
+        "column": 6
+      },
+      "end": {
+        "line": 13,
+        "column": 1
+      }
+    },
+    "visibility": null,
+    "signature": "(props)",
     "docstring": null,
     "is_async": false
   },

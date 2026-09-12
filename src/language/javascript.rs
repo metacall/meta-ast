@@ -49,6 +49,20 @@ static JS_QUERY: LazyLock<tree_sitter::Query> = LazyLock::new(|| {
     ) @kind.class
   ]
 )
+
+(variable_declarator
+  name: (identifier) @name
+  value: (arrow_function
+    "async"? @async
+    parameters: (formal_parameters) @signature)
+) @kind.function
+
+(variable_declarator
+  name: (identifier) @name
+  value: (function_expression
+    "async"? @async
+    parameters: (formal_parameters) @signature)
+) @kind.function
 "#,
         "JavaScript",
     )
