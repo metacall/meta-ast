@@ -45,3 +45,4 @@
 - [0010 - Deploy Manifests](rfcs/0010-deploy-manifests.md)
 - [0011 - MetaCall Client API Support](rfcs/0011-metacall-client-api-support.md)
 - [0012 - Polyglot LSP Server](rfcs/0012-polyglot-lsp-server.md)
+- [0013 - Package-Level Import Targets](rfcs/0013-package-import-targets.md)
