@@ -179,7 +179,7 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"package main\n\nimport \"fmt\"\n";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::Go,
             &tree,
             src,
@@ -190,7 +190,7 @@ mod tests {
             1,
             "expected 1 import record for non-aliased import"
         );
-        assert_eq!(imports[0].import_specifier, "\"fmt\"");
+        assert_eq!(imports[0].import_specifier, "fmt");
         assert!(imports[0].alias.is_none());
     }
 
@@ -199,7 +199,7 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"package main\n\nimport alias \"fmt\"\n";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::Go,
             &tree,
             src,
@@ -210,7 +210,7 @@ mod tests {
             1,
             "expected 1 import record, not 2 (CR-03 regression check)"
         );
-        assert_eq!(imports[0].import_specifier, "\"fmt\"");
+        assert_eq!(imports[0].import_specifier, "fmt");
         assert_eq!(imports[0].alias.as_deref(), Some("alias"));
     }
 
@@ -219,15 +219,15 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::Go,
             &tree,
             src,
             &std::path::PathBuf::from("test.go"),
         );
         assert_eq!(imports.len(), 2, "expected 2 import records for fmt and os");
-        assert_eq!(imports[0].import_specifier, "\"fmt\"");
-        assert_eq!(imports[1].import_specifier, "\"os\"");
+        assert_eq!(imports[0].import_specifier, "fmt");
+        assert_eq!(imports[1].import_specifier, "os");
     }
 
     #[test]

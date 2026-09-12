@@ -226,10 +226,10 @@ mod tests {
     fn extract_require_import() {
         let src = b"require 'json'";
         let tree = parse(src);
-        let (imports, _) =
+        let (imports, _, _) =
             extract_imports_and_references_for(LangId::Ruby, &tree, src, &PathBuf::from("test.rb"));
         assert_eq!(imports.len(), 1);
-        assert_eq!(imports[0].import_specifier, "'json'");
+        assert_eq!(imports[0].import_specifier, "json");
         assert!(imports[0].symbol.is_none());
     }
 
@@ -237,17 +237,17 @@ mod tests {
     fn extract_require_relative_import() {
         let src = b"require_relative './helper'";
         let tree = parse(src);
-        let (imports, _) =
+        let (imports, _, _) =
             extract_imports_and_references_for(LangId::Ruby, &tree, src, &PathBuf::from("test.rb"));
         assert_eq!(imports.len(), 1);
-        assert_eq!(imports[0].import_specifier, "'./helper'");
+        assert_eq!(imports[0].import_specifier, "./helper");
     }
 
     #[test]
     fn require_calls_do_not_leak_as_references() {
         let src = b"require 'json'\nputs 'hi'";
         let tree = parse(src);
-        let (imports, references) =
+        let (imports, references, _) =
             extract_imports_and_references_for(LangId::Ruby, &tree, src, &PathBuf::from("test.rb"));
         assert_eq!(imports.len(), 1);
         assert!(references.iter().any(|r| r.name == "puts"));
@@ -258,7 +258,7 @@ mod tests {
     fn extract_bare_call_reference() {
         let src = b"calc_total(items)";
         let tree = parse(src);
-        let (_, references) =
+        let (_, references, _) =
             extract_imports_and_references_for(LangId::Ruby, &tree, src, &PathBuf::from("test.rb"));
         assert!(references.iter().any(|r| r.name == "calc_total"));
     }
@@ -267,7 +267,7 @@ mod tests {
     fn extract_constant_receiver_reference() {
         let src = b"Math.sqrt(4)";
         let tree = parse(src);
-        let (_, references) =
+        let (_, references, _) =
             extract_imports_and_references_for(LangId::Ruby, &tree, src, &PathBuf::from("test.rb"));
         assert!(references.iter().any(|r| r.name == "Math"));
         assert!(references.iter().any(|r| r.name == "sqrt"));

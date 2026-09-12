@@ -392,7 +392,7 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"from . import util\n";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::Python,
             &tree,
             src,
@@ -408,7 +408,7 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"from .util import helper\n";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::Python,
             &tree,
             src,
@@ -424,7 +424,7 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"from ..pkg.mod import baz\n";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::Python,
             &tree,
             src,
@@ -439,7 +439,7 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"from a.b import c as d\n";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::Python,
             &tree,
             src,

@@ -306,7 +306,7 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"import { foo, bar } from 'utils';";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::JavaScript,
             &tree,
             src,
@@ -319,7 +319,7 @@ mod tests {
             "expected 2 named import records for foo and bar"
         );
         for imp in &named {
-            assert_eq!(imp.import_specifier, "'utils'");
+            assert_eq!(imp.import_specifier, "utils");
         }
         assert_eq!(named[0].symbol.as_deref(), Some("foo"));
         assert_eq!(named[1].symbol.as_deref(), Some("bar"));
@@ -330,7 +330,7 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"import React from 'react';";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::JavaScript,
             &tree,
             src,
@@ -338,7 +338,7 @@ mod tests {
         );
         let named: Vec<_> = imports.iter().filter(|i| i.symbol.is_some()).collect();
         assert_eq!(named.len(), 1);
-        assert_eq!(named[0].import_specifier, "'react'");
+        assert_eq!(named[0].import_specifier, "react");
         assert_eq!(named[0].symbol.as_deref(), Some("React"));
     }
 
@@ -347,14 +347,14 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"import 'styles.css';";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::JavaScript,
             &tree,
             src,
             &std::path::PathBuf::from("test.js"),
         );
         assert_eq!(imports.len(), 1);
-        assert_eq!(imports[0].import_specifier, "'styles.css'");
+        assert_eq!(imports[0].import_specifier, "styles.css");
         assert!(imports[0].symbol.is_none());
     }
 
