@@ -112,15 +112,17 @@ pub fn reanalyze_extractions(
 ) -> Result<ReanalysisOutput, crate::Error> {
     let files = input::discover_files(root, languages)?;
 
-    let overlay_by_path: HashMap<&Path, &Overlay> = overlays
+    // Key every overlay by the same path form the walk produces, so one file
+    // never enters the target set under two keys.
+    let overlay_by_path: HashMap<PathBuf, &Overlay> = overlays
         .iter()
-        .filter(|overlay| overlay.path.starts_with(root))
-        .map(|overlay| (overlay.path.as_path(), overlay))
+        .map(|overlay| (input::simplified_path(&overlay.path), overlay))
+        .filter(|(path, _)| path.starts_with(root))
         .collect();
 
     let mut targets: BTreeMap<PathBuf, LangId> = files.into_iter().collect();
-    for overlay in overlay_by_path.values() {
-        targets.entry(overlay.path.clone()).or_insert(overlay.lang);
+    for (path, overlay) in &overlay_by_path {
+        targets.entry(path.clone()).or_insert(overlay.lang);
     }
 
     let (current_fingerprints, read_diagnostics): (HashMap<PathBuf, Fingerprint>, Vec<Diagnostic>) =
@@ -129,7 +131,7 @@ pub fn reanalyze_extractions(
             .fold(
                 || (HashMap::new(), Vec::new()),
                 |(mut map, mut diags), (path, _)| {
-                    match overlay_by_path.get(path.as_path()) {
+                    match overlay_by_path.get(path) {
                         Some(overlay) => {
                             map.insert(path.clone(), Fingerprint::of(overlay.text.as_bytes()));
                         }
@@ -159,7 +161,7 @@ pub fn reanalyze_extractions(
 
     let mut change_set = ChangeSet::default();
     let mut changed_disk: Vec<(PathBuf, LangId)> = Vec::new();
-    let mut changed_overlays: Vec<&Overlay> = Vec::new();
+    let mut changed_overlays: Vec<(PathBuf, &Overlay)> = Vec::new();
 
     // A file that cannot be read keeps its cached extraction. Its fingerprint is
     // missing, so the stale sweep must not treat it as deleted.
@@ -190,8 +192,8 @@ pub fn reanalyze_extractions(
         if !changed {
             continue;
         }
-        match overlay_by_path.get(path.as_path()) {
-            Some(overlay) => changed_overlays.push(*overlay),
+        match overlay_by_path.get(path) {
+            Some(overlay) => changed_overlays.push((path.clone(), overlay)),
             None => changed_disk.push((path.clone(), *lang)),
         }
     }
@@ -235,7 +237,7 @@ pub fn reanalyze_extractions(
     };
 
     let mut overlay_diagnostics: Vec<Diagnostic> = Vec::new();
-    for overlay in &changed_overlays {
+    for (path, overlay) in &changed_overlays {
         match extractor::extract_text_with_id_gen(
             InMemorySource {
                 uri: overlay.uri.as_str(),
@@ -246,17 +248,20 @@ pub fn reanalyze_extractions(
             &options,
             &id_generators,
         ) {
-            Ok(versioned) => new_extractions.push(versioned.file),
+            Ok(mut versioned) => {
+                versioned.file.path = path.clone();
+                new_extractions.push(versioned.file);
+            }
             Err(error) => {
                 let message = error.to_string();
                 overlay_diagnostics.push(Diagnostic {
-                    path: overlay.path.clone(),
+                    path: path.clone(),
                     severity: Severity::Error,
                     message: message.clone(),
                     source_range: None,
                 });
                 new_extractions.push(FileExtraction::failed(
-                    overlay.path.clone(),
+                    path.clone(),
                     overlay.lang,
                     message,
                 ));
