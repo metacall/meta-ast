@@ -826,4 +826,89 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+    #[test]
+    fn python_resolver_finds_a_module_created_after_a_miss() {
+        fn no_fallback(_raw: &str, _source: &Path, _root: &Path) -> Option<PathBuf> {
+            None
+        }
+
+        let root = std::env::temp_dir().join("resolver_python_created_after_miss");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let resolver = PythonResolver::new(no_fallback);
+        assert!(
+            resolver.resolve("pkg", &root, &root).is_none(),
+            "the module does not exist yet"
+        );
+
+        let (init, _module) = python_candidate_paths("pkg", &root, &root).unwrap();
+        std::fs::create_dir_all(init.parent().unwrap()).unwrap();
+        std::fs::write(&init, "").unwrap();
+
+        assert_eq!(
+            resolver.resolve("pkg", &root, &root),
+            Some(init),
+            "a module created after the first miss must resolve"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn go_resolver_sees_a_module_file_created_after_a_miss() {
+        fn no_fallback(_raw: &str, _source: &Path, _root: &Path) -> Option<PathBuf> {
+            None
+        }
+
+        let root = std::env::temp_dir().join("resolver_go_created_after_miss");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let resolver = GoModResolver::new(no_fallback);
+        assert!(
+            resolver
+                .resolve("example.com/mod/util", &root, &root)
+                .is_none(),
+            "there is no go.mod yet"
+        );
+
+        std::fs::write(root.join("go.mod"), "module example.com/mod\n\ngo 1.22\n").unwrap();
+
+        assert_eq!(
+            resolver.resolve("example.com/mod/util", &root, &root),
+            Some(root.join("util").with_extension("go")),
+            "a go.mod written after the first miss must change the answer"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn node_resolver_finds_a_file_created_after_a_miss() {
+        fn no_fallback(_raw: &str, _source: &Path, _root: &Path) -> Option<PathBuf> {
+            None
+        }
+
+        let root = std::env::temp_dir().join("resolver_node_created_after_miss");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let resolver = NodeResolver::new(no_fallback, JS_EXTS);
+        assert!(
+            resolver.resolve("./util", &root, &root).is_none(),
+            "the file does not exist yet"
+        );
+
+        let created = root.join("util.js");
+        std::fs::write(&created, "module.exports = {};\n").unwrap();
+
+        assert_eq!(
+            resolver.resolve("./util", &root, &root),
+            Some(created),
+            "a file created after the first miss must resolve"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

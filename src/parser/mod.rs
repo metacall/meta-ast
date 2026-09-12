@@ -147,4 +147,29 @@ mod tests {
         assert_eq!(metrics.error_ratio, 0.0);
         assert_eq!(metrics.node_count, 0);
     }
+    #[test]
+    fn a_busy_pool_still_parses() {
+        // Hold the thread-local pool, then parse: a re-entrant call must not
+        // panic on the borrow, because the release profile aborts on panic.
+        PARSERS.with(|cache| {
+            let guard = cache.borrow_mut();
+            let tree = parse_tree(LangId::Python, b"def hello(): pass");
+            assert!(
+                tree.is_ok(),
+                "a busy pool must fall back to a fresh parser: {:?}",
+                tree.err()
+            );
+            drop(guard);
+        });
+    }
+
+    #[test]
+    fn a_parser_is_reused_after_a_parse() {
+        let first = parse_tree(LangId::Python, b"def first(): pass").unwrap();
+        let second = parse_tree(LangId::Python, b"def second(): pass").unwrap();
+        assert!(!first.root_node().has_error());
+        assert!(!second.root_node().has_error());
+        let third = parse_tree(LangId::JavaScript, b"function third() {}").unwrap();
+        assert_eq!(third.root_node().kind(), "program");
+    }
 }
