@@ -17,7 +17,6 @@ use rayon::prelude::*;
 use crate::cache::{ExtractionCache, Fingerprint};
 use crate::error::{Diagnostic, Severity};
 use crate::extractor::{self, ExtractOptions, ExtractionIdGenerators, InMemorySource};
-use crate::graph::GraphBuilder;
 use crate::input;
 use crate::language::LangId;
 use crate::model::{FileExtraction, SnapshotId};
@@ -312,14 +311,18 @@ pub fn incremental_reanalyze(
     state: &mut WatchState,
 ) -> Result<(GraphAnalysis, ChangeSet, Vec<Diagnostic>), crate::Error> {
     let started = Instant::now();
-    let (merged, change_set, mut diagnostics) = reanalyze_extractions(root, languages, &[], state)?;
+    let (merged, change_set, extraction_diagnostics) =
+        reanalyze_extractions(root, languages, &[], state)?;
 
     let snapshot_id = state.next_snapshot_id()?;
-    let (graph, scc) = GraphBuilder::from_extractions(&merged, root, snapshot_id, &mut diagnostics);
+    let (analysis, graph_diagnostics) = crate::pipeline::build_analysis(merged, root, snapshot_id);
+
+    let mut diagnostics = extraction_diagnostics;
+    diagnostics.extend(graph_diagnostics);
     diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
 
     tracing::info!(
-        total = merged.len(),
+        total = analysis.extractions.len(),
         added = change_set.files_added,
         removed = change_set.files_removed,
         modified = change_set.files_modified,
@@ -327,13 +330,6 @@ pub fn incremental_reanalyze(
         elapsed_ms = started.elapsed().as_millis(),
         "Incremental re-analysis complete",
     );
-
-    let analysis = GraphAnalysis {
-        graph,
-        scc,
-        snapshot_id,
-        extractions: merged,
-    };
 
     Ok((analysis, change_set, diagnostics))
 }
