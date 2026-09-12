@@ -14,6 +14,7 @@ mod integration {
     mod graph_regression_test;
     mod import_test;
     mod inspect_output_test;
+    mod output_defaults_test;
     mod output_format_test;
     mod pipeline_equivalence_test;
     mod pipeline_test;
