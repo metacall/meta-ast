@@ -637,7 +637,13 @@ pub(crate) fn extract_def_use_dataflow(
     }
 
     let mut nodes: Vec<DataNode> = Vec::new();
-    let mut def_ids: Vec<(String, usize, DataNodeId, bool)> = Vec::new();
+    // Definitions grouped by their enclosing scope and name, in source order:
+    // a use looks up its own bucket instead of scanning every definition, and
+    // the nearest preceding definition is the last entry before the use.
+    let mut defs_by_scope: std::collections::HashMap<
+        usize,
+        std::collections::HashMap<String, Vec<(usize, DataNodeId)>>,
+    > = std::collections::HashMap::new();
     for (name, byte_pos, node, is_param) in &defs {
         let scope = if *is_param {
             DataScope::Parameter
@@ -652,29 +658,35 @@ pub(crate) fn extract_def_use_dataflow(
             type_hint: None,
             source_range: source_range_from_node(node),
         };
-        def_ids.push((name.clone(), *byte_pos, dn.id, *is_param));
+        let scope_start = find_enclosing_scope(tree.root_node(), *byte_pos, function_kinds);
+        defs_by_scope
+            .entry(scope_start)
+            .or_default()
+            .entry(name.clone())
+            .or_default()
+            .push((*byte_pos, dn.id));
         nodes.push(dn);
+    }
+    for by_name in defs_by_scope.values_mut() {
+        for candidates in by_name.values_mut() {
+            candidates.sort_by_key(|(byte_pos, _)| *byte_pos);
+        }
     }
 
     let mut edges: Vec<FlowEdge> = Vec::new();
     for (use_name, use_pos, use_node, use_func_start) in &uses {
-        let mut best_def: Option<&(String, usize, DataNodeId, bool)> = None;
-        for def in &def_ids {
-            if def.0 == *use_name
-                && def.1 < *use_pos
-                && find_enclosing_scope(tree.root_node(), def.1, function_kinds) == *use_func_start
-            {
-                match best_def {
-                    None => best_def = Some(def),
-                    Some(best) => {
-                        if def.1 > best.1 {
-                            best_def = Some(def);
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(def) = best_def {
+        let best_def = defs_by_scope
+            .get(use_func_start)
+            .and_then(|by_name| by_name.get(use_name.as_str()))
+            .and_then(|candidates| {
+                let preceding = candidates.partition_point(|(byte_pos, _)| byte_pos < use_pos);
+                preceding
+                    .checked_sub(1)
+                    .and_then(|index| candidates.get(index))
+                    .map(|(_, def_id)| *def_id)
+            });
+
+        if let Some(def_id) = best_def {
             let use_dn = DataNode {
                 id: id_gen.next(),
                 symbol_id: None,
@@ -686,7 +698,7 @@ pub(crate) fn extract_def_use_dataflow(
             let target_id = use_dn.id;
             nodes.push(use_dn);
             edges.push(FlowEdge {
-                source: def.2,
+                source: def_id,
                 target: target_id,
                 kind: FlowKind::DefUse,
                 confidence: CONFIDENCE_DEF_USE,
