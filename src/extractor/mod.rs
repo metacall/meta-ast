@@ -168,7 +168,9 @@ fn renumber_data_nodes(
     }
 
     let counter = IdGenerator::<DataNodeId>::with_start(
-        id_generators.data_nodes.reserve(file.data_nodes.len() as u32),
+        id_generators
+            .data_nodes
+            .reserve(file.data_nodes.len() as u32),
     );
     let mut node_map = HashMap::with_capacity(file.data_nodes.len());
     for node in &mut file.data_nodes {

@@ -3,12 +3,18 @@
 //! Listens for file-system events using `notify-debouncer-mini`, triggers
 //! incremental re-analysis, and invokes the change callback.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use crate::input;
+use crate::language::LangId;
 use crate::pipeline::GraphAnalysis;
 use crate::reanalyze::{ChangeSet, WatchState, incremental_reanalyze};
 use crate::watch::config::WatchConfig;
+
+/// How long the loop waits for events before it checks the stop flag again.
+const IDLE_POLL: Duration = Duration::from_millis(100);
 
 /// Start a debounced file-system watcher on `root` and re-analyse on changes.
 ///
@@ -16,11 +22,26 @@ use crate::watch::config::WatchConfig;
 /// every subsequent incremental re-analysis. Typical usage: emit serialized
 /// graph output on each change.
 ///
-/// This function blocks until the watcher encounters an unrecoverable error
-/// or the underlying channel disconnects.
+/// This function blocks until the watcher channel disconnects, or until a
+/// failed tick is the only outcome left. Interrupts terminate the process.
+/// Use [`run_watch_until`] to stop the loop from another thread.
 pub fn run_watch(
     root: PathBuf,
     config: WatchConfig,
+    on_change: impl FnMut(&GraphAnalysis, &ChangeSet) -> Result<(), anyhow::Error>,
+) -> anyhow::Result<()> {
+    let stop = AtomicBool::new(false);
+    run_watch_until(root, config, &stop, on_change)
+}
+
+/// Like [`run_watch`], but the loop also stops when `stop` is set.
+///
+/// A tick that fails to emit or to re-analyse is counted and reported once the
+/// loop ends, so a long watch run cannot hide a broken output path.
+pub fn run_watch_until(
+    root: PathBuf,
+    config: WatchConfig,
+    stop: &AtomicBool,
     mut on_change: impl FnMut(&GraphAnalysis, &ChangeSet) -> Result<(), anyhow::Error>,
 ) -> anyhow::Result<()> {
     use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
@@ -28,6 +49,7 @@ pub fn run_watch(
     let mut state = WatchState::new();
 
     let languages = config.languages.as_deref();
+    let debounce = config.debounce();
 
     tracing::info!(root = %root.display(), "Running initial analysis");
     let (analysis, change_set, diags) = incremental_reanalyze(&root, languages, &mut state)?;
@@ -44,7 +66,7 @@ pub fn run_watch(
     on_change(&analysis, &change_set)?;
 
     let (tx, rx) = std::sync::mpsc::channel::<DebounceEventResult>();
-    let mut debouncer = new_debouncer(config.debounce, move |res| {
+    let mut debouncer = new_debouncer(debounce, move |res| {
         let _ = tx.send(res);
     })?;
 
@@ -55,19 +77,23 @@ pub fn run_watch(
 
     tracing::info!(
         root = %root.display(),
-        debounce_ms = config.debounce.as_millis(),
+        debounce_ms = debounce.as_millis(),
         "Watching for file changes",
     );
 
-    for res in rx {
+    let mut failures = 0usize;
+    while !stop.load(Ordering::Relaxed) {
+        let res = match rx.recv_timeout(IDLE_POLL) {
+            Ok(res) => res,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+
         match res {
             Ok(events) => {
-                let relevant = events.iter().any(|e| {
-                    e.path.is_dir()
-                        || input::detect_language(&e.path)
-                            .is_some_and(|lang| languages.is_none_or(|langs| langs.contains(&lang)))
-                });
-                if !relevant && !events.is_empty() {
+                let relevant =
+                    has_relevant_path(events.iter().map(|event| event.path.as_path()), languages);
+                if !relevant {
                     continue;
                 }
 
@@ -83,17 +109,70 @@ pub fn run_watch(
                             );
                         }
                         if let Err(e) = on_change(&analysis, &change_set) {
+                            failures += 1;
                             tracing::error!("Emit error: {e}");
                         }
                     }
-                    Err(e) => tracing::error!("Re-analysis error: {e}"),
+                    Err(e) => {
+                        failures += 1;
+                        tracing::error!("Re-analysis error: {e}");
+                    }
                 }
             }
             Err(e) => {
+                failures += 1;
                 tracing::error!("Watch error: {e}");
             }
         }
     }
 
+    if failures > 0 {
+        anyhow::bail!("watch stopped after {failures} failed tick(s)");
+    }
+
     Ok(())
+}
+
+/// A batch matters only when it touches a source file of a wanted language.
+///
+/// Directory metadata events fire on every child change and carry no source
+/// path, so they never justify a full re-analysis on their own.
+fn has_relevant_path<'a>(
+    paths: impl Iterator<Item = &'a Path>,
+    languages: Option<&[LangId]>,
+) -> bool {
+    paths.into_iter().any(|path| {
+        input::detect_language(path)
+            .is_some_and(|lang| languages.is_none_or(|langs| langs.contains(&lang)))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directory_events_are_not_relevant() {
+        let paths = [Path::new("/tmp/project"), Path::new("/tmp/project/sub")];
+        assert!(!has_relevant_path(paths.iter().copied(), None));
+    }
+
+    #[test]
+    fn source_events_are_relevant() {
+        let paths = [Path::new("/tmp/project"), Path::new("/tmp/project/main.py")];
+        assert!(has_relevant_path(paths.iter().copied(), None));
+    }
+
+    #[test]
+    fn language_filter_applies_to_events() {
+        let paths = [Path::new("/tmp/project/main.py")];
+        assert!(!has_relevant_path(
+            paths.iter().copied(),
+            Some(&[LangId::Rust])
+        ));
+        assert!(has_relevant_path(
+            paths.iter().copied(),
+            Some(&[LangId::Python])
+        ));
+    }
 }

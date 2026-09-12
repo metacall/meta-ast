@@ -165,8 +165,10 @@ pub fn reanalyze_extractions(
 
     // A file that cannot be read keeps its cached extraction. Its fingerprint is
     // missing, so the stale sweep must not treat it as deleted.
-    let failed_reads: HashSet<PathBuf> =
-        read_diagnostics.iter().map(|diag| diag.path.clone()).collect();
+    let failed_reads: HashSet<PathBuf> = read_diagnostics
+        .iter()
+        .map(|diag| diag.path.clone())
+        .collect();
 
     for (path, lang) in &targets {
         let Some(curr_fp) = current_fingerprints.get(path) else {
@@ -201,9 +203,7 @@ pub fn reanalyze_extractions(
     let stale: Vec<PathBuf> = state
         .cache
         .paths()
-        .filter(|path| {
-            !current_fingerprints.contains_key(*path) && !failed_reads.contains(*path)
-        })
+        .filter(|path| !current_fingerprints.contains_key(*path) && !failed_reads.contains(*path))
         .cloned()
         .collect();
     if !stale.is_empty() {
@@ -260,11 +260,7 @@ pub fn reanalyze_extractions(
                     message: message.clone(),
                     source_range: None,
                 });
-                new_extractions.push(FileExtraction::failed(
-                    path.clone(),
-                    overlay.lang,
-                    message,
-                ));
+                new_extractions.push(FileExtraction::failed(path.clone(), overlay.lang, message));
             }
         }
     }
