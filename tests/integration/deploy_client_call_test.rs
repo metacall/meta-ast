@@ -52,7 +52,7 @@ mod deploy_client_call_tests {
     fn test_client_call_mesh_pod_manifest() {
         let (_out_dir, manifest) = run_deploy_on_fixture();
 
-        assert_eq!(manifest["version"].as_str().unwrap(), "1.0");
+        assert_eq!(manifest["version"].as_str().unwrap(), "1.1");
 
         let deployments = manifest["deployments"].as_array().unwrap();
         assert_eq!(

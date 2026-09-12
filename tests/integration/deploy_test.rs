@@ -30,7 +30,7 @@ mod deploy_tests {
         // Verify pod manifest content
         let pod_content = fs::read_to_string(out_path.join("metacall.pods.json")).unwrap();
         let pod_json: serde_json::Value = serde_json::from_str(&pod_content).unwrap();
-        assert_eq!(pod_json["version"], "1.0");
+        assert_eq!(pod_json["version"], "1.1");
         assert!(!pod_json["deployments"].as_array().unwrap().is_empty());
         // python_calls_js has both Python and JS files
         let languages: Vec<&str> = pod_json["deployments"]
@@ -120,9 +120,10 @@ mod deploy_tests {
             .iter()
             .filter(|e| e["kind"].as_str() == Some("rpc_stub"))
             .filter(|e| {
-                e["cut_annotation"]["cut_reason"]
-                    .get("OversizedPod")
-                    .is_some()
+                e["cut_annotations"].as_array().is_some_and(|cuts| {
+                    cuts.iter()
+                        .any(|cut| cut["cut_reason"].get("OversizedPod").is_some())
+                })
             })
             .collect();
         assert!(
@@ -138,9 +139,10 @@ mod deploy_tests {
             .iter()
             .filter(|e| e["kind"].as_str() == Some("rpc_stub"))
             .filter(|e| {
-                e["cut_annotation"]["cut_reason"]
-                    .get("OversizedPod")
-                    .is_some()
+                e["cut_annotations"].as_array().is_some_and(|cuts| {
+                    cuts.iter()
+                        .any(|cut| cut["cut_reason"].get("OversizedPod").is_some())
+                })
             })
             .collect();
         assert!(

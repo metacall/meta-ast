@@ -121,9 +121,15 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
 
         // Only union files in the same language.
         if src_lang == dst_lang && src_lang.is_some() {
-            let i = file_idx[&src_fid] as u32;
-            let j = file_idx[&dst_fid] as u32;
-            uf.union(i, j);
+            let (Some(&i), Some(&j)) = (file_idx.get(&src_fid), file_idx.get(&dst_fid)) else {
+                tracing::warn!(
+                    from = src_fid.to_raw(),
+                    to = dst_fid.to_raw(),
+                    "partition skipped an edge with a stale file id"
+                );
+                continue;
+            };
+            uf.union(i as u32, j as u32);
         }
     }
 
@@ -179,8 +185,17 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
             continue;
         };
 
-        let src_rep = labeling[file_idx[&src_fid]];
-        let dst_rep = labeling[file_idx[&dst_fid]];
+        let (Some(&src_pos), Some(&dst_pos)) = (file_idx.get(&src_fid), file_idx.get(&dst_fid))
+        else {
+            tracing::warn!(
+                from = src_fid.to_raw(),
+                to = dst_fid.to_raw(),
+                "inter-pod pass skipped an edge with a stale file id"
+            );
+            continue;
+        };
+        let src_rep = labeling[src_pos];
+        let dst_rep = labeling[dst_pos];
         if src_rep == dst_rep {
             continue; // intra-pod edge, not inter-pod.
         }

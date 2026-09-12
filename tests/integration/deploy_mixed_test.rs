@@ -145,7 +145,7 @@ mod deploy_mixed_tests {
     #[test]
     fn test_cross_language_manifest_version() {
         let (_out_dir, manifest) = run_deploy_on_fixture("three_lang_math");
-        assert_eq!(manifest["version"].as_str().unwrap(), "1.0");
+        assert_eq!(manifest["version"].as_str().unwrap(), "1.1");
     }
 
     #[test]
@@ -251,9 +251,12 @@ mod deploy_mixed_tests {
             cross_lang >= 4,
             "expected >= 4 cross-language edges (loads + cycle), got {cross_lang}"
         );
-        let has_scc_cut = edges
-            .iter()
-            .any(|e| e["cut_annotation"]["cut_reason"].as_str() == Some("CrossLanguageScc"));
+        let has_scc_cut = edges.iter().any(|e| {
+            e["cut_annotations"].as_array().is_some_and(|cuts| {
+                cuts.iter()
+                    .any(|cut| cut["cut_reason"].as_str() == Some("CrossLanguageScc"))
+            })
+        });
         assert!(
             has_scc_cut,
             "expected a CrossLanguageScc cut, edges: {edges:?}"
@@ -383,18 +386,21 @@ mod deploy_mixed_tests {
 
         // The cross-language cut must fire for the py<->go metacall cycle.
         let edges = manifest["edges"].as_array().unwrap();
-        let has_scc_cut = edges
-            .iter()
-            .any(|e| e["cut_annotation"]["cut_reason"].as_str() == Some("CrossLanguageScc"));
+        let has_scc_cut = edges.iter().any(|e| {
+            e["cut_annotations"].as_array().is_some_and(|cuts| {
+                cuts.iter()
+                    .any(|cut| cut["cut_reason"].as_str() == Some("CrossLanguageScc"))
+            })
+        });
         assert!(
             has_scc_cut,
             "expected a CrossLanguageScc cut, edges: {edges:?}"
         );
 
-        // Every cut edge must carry an rpc_stub-style cut_annotation and a
+        // Every cut edge must carry rpc_stub-style cut annotations and a
         // counterpart pod pair (fairness invariant from ADR 0003).
         for e in edges {
-            if let Some(cut) = e["cut_annotation"].as_object() {
+            for cut in e["cut_annotations"].as_array().into_iter().flatten() {
                 assert!(
                     cut.get("cut_reason").is_some(),
                     "cut edge missing cut_reason: {e:?}"
