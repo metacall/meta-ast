@@ -159,6 +159,16 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
     let n_pods = partition.pods.len();
     let n_inter = partition.inter_pod_edges.len();
 
+    for pod in &partition.pods {
+        if !tags::has_loader(pod.language) {
+            tracing::warn!(
+                pod = pod.id,
+                language = %pod.language,
+                "MetaCall has no loader for this language yet; the pod tag is informational",
+            );
+        }
+    }
+
     // 8. Compute metrics from extractions (zero re-parsing)
     let file_metrics = metrics::compute_file_metrics(&analysis.extractions);
     let pod_metrics = metrics::compute_pod_metrics(&partition, &file_metrics, &analysis.graph);

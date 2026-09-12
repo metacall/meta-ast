@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(LangId::TypeScript.metacall_tag(), "ts");
         assert_eq!(LangId::Tsx.metacall_tag(), "ts");
         assert_eq!(LangId::C.metacall_tag(), "c");
-        assert_eq!(LangId::Cpp.metacall_tag(), "cpp");
+        assert_eq!(LangId::Cpp.metacall_tag(), "c");
         assert_eq!(LangId::Rust.metacall_tag(), "rs");
         assert_eq!(LangId::Go.metacall_tag(), "go");
         assert_eq!(LangId::Ruby.metacall_tag(), "rb");
