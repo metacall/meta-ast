@@ -18,6 +18,7 @@ mod integration {
     mod pipeline_equivalence_test;
     mod pipeline_test;
     mod reanalyze_api_test;
+    mod shard_hygiene_test;
     mod shard_index_test;
     mod shard_test;
     #[cfg(feature = "watch")]
