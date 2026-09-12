@@ -7,7 +7,7 @@
 //! This module is not gated by the `watch` feature. Only the OS watcher in
 //! [`crate::watch`] needs that feature.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -158,8 +158,16 @@ pub fn reanalyze_extractions(
     let mut changed_disk: Vec<(PathBuf, LangId)> = Vec::new();
     let mut changed_overlays: Vec<&Overlay> = Vec::new();
 
+    // A file that cannot be read keeps its cached extraction. Its fingerprint is
+    // missing, so the stale sweep must not treat it as deleted.
+    let failed_reads: HashSet<PathBuf> =
+        read_diagnostics.iter().map(|diag| diag.path.clone()).collect();
+
     for (path, lang) in &targets {
         let Some(curr_fp) = current_fingerprints.get(path) else {
+            if failed_reads.contains(path) {
+                change_set.files_unchanged += 1;
+            }
             continue;
         };
         let changed = match state.cache.fingerprint_of(path) {
@@ -188,7 +196,9 @@ pub fn reanalyze_extractions(
     let stale: Vec<PathBuf> = state
         .cache
         .paths()
-        .filter(|path| !current_fingerprints.contains_key(*path))
+        .filter(|path| {
+            !current_fingerprints.contains_key(*path) && !failed_reads.contains(*path)
+        })
         .cloned()
         .collect();
     if !stale.is_empty() {
