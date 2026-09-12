@@ -13,6 +13,7 @@ pub(crate) mod dataflow;
 pub(crate) mod go;
 pub mod import_resolver;
 pub(crate) mod javascript;
+pub(crate) mod pack;
 pub(crate) mod python;
 pub(crate) mod ruby;
 pub(crate) mod rust;
@@ -358,5 +359,190 @@ mod tests {
         assert_eq!(LangId::Rust.metacall_tag(), "rs");
         assert_eq!(LangId::Go.metacall_tag(), "go");
         assert_eq!(LangId::Ruby.metacall_tag(), "rb");
+    }
+
+    /// The pack declarations keep this surface when a macro owns them:
+    /// extensions, visibility defaults, doc comment rules and the node kinds
+    /// each extraction step keys on.
+    #[test]
+    fn specs_keep_their_documented_surface() {
+        struct Expected {
+            extensions: &'static [&'static str],
+            default_visibility: DefaultVisibility,
+            doc_prefixes: Option<&'static [&'static str]>,
+            doc_block_open: Option<&'static str>,
+            class_like_parents: &'static [&'static str],
+            ancestor_rules: usize,
+            import_kinds: &'static [&'static str],
+            visibility_from_name: bool,
+        }
+
+        let public = DefaultVisibility::PublicByDefault;
+        let private = DefaultVisibility::PrivateByDefault;
+        let cases: [(LangId, Expected); 9] = [
+            (
+                LangId::Python,
+                Expected {
+                    extensions: &["py", "pyi"],
+                    default_visibility: public,
+                    doc_prefixes: None,
+                    doc_block_open: None,
+                    class_like_parents: &["class_definition"],
+                    ancestor_rules: 0,
+                    import_kinds: &["import_statement", "import_from_statement"],
+                    visibility_from_name: false,
+                },
+            ),
+            (
+                LangId::JavaScript,
+                Expected {
+                    extensions: &["js", "mjs", "cjs"],
+                    default_visibility: private,
+                    doc_prefixes: Some(&["//"]),
+                    doc_block_open: Some("/**"),
+                    class_like_parents: &["class_declaration", "class"],
+                    ancestor_rules: 1,
+                    import_kinds: &["import_statement"],
+                    visibility_from_name: false,
+                },
+            ),
+            (
+                LangId::TypeScript,
+                Expected {
+                    extensions: &["ts", "cts", "mts"],
+                    default_visibility: private,
+                    doc_prefixes: Some(&["//"]),
+                    doc_block_open: Some("/**"),
+                    class_like_parents: &["class_declaration", "class"],
+                    ancestor_rules: 1,
+                    import_kinds: &["import_statement"],
+                    visibility_from_name: false,
+                },
+            ),
+            (
+                LangId::Tsx,
+                Expected {
+                    extensions: &["tsx"],
+                    default_visibility: private,
+                    doc_prefixes: Some(&["//"]),
+                    doc_block_open: Some("/**"),
+                    class_like_parents: &["class_declaration", "class"],
+                    ancestor_rules: 1,
+                    import_kinds: &["import_statement"],
+                    visibility_from_name: false,
+                },
+            ),
+            (
+                LangId::C,
+                Expected {
+                    extensions: &["c", "h"],
+                    default_visibility: public,
+                    doc_prefixes: Some(&["//"]),
+                    doc_block_open: Some("/**"),
+                    class_like_parents: &[],
+                    ancestor_rules: 0,
+                    import_kinds: &["preproc_include"],
+                    visibility_from_name: false,
+                },
+            ),
+            (
+                LangId::Cpp,
+                Expected {
+                    extensions: &["cc", "cpp", "cxx", "hpp"],
+                    default_visibility: private,
+                    doc_prefixes: Some(&["//"]),
+                    doc_block_open: Some("/**"),
+                    class_like_parents: &["class_specifier", "struct_specifier"],
+                    ancestor_rules: 0,
+                    import_kinds: &["preproc_include"],
+                    visibility_from_name: false,
+                },
+            ),
+            (
+                LangId::Rust,
+                Expected {
+                    extensions: &["rs"],
+                    default_visibility: private,
+                    doc_prefixes: Some(&["///", "//!"]),
+                    doc_block_open: Some("/**"),
+                    class_like_parents: &["impl_item"],
+                    ancestor_rules: 0,
+                    import_kinds: &["use_declaration"],
+                    visibility_from_name: false,
+                },
+            ),
+            (
+                LangId::Go,
+                Expected {
+                    extensions: &["go"],
+                    default_visibility: private,
+                    doc_prefixes: Some(&["//"]),
+                    doc_block_open: None,
+                    class_like_parents: &[],
+                    ancestor_rules: 0,
+                    import_kinds: &["import_declaration"],
+                    visibility_from_name: true,
+                },
+            ),
+            (
+                LangId::Ruby,
+                Expected {
+                    extensions: &["rb", "gemspec"],
+                    default_visibility: public,
+                    doc_prefixes: Some(&["#"]),
+                    doc_block_open: None,
+                    class_like_parents: &["class", "module"],
+                    ancestor_rules: 0,
+                    import_kinds: &[],
+                    visibility_from_name: false,
+                },
+            ),
+        ];
+
+        for (lang, want) in cases {
+            let spec = spec_for(lang);
+            assert_eq!(spec.extensions, want.extensions, "{lang:?} extensions");
+            assert_eq!(
+                spec.default_visibility, want.default_visibility,
+                "{lang:?} default visibility"
+            );
+            assert_eq!(
+                spec.class_like_parents, want.class_like_parents,
+                "{lang:?} class-like parents"
+            );
+            assert_eq!(
+                spec.ancestor_visibility_rules.len(),
+                want.ancestor_rules,
+                "{lang:?} ancestor visibility rules"
+            );
+            assert_eq!(
+                spec.import_statement_kinds, want.import_kinds,
+                "{lang:?} import statement kinds"
+            );
+            assert_eq!(
+                spec.visibility_from_name.is_some(),
+                want.visibility_from_name,
+                "{lang:?} name-based visibility"
+            );
+            match (spec.doc_comment_config.as_ref(), want.doc_prefixes) {
+                (None, None) => {}
+                (Some(config), Some(prefixes)) => {
+                    assert_eq!(config.line_prefixes, prefixes, "{lang:?} doc prefixes");
+                    assert_eq!(
+                        config.block_open, want.doc_block_open,
+                        "{lang:?} doc block opener"
+                    );
+                }
+                (config, prefixes) => panic!(
+                    "{lang:?} doc comment configuration mismatch: {config:?} against {prefixes:?}"
+                ),
+            }
+        }
+
+        let rule = spec_for(LangId::Go).visibility_from_name;
+        assert!(rule.is_some(), "Go derives visibility from the name");
+        let rule = rule.unwrap();
+        assert_eq!(rule("Exported"), Some(Visibility::Public));
+        assert_eq!(rule("hidden"), None);
     }
 }
