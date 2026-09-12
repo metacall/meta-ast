@@ -12,16 +12,24 @@ struct CountingAllocator;
 
 static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
 
+// SAFETY: every method forwards the same layout and pointer to the system
+// allocator unchanged, so the allocator contract is preserved. The counter is
+// the only state this wrapper adds.
 unsafe impl GlobalAlloc for CountingAllocator {
+    // SAFETY: the layout is forwarded unchanged to the system allocator.
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
         unsafe { System.alloc(layout) }
     }
 
+    // SAFETY: the pointer and layout come from the system allocator, which is
+    // the allocator that frees them here.
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         unsafe { System.dealloc(ptr, layout) }
     }
 
+    // SAFETY: the pointer, layout and new size are forwarded unchanged to the
+    // system allocator that owns the block.
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
         unsafe { System.realloc(ptr, layout, new_size) }
@@ -101,6 +109,7 @@ fn one_extraction_stays_inside_its_allocation_budget() {
         warmed.file.symbols.len(),
         "two passes over the same buffer agree"
     );
+    println!("one extraction allocates {allocations} times");
     assert!(
         allocations <= EXTRACTION_BUDGET,
         "one extraction allocates {allocations} times, over the budget of {EXTRACTION_BUDGET}"
