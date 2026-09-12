@@ -52,6 +52,8 @@ pub struct GraphMetadata {
     pub symbol_count: usize,
     /// Number of data-bearing nodes
     pub data_node_count: usize,
+    /// Edges whose confidence was not finite and was normalized to `0.0`
+    pub invalid_confidence_edges: usize,
 }
 
 /// Serialized node representation.
@@ -99,9 +101,12 @@ pub struct SerializedEdge {
     pub target: usize,
     /// Edge kind: "ownership", "import", "reference", or "flow"
     pub kind: String,
-    /// Confidence score (0.0-1.0), omitted when 1.0
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub confidence: Option<f32>,
+    /// Confidence score in the range 0.0-1.0.
+    ///
+    /// Always serialized: absence must not have to mean `1.0`. A non-finite
+    /// value is corruption and is written as `0.0` (see
+    /// `GraphMetadata::invalid_confidence_edges`).
+    pub confidence: f32,
     /// Flow kind for dataflow edges (def_use, argument, return, field_access)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flow_kind: Option<String>,
@@ -181,6 +186,7 @@ impl GraphOutput {
         let mut file_count = 0;
         let mut symbol_count = 0;
         let mut data_node_count = 0;
+        let mut invalid_confidence_edges = 0;
 
         for node_data in g.node_weights() {
             match node_data {
@@ -188,6 +194,11 @@ impl GraphOutput {
                 NodeData::Symbol(_) => symbol_count += 1,
                 NodeData::External(_) => {}
                 NodeData::Data(_) => data_node_count += 1,
+            }
+        }
+        for edge_data in g.edge_weights() {
+            if !edge_data.confidence.is_finite() {
+                invalid_confidence_edges += 1;
             }
         }
 
@@ -199,6 +210,7 @@ impl GraphOutput {
             file_count,
             symbol_count,
             data_node_count,
+            invalid_confidence_edges,
         }
     }
 
@@ -291,10 +303,12 @@ impl GraphOutput {
             .filter_map(|edge_idx| {
                 let (source, target) = g.edge_endpoints(edge_idx)?;
                 let edge_data = g.edge_weight(edge_idx)?;
-                let confidence = if edge_data.confidence < 1.0 {
-                    Some(edge_data.confidence)
+                // A non-finite confidence is corruption. It is reported in the
+                // metadata and written as 0.0, never omitted.
+                let confidence = if edge_data.confidence.is_finite() {
+                    edge_data.confidence.clamp(0.0, 1.0)
                 } else {
-                    None
+                    0.0
                 };
 
                 let flow_kind = if edge_data.kind == EdgeKind::Flow {
@@ -556,7 +570,7 @@ mod tests {
         let output = GraphOutput::from_graph(&graph, Some(&scc), 1);
         assert_eq!(output.edges.len(), 1);
         assert_eq!(output.edges[0].kind, "flow");
-        assert_eq!(output.edges[0].confidence, Some(0.9));
+        assert_eq!(output.edges[0].confidence, 0.9);
         assert_eq!(output.edges[0].flow_kind.as_deref(), Some("argument"));
     }
 
@@ -585,7 +599,7 @@ mod tests {
 
         let output = GraphOutput::from_graph(&graph, Some(&scc), 1);
         assert_eq!(output.edges[0].flow_kind, None);
-        assert_eq!(output.edges[0].confidence, None); // 1.0 → omitted
+        assert_eq!(output.edges[0].confidence, 1.0);
     }
 
     // ── Light mode (no SCC) tests ───────────────────────────────────

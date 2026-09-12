@@ -12,12 +12,34 @@ pub fn to_graph_html(
     snapshot_id: u64,
 ) -> anyhow::Result<String> {
     let graph_output = GraphOutput::from_graph(graph, Some(scc_analysis), snapshot_id);
-    let json_data = serde_json::to_string(&graph_output)?;
+    let json_data = escape_script_payload(&serde_json::to_string(&graph_output)?);
 
     let html = HTML_TEMPLATE
         .replacen("__CDN_SCRIPT__", &cdn_script(), 1)
         .replacen("__DATA__", &json_data, 1);
     Ok(html)
+}
+
+/// Escape a JSON payload for a `<script>` element.
+///
+/// JSON escaping protects a JSON parser, not the HTML parser inside the
+/// element: the element ends at the first `</script`, so `<`, `>`, `&` and
+/// the JavaScript line separators become `\uXXXX` escapes. Every escape
+/// decodes to the same character, so a JSON consumer reads the original
+/// payload. The analyzed project is untrusted input.
+fn escape_script_payload(json: &str) -> String {
+    let mut escaped = String::with_capacity(json.len());
+    for ch in json.chars() {
+        match ch {
+            '<' => escaped.push_str("\\u003c"),
+            '>' => escaped.push_str("\\u003e"),
+            '&' => escaped.push_str("\\u0026"),
+            '\u{2028}' => escaped.push_str("\\u2028"),
+            '\u{2029}' => escaped.push_str("\\u2029"),
+            other => escaped.push(other),
+        }
+    }
+    escaped
 }
 
 fn cdn_script() -> String {

@@ -47,12 +47,25 @@ pub fn emit_graph(analysis: &GraphAnalysis, config: &EmitConfig) -> anyhow::Resu
             .output
             .clone()
             .unwrap_or_else(|| PathBuf::from("project.metast"));
-        let path_str = path.to_string_lossy().to_string();
         std::fs::write(&path, html)?;
         if config.open_browser {
-            let open_res = webbrowser::open(&path_str);
-            if let Err(e) = open_res {
-                tracing::warn!(error = %e, "could not open browser");
+            // A file URL keeps a non-UTF-8 path intact. `to_string_lossy` would
+            // replace the unencodable bytes, and the OS handler expects a URL.
+            let absolute = if path.is_absolute() {
+                path.clone()
+            } else {
+                std::env::current_dir()?.join(&path)
+            };
+            match url::Url::from_file_path(&absolute) {
+                Ok(url) => {
+                    if let Err(e) = webbrowser::open(url.as_str()) {
+                        tracing::warn!(error = %e, "could not open browser");
+                    }
+                }
+                Err(()) => tracing::warn!(
+                    path = %absolute.display(),
+                    "cannot open the dashboard in a browser"
+                ),
             }
         }
     } else {
