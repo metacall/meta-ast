@@ -88,3 +88,68 @@ pub fn compute_pod_metrics(
     }
     pod_metrics
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deploy::pod::{Pod, PodPartition};
+    use crate::graph::node::{FileNode, NodeData};
+    use crate::language::LangId;
+    use crate::model::ids::{FileId, SnapshotId};
+    use std::collections::HashMap;
+
+    /// The aggregate must saturate instead of overflowing.
+    #[test]
+    fn pod_metrics_total_saturates() {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let a = FileId::new(1).unwrap();
+        let b = FileId::new(2).unwrap();
+        for (fid, path) in [(a, "a.py"), (b, "b.py")] {
+            let idx = graph.add_node(NodeData::File(FileNode::new(
+                fid,
+                PathBuf::from(path),
+                LangId::Python,
+                SnapshotId::new(1).unwrap(),
+            )));
+            graph.file_to_index.insert(fid, idx);
+        }
+
+        let partition = PodPartition {
+            pods: vec![Pod {
+                id: 0,
+                files: vec![a, b],
+                language: LangId::Python,
+            }],
+            inter_pod_edges: Vec::new(),
+            file_languages: HashMap::from([(a, LangId::Python), (b, LangId::Python)]),
+        };
+        let file_metrics = HashMap::from([
+            (
+                PathBuf::from("a.py"),
+                FileMetrics {
+                    ast_node_count: usize::MAX,
+                    symbol_count: 0,
+                    import_count: 0,
+                    reference_count: 0,
+                },
+            ),
+            (
+                PathBuf::from("b.py"),
+                FileMetrics {
+                    ast_node_count: usize::MAX,
+                    symbol_count: 0,
+                    import_count: 0,
+                    reference_count: 0,
+                },
+            ),
+        ]);
+
+        let metrics = compute_pod_metrics(&partition, &file_metrics, &graph);
+        assert_eq!(metrics.len(), 1);
+        assert_eq!(
+            metrics[0].total_ast_nodes,
+            usize::MAX,
+            "the aggregate must saturate, not overflow"
+        );
+    }
+}

@@ -286,6 +286,53 @@ mod tests {
     }
 
     #[test]
+    fn cross_language_cut_names_the_files_not_ids() {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let py_id = FileId::new(1).unwrap();
+        let go_id = FileId::new(2).unwrap();
+        let py_idx = graph.add_node(NodeData::File(FileNode::new(
+            py_id,
+            PathBuf::from("orch.py"),
+            LangId::Python,
+            SnapshotId::new(1).unwrap(),
+        )));
+        let go_idx = graph.add_node(NodeData::File(FileNode::new(
+            go_id,
+            PathBuf::from("auth.go"),
+            LangId::Go,
+            SnapshotId::new(1).unwrap(),
+        )));
+        graph.file_to_index.insert(py_id, py_idx);
+        graph.file_to_index.insert(go_id, go_idx);
+        graph.add_edge_normalized(py_idx, go_idx, EdgeKind::Import, 1.0);
+        graph.add_edge_normalized(go_idx, py_idx, EdgeKind::Import, 1.0);
+
+        let scc = SccAnalysis::analyze(graph.graph());
+        let mut file_languages: HashMap<FileId, LangId> = HashMap::new();
+        file_languages.insert(py_id, LangId::Python);
+        file_languages.insert(go_id, LangId::Go);
+        let partition = partition_into_pods(&graph);
+        let cuts = find_cross_language_cuts(&scc, &graph, &file_languages, &partition);
+        let cut = cuts
+            .into_iter()
+            .find(|c| matches!(c.annotation.cut_reason, CutReason::CrossLanguageScc))
+            .expect("cross-language cycle must produce a CrossLanguageScc cut");
+
+        // ADR 0003 traceability: the annotation must name the cut files so a
+        // reader can find them. A numeric FileId is not traceable.
+        assert!(
+            cut.annotation.from_file.ends_with("orch.py"),
+            "from_file must be the source path, got {:?}",
+            cut.annotation.from_file
+        );
+        assert!(
+            cut.annotation.to_file.ends_with("auth.go"),
+            "to_file must be the target path, got {:?}",
+            cut.annotation.to_file
+        );
+    }
+
+    #[test]
     fn cross_language_cycle_produces_scc_cut() {
         let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
         let py_id = FileId::new(1).unwrap();

@@ -177,3 +177,131 @@ pub fn generate_pod_manifest(
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deploy::cut::{CutAnnotation, CutReason};
+    use crate::deploy::metrics::PodMetrics;
+    use crate::deploy::pod::{InterPodEdge, Pod, PodPartition};
+    use crate::graph::EdgeKind;
+    use crate::graph::node::{FileNode, NodeData};
+    use crate::language::LangId;
+    use crate::model::ids::{FileId, SnapshotId};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn test_partition() -> (PodPartition, CodeGraph) {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let py = FileId::new(1).unwrap();
+        let js = FileId::new(2).unwrap();
+        for (fid, path, lang) in [
+            (py, "a.py", LangId::Python),
+            (js, "b.js", LangId::JavaScript),
+        ] {
+            let idx = graph.add_node(NodeData::File(FileNode::new(
+                fid,
+                PathBuf::from(path),
+                lang,
+                SnapshotId::new(1).unwrap(),
+            )));
+            graph.file_to_index.insert(fid, idx);
+        }
+
+        let partition = PodPartition {
+            pods: vec![
+                Pod {
+                    id: 0,
+                    files: vec![py],
+                    language: LangId::Python,
+                },
+                Pod {
+                    id: 1,
+                    files: vec![js],
+                    language: LangId::JavaScript,
+                },
+            ],
+            inter_pod_edges: vec![InterPodEdge {
+                from_pod: 0,
+                to_pod: 1,
+                from_file: py,
+                to_file: js,
+                kind: EdgeKind::Import,
+                confidence: 0.6,
+                is_cross_language: true,
+            }],
+            file_languages: HashMap::from([(py, LangId::Python), (js, LangId::JavaScript)]),
+        };
+        (partition, graph)
+    }
+
+    fn cut(reason: CutReason, confidence: f32) -> CutEdge {
+        CutEdge {
+            from_pod: 0,
+            to_pod: 1,
+            annotation: CutAnnotation {
+                from_file: "a.py".to_string(),
+                to_file: "b.js".to_string(),
+                cut_reason: reason,
+                original_confidence: confidence,
+            },
+        }
+    }
+
+    /// Two cuts on one pod pair must surface as a single rpc_stub edge and keep
+    /// both annotations.
+    #[test]
+    fn two_cuts_on_one_pod_pair_emit_one_rpc_stub() {
+        let (partition, graph) = test_partition();
+        let metrics = vec![
+            PodMetrics {
+                total_ast_nodes: 1,
+                file_count: 1,
+                symbol_count: 0,
+            },
+            PodMetrics {
+                total_ast_nodes: 1,
+                file_count: 1,
+                symbol_count: 0,
+            },
+        ];
+        let cuts = vec![
+            cut(CutReason::CrossLanguageScc, 0.6),
+            cut(
+                CutReason::OversizedPod {
+                    pod_size: 4,
+                    max_size: 3,
+                },
+                0.3,
+            ),
+        ];
+
+        let manifest = generate_pod_manifest(&partition, &metrics, &cuts, &HashMap::new(), &graph);
+
+        let stubs: Vec<&ManifestEdge> = manifest
+            .edges
+            .iter()
+            .filter(|e| e.kind == "rpc_stub")
+            .collect();
+        assert_eq!(
+            stubs.len(),
+            1,
+            "one rpc_stub per pod pair, got {}: {:?}",
+            stubs.len(),
+            stubs
+                .iter()
+                .map(|e| (e.from_pod, e.to_pod))
+                .collect::<Vec<_>>()
+        );
+
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert!(
+            json.contains("CrossLanguageScc"),
+            "the SCC cut annotation must survive"
+        );
+        assert!(
+            json.contains("OversizedPod"),
+            "the oversized cut annotation must survive"
+        );
+    }
+}
