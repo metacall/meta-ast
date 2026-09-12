@@ -354,6 +354,58 @@ mod tests {
         assert!(func.docstring.as_ref().unwrap().contains("JSDoc comment"));
     }
 
+    fn symbol_names(symbols: &[crate::language::RawSymbol<'_>]) -> Vec<String> {
+        symbols.iter().map(|s| s.name.to_string()).collect()
+    }
+
+    #[test]
+    fn extract_arrow_function_assigned_to_const() {
+        let src = b"const compute = (a, b) => a + b;";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::JavaScript, &tree, src);
+        let found = symbols.iter().find(|s| s.name == "compute");
+        assert!(
+            found.is_some(),
+            "missing compute: {:?}",
+            symbol_names(&symbols)
+        );
+        let found = found.unwrap();
+        assert!(matches!(found.kind, SymbolKind::Function));
+        assert_eq!(found.signature.as_deref(), Some("(a, b)"));
+    }
+
+    #[test]
+    fn extract_exported_async_arrow_function() {
+        let src = b"export const handler = async () => {};";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::JavaScript, &tree, src);
+        let found = symbols.iter().find(|s| s.name == "handler");
+        assert!(
+            found.is_some(),
+            "missing handler: {:?}",
+            symbol_names(&symbols)
+        );
+        let found = found.unwrap();
+        assert!(matches!(found.kind, SymbolKind::Function));
+        assert!(found.is_async);
+        assert_eq!(found.visibility, Some(Visibility::Public));
+    }
+
+    #[test]
+    fn extract_function_expression_assigned_to_const() {
+        let src = b"const greet = function inner(x) { return x; };";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::JavaScript, &tree, src);
+        let found = symbols.iter().find(|s| s.name == "greet");
+        assert!(
+            found.is_some(),
+            "missing greet: {:?}",
+            symbol_names(&symbols)
+        );
+        assert!(!symbols.iter().any(|s| s.name == "inner"));
+        assert_eq!(found.unwrap().signature.as_deref(), Some("(x)"));
+    }
+
     #[test]
     fn js_insta_snapshot() {
         let src = std::fs::read_to_string(

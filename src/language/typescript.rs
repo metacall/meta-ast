@@ -265,6 +265,51 @@ mod tests {
         assert!(func.docstring.as_ref().unwrap().contains("TSDoc comment"));
     }
 
+    fn symbol_names(symbols: &[crate::language::RawSymbol<'_>]) -> Vec<String> {
+        symbols.iter().map(|s| s.name.to_string()).collect()
+    }
+
+    #[test]
+    fn extract_annotated_arrow_function() {
+        let src = b"const f: T = () => {};";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::TypeScript, &tree, src);
+        let found = symbols.iter().find(|s| s.name == "f");
+        assert!(found.is_some(), "missing f: {:?}", symbol_names(&symbols));
+        let found = found.unwrap();
+        assert!(matches!(found.kind, SymbolKind::Function));
+        assert_eq!(found.signature.as_deref(), Some("()"));
+    }
+
+    #[test]
+    fn extract_exported_annotated_arrow_function() {
+        let src = b"export const handler: Handler = async () => {};";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::TypeScript, &tree, src);
+        let found = symbols.iter().find(|s| s.name == "handler");
+        assert!(
+            found.is_some(),
+            "missing handler: {:?}",
+            symbol_names(&symbols)
+        );
+        let found = found.unwrap();
+        assert!(matches!(found.kind, SymbolKind::Function));
+        assert!(found.is_async);
+    }
+
+    #[test]
+    fn extract_typed_function_expression() {
+        let src = b"const g = function n(): void {};";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::TypeScript, &tree, src);
+        assert!(
+            symbols.iter().any(|s| s.name == "g"),
+            "missing g: {:?}",
+            symbol_names(&symbols)
+        );
+        assert!(!symbols.iter().any(|s| s.name == "n"));
+    }
+
     #[test]
     fn ts_insta_snapshot() {
         let src = std::fs::read_to_string(

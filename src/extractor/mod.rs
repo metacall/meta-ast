@@ -433,4 +433,32 @@ mod tests {
             "all IDs must be unique"
         );
     }
+
+    #[test]
+    fn parse_errors_are_reported_for_any_broken_tree() {
+        let clean = write_temp("parse_clean.py", b"def ok(): pass\n");
+        let slightly_broken = write_temp("parse_broken.py", b"def broken(\n   # no close paren\n");
+        let heavily_broken = write_temp("parse_heavily_broken.py", b"@@@ ??? (((\n");
+        let result = extract(&[
+            (clean.clone(), LangId::Python),
+            (slightly_broken.clone(), LangId::Python),
+            (heavily_broken.clone(), LangId::Python),
+        ]);
+
+        let parse_diagnostics = |path: &PathBuf| -> usize {
+            result
+                .files
+                .iter()
+                .find(|f| &f.path == path)
+                .unwrap()
+                .diagnostics
+                .iter()
+                .filter(|d| d.message.contains("parse errors"))
+                .count()
+        };
+
+        assert_eq!(parse_diagnostics(&clean), 0);
+        assert!(parse_diagnostics(&slightly_broken) > 0);
+        assert!(parse_diagnostics(&heavily_broken) > 0);
+    }
 }

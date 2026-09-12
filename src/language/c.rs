@@ -145,6 +145,54 @@ mod tests {
     }
 
     #[test]
+    fn extract_function_declaration() {
+        let src = b"int add(int a, int b);";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::C, &tree, src);
+        let found = symbols.iter().find(|s| s.name == "add");
+        assert!(found.is_some(), "missing add: {symbols:?}");
+        let found = found.unwrap();
+        assert_eq!(format!("{:?}", found.kind), "Declaration");
+        assert_eq!(found.signature.as_deref(), Some("(int a, int b)"));
+    }
+
+    #[test]
+    fn extract_pointer_returning_function_declaration() {
+        let src = b"int *f(void);";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::C, &tree, src);
+        let found = symbols.iter().find(|s| s.name == "f");
+        assert!(found.is_some(), "missing f: {symbols:?}");
+        assert_eq!(format!("{:?}", found.unwrap().kind), "Declaration");
+    }
+
+    #[test]
+    fn extern_variable_declaration_is_not_a_symbol() {
+        let src = b"extern int counter;";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::C, &tree, src);
+        assert!(!symbols.iter().any(|s| s.name == "counter"));
+    }
+
+    #[test]
+    fn typedef_function_pointer_is_not_a_declaration() {
+        let src = b"typedef int (*cb)(int);";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::C, &tree, src);
+        assert!(!symbols.iter().any(|s| s.name == "cb"));
+    }
+
+    #[test]
+    fn definition_is_not_marked_as_a_declaration() {
+        let src = b"int add(int a, int b) { return a + b; }";
+        let tree = parse(src);
+        let symbols = extract_symbols_for(LangId::C, &tree, src);
+        assert_eq!(symbols.len(), 1, "{symbols:?}");
+        assert_eq!(symbols[0].name, "add");
+        assert_eq!(format!("{:?}", symbols[0].kind), "Function");
+    }
+
+    #[test]
     fn c_insta_snapshot() {
         let src = std::fs::read_to_string(
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
