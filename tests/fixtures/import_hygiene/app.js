@@ -1,5 +1,5 @@
-import React from 'react';
-import { helper } from './helper';
+import React from "react";
+import { helper } from "./helper";
 
 export const compute = (value) => helper(value);
 

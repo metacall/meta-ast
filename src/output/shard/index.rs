@@ -13,11 +13,12 @@ use std::sync::Arc;
 
 use crate::model::{FileExtraction, IdGenerator, SymbolId};
 
-use super::edge::ShardEdge;
+use super::edge::{ShardEdge, ShardEdgeKind};
 use super::error::ShardError;
 use super::file::{LoadedShard, ShardFile, read_shard};
 use super::header::{ShardHeader, read_header};
 use super::manifest::{ShardManifestRecord, read_manifest};
+use super::name::is_device_stem;
 
 /// Directory name of the generated index under the project root.
 pub const INDEX_DIR_NAME: &str = ".meta-ast";
@@ -79,6 +80,22 @@ pub fn is_safe_shard_name(name: &str) -> bool {
             .any(|component| matches!(component, Component::ParentDir | Component::RootDir))
 }
 
+/// Reports whether a shard name can be written on every platform this index
+/// supports: it stays inside `shards/`, it does not end in a dot or a space,
+/// and its stem is not a reserved Windows device.
+pub fn is_writable_name(name: &str) -> bool {
+    if !is_safe_shard_name(name) {
+        return false;
+    }
+    let Some(file_name) = Path::new(name).file_name().and_then(|part| part.to_str()) else {
+        return false;
+    };
+    if file_name.ends_with('.') || file_name.ends_with(' ') {
+        return false;
+    }
+    !is_device_stem(file_name.split('.').next().unwrap_or_default())
+}
+
 /// Load and verify a `.meta-ast` index.
 ///
 /// IDs are assigned in manifest order, so the caller must pass a generator
@@ -102,9 +119,18 @@ pub fn load_index(
     let mut shards: BTreeMap<String, Vec<ShardFile>> = BTreeMap::new();
     let mut unreadable_shards: BTreeMap<String, String> = BTreeMap::new();
     for record in &manifest {
+        // Containment and writability stay separate, so a traversal attempt and
+        // a name that no portable writer creates do not look alike. Shard names
+        // are checked here, where the shard file is opened.
         if !is_safe_shard_name(&record.shard) {
             return Err(ShardError::UnsafeShardName {
                 name: record.shard.clone(),
+            });
+        }
+        if !is_writable_name(&record.shard) {
+            return Err(ShardError::UnwritableShardName {
+                name: record.shard.clone(),
+                reason: "the name is reserved or ends in a dot or a space",
             });
         }
         if shards.contains_key(&record.shard) {
@@ -221,6 +247,17 @@ pub fn load_index(
         stats,
         skips,
     })
+}
+
+impl LoadedIndex {
+    /// Persisted edges per kind, for a caller that reports index contents.
+    pub fn edge_counts_by_kind(&self) -> BTreeMap<ShardEdgeKind, usize> {
+        let mut counts = BTreeMap::new();
+        for edge in &self.edges {
+            *counts.entry(edge.kind).or_default() += 1;
+        }
+        counts
+    }
 }
 
 fn record_skip(

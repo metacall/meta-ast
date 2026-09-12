@@ -48,6 +48,9 @@ pub enum ShardError {
     #[error("unsafe shard name: {name}")]
     UnsafeShardName { name: String },
 
+    #[error("shard name '{name}' cannot be written on every platform: {reason}")]
+    UnwritableShardName { name: String, reason: &'static str },
+
     #[error("index path escapes the project root: {path:?}")]
     PathOutsideRoot { path: PathBuf },
 }

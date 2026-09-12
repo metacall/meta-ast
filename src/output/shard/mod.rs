@@ -24,9 +24,10 @@ pub use file::{
 pub use header::{ShardHeader, read_header, write_header};
 pub use index::{
     INDEX_DIR_NAME, IndexLoadOptions, IndexLoadStats, LoadedIndex, ShardSkip, is_safe_shard_name,
-    load_index,
+    is_writable_name, load_index,
 };
 pub use manifest::{ShardManifestRecord, read_manifest, write_manifest};
+pub use name::{ShardNamePlan, collision_key, plan_shard_file_names};
 
 #[cfg(test)]
 mod tests {
