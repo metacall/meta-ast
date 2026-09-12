@@ -295,8 +295,8 @@ fn extract_source(
         })
         .collect();
 
-    let (imports, references) = if opts.skip_imports_and_refs {
-        (Vec::new(), Vec::new())
+    let (imports, references, text_diagnostics) = if opts.skip_imports_and_refs {
+        (Vec::new(), Vec::new(), Vec::new())
     } else {
         crate::language::extract_imports_and_references_for(lang, &tree, source, path)
     };
@@ -313,6 +313,7 @@ fn extract_source(
     out.imports = imports;
     out.references = references;
     out.diagnostics = diags;
+    out.diagnostics.extend(text_diagnostics);
     out.ast_node_count = metrics.node_count;
     #[cfg(feature = "metacall-deploy")]
     {

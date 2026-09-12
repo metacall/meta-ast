@@ -1013,7 +1013,7 @@ fn extract_js_multiline_import() {
         imports.len()
     );
     for imp in imports {
-        assert_eq!(imp.import_specifier, "'./module'");
+        assert_eq!(imp.import_specifier, "./module");
     }
 
     std::fs::remove_dir_all(&tmp).unwrap();

@@ -367,24 +367,64 @@ fn resolve_import_path_from_symbol_node<'a>(
     }
 }
 
+/// Byte span of the specifier inside an import node.
+///
+/// Import statements wrap the specifier in a string literal or, for C and C++
+/// system headers, in angle brackets. Consumers want the bare form, so the wrap
+/// characters are trimmed here, at the single place the value is produced. A
+/// leading quote implies a string literal and always closes the span; angle
+/// brackets only count when they wrap the whole specifier, because a qualified
+/// Rust path can start with `<`.
+fn bare_span(source: &[u8], (start, end): (usize, usize)) -> (usize, usize) {
+    let Some(&first) = source.get(start) else {
+        return (start, end);
+    };
+    match first {
+        b'\'' | b'"' => {
+            let end = if end > start && source[end - 1] == first {
+                end - 1
+            } else {
+                end
+            };
+            (start + 1, end)
+        }
+        b'<' if end > start + 1 && source[end - 1] == b'>' => (start + 1, end - 1),
+        _ => (start, end),
+    }
+}
+
+/// One warning for a text range that is not valid UTF-8.
+///
+/// The range travels as a diagnostic instead of a placeholder string, so a
+/// consumer can point at the defect instead of parsing a sentinel.
+fn undecodable(path: &std::path::Path, range: SourceRange, what: &str) -> crate::error::Diagnostic {
+    crate::error::Diagnostic {
+        path: path.to_path_buf(),
+        severity: crate::error::Severity::Warning,
+        message: format!("{what} is not valid UTF-8"),
+        source_range: Some(range),
+    }
+}
+
 pub(crate) fn extract_imports_and_references_with_spec<'a>(
     tree: &'a tree_sitter::Tree,
     source: &'a [u8],
     spec: &LanguageSpec,
-    _file_path: &std::path::Path,
+    file_path: &std::path::Path,
 ) -> (
     Vec<crate::model::UnresolvedImport>,
     Vec<crate::model::UnresolvedReference>,
+    Vec<crate::error::Diagnostic>,
 ) {
     let query = (spec.import_ref_query_fn)();
     let Some(path_idx) = query.capture_index_for_name("import.path") else {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new());
     };
     let alias_idx = query.capture_index_for_name("import.alias");
     let symbol_idx = query.capture_index_for_name("import.symbol");
     let star_idx = query.capture_index_for_name("import.star");
     let Some(ref_idx) = query.capture_index_for_name("reference.name") else {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new());
     };
 
     let mut query_cursor = tree_sitter::QueryCursor::new();
@@ -460,21 +500,22 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
         }
     }
 
-    let slice = |(s, e): (usize, usize)| -> String {
-        let s = &source[s..e];
-        std::str::from_utf8(s)
-            .unwrap_or("<invalid-utf8>")
-            .to_string()
-    };
+    let text =
+        |(s, e): (usize, usize)| -> Option<&'a str> { std::str::from_utf8(&source[s..e]).ok() };
+    let mut diagnostics: Vec<crate::error::Diagnostic> = Vec::new();
     let mut imports: Vec<crate::model::UnresolvedImport> = Vec::with_capacity(raw_imports.len());
     for r in raw_imports {
+        let Some(ns) = r.namespace else {
+            continue;
+        };
+        let Some(specifier) = text(bare_span(source, ns)) else {
+            diagnostics.push(undecodable(file_path, r.range, "the import specifier"));
+            continue;
+        };
         imports.push(crate::model::UnresolvedImport {
-            import_specifier: match r.namespace {
-                Some(ns) => slice(ns),
-                None => continue,
-            },
-            alias: r.alias.map(slice),
-            symbol: r.symbol.map(slice),
+            import_specifier: specifier.to_string(),
+            alias: r.alias.and_then(text).map(str::to_string),
+            symbol: r.symbol.and_then(text).map(str::to_string),
             star: r.star,
             range: r.range,
         });
@@ -483,16 +524,19 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     let mut references: Vec<crate::model::UnresolvedReference> =
         Vec::with_capacity(ref_ranges.len());
     for range in ref_ranges {
-        let name = std::str::from_utf8(&source[range.byte_start..range.byte_end])
-            .unwrap_or("<invalid-utf8>")
-            .to_string();
-        references.push(crate::model::UnresolvedReference { name, range });
+        match std::str::from_utf8(&source[range.byte_start..range.byte_end]) {
+            Ok(name) => references.push(crate::model::UnresolvedReference {
+                name: name.to_string(),
+                range,
+            }),
+            Err(_) => diagnostics.push(undecodable(file_path, range, "the reference name")),
+        }
     }
 
     imports.sort_by_key(|i| i.range.byte_start);
     references.sort_by_key(|r| r.range.byte_start);
 
-    (imports, references)
+    (imports, references, diagnostics)
 }
 
 /// JS-family AST node kinds that introduce a new intra-procedural scope.
@@ -659,7 +703,7 @@ mod tests {
 
     use crate::language::LangId;
 
-    use super::{clean_docstring, field_text, source_range_from_node};
+    use super::{bare_span, clean_docstring, field_text, source_range_from_node};
 
     #[test]
     fn source_range_tracks_node_positions() {
@@ -692,6 +736,29 @@ mod tests {
 
         let name = field_text(&function, "name", source).unwrap();
         assert_eq!(name, "hello");
+    }
+
+    #[test]
+    fn bare_span_strips_only_the_wrapping_delimiters() {
+        let quoted = b"'react'";
+        assert_eq!(bare_span(quoted, (0, quoted.len())), (1, 6));
+
+        let system_header = b"<stdio.h>";
+        assert_eq!(bare_span(system_header, (0, system_header.len())), (1, 8));
+
+        let bare = b"json";
+        assert_eq!(bare_span(bare, (0, bare.len())), (0, 4));
+
+        // An unterminated literal still loses its opening quote.
+        let unterminated = b"'foo";
+        assert_eq!(bare_span(unterminated, (0, unterminated.len())), (1, 4));
+
+        // A qualified path that starts with an angle bracket is not a wrap.
+        let qualified = b"<T as Trait>::x";
+        assert_eq!(
+            bare_span(qualified, (0, qualified.len())),
+            (0, qualified.len())
+        );
     }
 
     #[test]

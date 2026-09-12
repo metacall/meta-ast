@@ -193,6 +193,7 @@ pub fn extract_imports_and_references_for<'a>(
 ) -> (
     Vec<crate::model::UnresolvedImport>,
     Vec<crate::model::UnresolvedReference>,
+    Vec<crate::error::Diagnostic>,
 ) {
     common::extract_imports_and_references_with_spec(tree, source, spec_for(id), file_path)
 }

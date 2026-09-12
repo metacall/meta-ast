@@ -237,7 +237,7 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"import { Component, OnInit } from '@angular/core';";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::TypeScript,
             &tree,
             src,
@@ -246,7 +246,7 @@ mod tests {
         let named: Vec<_> = imports.iter().filter(|i| i.symbol.is_some()).collect();
         assert_eq!(named.len(), 2);
         for imp in &named {
-            assert_eq!(imp.import_specifier, "'@angular/core'");
+            assert_eq!(imp.import_specifier, "@angular/core");
         }
         assert_eq!(named[0].symbol.as_deref(), Some("Component"));
         assert_eq!(named[1].symbol.as_deref(), Some("OnInit"));
@@ -257,7 +257,7 @@ mod tests {
         use crate::language::extract_imports_and_references_for;
         let src = b"import React from 'react';";
         let tree = parse(src);
-        let (imports, _) = extract_imports_and_references_for(
+        let (imports, _, _) = extract_imports_and_references_for(
             LangId::TypeScript,
             &tree,
             src,
@@ -265,7 +265,7 @@ mod tests {
         );
         let named: Vec<_> = imports.iter().filter(|i| i.symbol.is_some()).collect();
         assert_eq!(named.len(), 1);
-        assert_eq!(named[0].import_specifier, "'react'");
+        assert_eq!(named[0].import_specifier, "react");
         assert_eq!(named[0].symbol.as_deref(), Some("React"));
     }
 
