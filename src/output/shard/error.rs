@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 /// Failures that can occur during shard reading, writing, or restoration.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ShardError {
     #[error("shard IO failed: {0}")]
     Io(#[from] std::io::Error),
@@ -40,4 +41,13 @@ pub enum ShardError {
         edge_index: usize,
         message: String,
     },
+
+    #[error("index written by meta-ast {found}; this build is {expected}")]
+    ToolVersionMismatch { found: String, expected: String },
+
+    #[error("unsafe shard name: {name}")]
+    UnsafeShardName { name: String },
+
+    #[error("index path escapes the project root: {path:?}")]
+    PathOutsideRoot { path: PathBuf },
 }
