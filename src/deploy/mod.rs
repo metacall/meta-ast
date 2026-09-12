@@ -121,6 +121,7 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
             add_metacall_edge(
                 &base,
                 from_idx,
+                CallSiteVariant::LoadFromConfiguration,
                 target_lang,
                 script,
                 site.confidence,
@@ -142,12 +143,31 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
             continue;
         };
         let Some(target_lang) = crate::deploy::tags::from_metacall_tag(target_lang_tag) else {
+            diagnostics.push(Diagnostic {
+                path: site.source_file.clone(),
+                severity: Severity::Warning,
+                message: format!("unknown MetaCall load tag '{target_lang_tag}'"),
+                source_range: site.source_range.clone(),
+            });
             continue;
         };
+        if !crate::deploy::tags::has_loader(target_lang) {
+            diagnostics.push(Diagnostic {
+                path: site.source_file.clone(),
+                severity: Severity::Warning,
+                message: format!(
+                    "no MetaCall loader for language '{}', the tag '{}' is a meta-ast tag",
+                    target_lang.as_ref(),
+                    target_lang_tag
+                ),
+                source_range: site.source_range.clone(),
+            });
+        }
         for script in &site.scripts {
             add_metacall_edge(
                 &config.root,
                 from_idx,
+                site.variant.clone(),
                 target_lang,
                 script,
                 site.confidence,
@@ -202,8 +222,28 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
 
     // 10. Rebalance oversized pods
     for pod in &partition.pods {
-        if let Some(cut) = cut::find_oversized_pod_cut(pod, &analysis.graph, config.max_pod_size) {
-            all_cuts.push(cut);
+        match cut::find_oversized_pod_cut(pod, &analysis.graph, config.max_pod_size) {
+            Some(cut) => all_cuts.push(cut),
+            None if pod.files.len() > config.max_pod_size => {
+                let path = pod
+                    .files
+                    .first()
+                    .and_then(|fid| analysis.graph.file_node(*fid))
+                    .map(|file| file.path.clone())
+                    .unwrap_or_else(|| config.root.clone());
+                diagnostics.push(Diagnostic {
+                    path,
+                    severity: Severity::Warning,
+                    message: format!(
+                        "pod {} holds {} files above the limit {} and has no internal edge to cut",
+                        pod.id,
+                        pod.files.len(),
+                        config.max_pod_size
+                    ),
+                    source_range: None,
+                });
+            }
+            None => {}
         }
     }
 
@@ -319,6 +359,7 @@ fn orphaned_config_diagnostics(root: &Path, call_sites: &[CallSite]) -> Vec<Diag
 fn add_metacall_edge(
     base: &std::path::Path,
     from_idx: petgraph::graph::NodeIndex,
+    variant: CallSiteVariant,
     target_lang: crate::language::LangId,
     script: &str,
     confidence: f32,
@@ -331,14 +372,26 @@ fn add_metacall_edge(
         crate::graph::node::NodeData::File(f) => f.path.clone(),
         _ => return,
     };
-    if let Some(to_idx) =
-        client_call::resolve_script_to_file(base, script, &source_file, path_to_idx)
-    {
+
+    // A memory load carries inline code and a package load carries a package
+    // name, so neither may resolve to a project file.
+    let resolved = match variant {
+        CallSiteVariant::LoadFromMemory | CallSiteVariant::LoadFromPackage => None,
+        _ => client_call::resolve_script_to_file(base, script, &source_file, path_to_idx),
+    };
+    if let Some(to_idx) = resolved {
         graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Import, confidence);
         return;
     }
 
     // No match: create or reuse ExternalNode (keeps external_index consistent).
-    let to_idx = graph.get_or_create_external_node(script.to_string(), target_lang);
+    // The code text of a memory load is not a name.
+    let name = match variant {
+        CallSiteVariant::LoadFromMemory => {
+            format!("<memory:{}>", crate::deploy::tags::metacall_tag(target_lang))
+        }
+        _ => script.to_string(),
+    };
+    let to_idx = graph.get_or_create_external_node(name, target_lang);
     graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Import, confidence);
 }

@@ -502,8 +502,13 @@ mod deploy_mixed_tests {
             "express (LoadFromPackage) must be classified, got {dep_names:?}"
         );
         assert!(
-            dep_names.iter().any(|n| n.contains("INLINE")),
-            "inline memory load must be classified as external, got {dep_names:?}"
+            dep_names.iter().any(|n| n == "<memory:ts>"),
+            "an inline memory load must be classified for its language, not named \
+             after its code, got {dep_names:?}"
+        );
+        assert!(
+            !dep_names.iter().any(|n| n.contains("INLINE")),
+            "the inline code text must never become a dependency name, got {dep_names:?}"
         );
 
         // The Node validation pod imports the builtin "crypto"; the classifier
