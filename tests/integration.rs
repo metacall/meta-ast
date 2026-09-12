@@ -14,6 +14,7 @@ mod integration {
     mod output_format_test;
     mod pipeline_test;
     mod reanalyze_api_test;
+    mod shard_index_test;
     mod shard_test;
     #[cfg(feature = "watch")]
     mod watch_test;

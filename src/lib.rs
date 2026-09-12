@@ -46,9 +46,10 @@ pub use graph::{
 
 // Shard and index re-exports
 pub use output::shard::{
-    LoadedShard, SHARD_SCHEMA_VERSION, ShardEdge, ShardEdgeKind, ShardError, ShardFile,
-    ShardFlowKind, ShardHeader, ShardManifestRecord, ShardSymbol, read_header, read_manifest,
-    read_shard, restore_shard_edges, write_header, write_manifest, write_shard,
+    INDEX_DIR_NAME, IndexLoadOptions, IndexLoadStats, LoadedIndex, LoadedShard,
+    SHARD_SCHEMA_VERSION, ShardEdge, ShardEdgeKind, ShardError, ShardFile, ShardFlowKind,
+    ShardHeader, ShardManifestRecord, ShardSymbol, is_safe_shard_name, load_index, read_header,
+    read_manifest, read_shard, restore_shard_edges, write_header, write_manifest, write_shard,
 };
 pub use pipeline::{GraphAnalysis, SnapshotMeta, snapshot_meta};
 

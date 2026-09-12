@@ -12,6 +12,7 @@ pub mod edge;
 pub mod error;
 pub mod file;
 pub mod header;
+pub mod index;
 pub mod manifest;
 pub(crate) mod name;
 
@@ -21,6 +22,9 @@ pub use file::{
     LoadedShard, SHARD_SCHEMA_VERSION, ShardFile, ShardSymbol, read_shard, write_shard,
 };
 pub use header::{ShardHeader, read_header, write_header};
+pub use index::{
+    INDEX_DIR_NAME, IndexLoadOptions, IndexLoadStats, LoadedIndex, is_safe_shard_name, load_index,
+};
 pub use manifest::{ShardManifestRecord, read_manifest, write_manifest};
 
 #[cfg(test)]
