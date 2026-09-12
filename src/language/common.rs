@@ -38,22 +38,6 @@ pub(crate) fn compile_query_checked(
         .map_err(|error| format!("query compilation failed for {label}: {error}"))
 }
 
-/// Compile a query for a caller that has no diagnostic channel yet.
-///
-/// The deploy scanner runs outside the per-file diagnostic path, so it keeps
-/// the infallible helper under its feature gate.
-#[cfg(feature = "metacall-deploy")]
-pub(crate) fn compile_query(
-    lang: &tree_sitter::Language,
-    src: &str,
-    label: &str,
-) -> tree_sitter::Query {
-    match compile_query_checked(lang, src, label) {
-        Ok(query) => query,
-        Err(message) => panic!("{message}"),
-    }
-}
-
 /// Borrow a compiled query from a lazily initialized slot.
 pub(crate) fn query_from(
     cached: &Result<tree_sitter::Query, String>,

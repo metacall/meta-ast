@@ -349,7 +349,18 @@ fn extract_source(
     };
 
     #[cfg(feature = "metacall-deploy")]
-    let call_sites = crate::deploy::scanner::scan_file(lang, &tree, source, path);
+    let call_sites = match crate::deploy::scanner::scan_file(lang, &tree, source, path) {
+        Ok(sites) => sites,
+        Err(error) => {
+            diags.push(Diagnostic {
+                path: path.to_path_buf(),
+                severity: Severity::Error,
+                message: format!("deploy call site scan failed: {error}"),
+                source_range: None,
+            });
+            Vec::new()
+        }
+    };
 
     #[cfg(feature = "dataflow")]
     let (data_nodes, flow_edges) =
