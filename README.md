@@ -114,8 +114,11 @@ view of their structure without executing any user code. Its objectives:
   its dependencies across a polyglot repo to understand structure quickly.
   Run `meta-ast inspect` on a checkout and read the JSON/YAML, or open the
   interactive dashboard from `meta-ast graph --html`.
-- **Cyclic dependency guard.** Run `meta-ast graph` in CI to fail builds that
-  introduce accidental import cycles (Tarjan SCC flags cyclic clusters).
+- **CI gate.** `meta-ast graph` exits 1 when the run reports an error
+  diagnostic, 2 for a usage or configuration problem, and 0 otherwise. Pass
+  `--fail-on warning` to fail on warnings as well, or `--fail-on never` to
+  always exit 0. Import cycles surface as cyclic clusters in the output and in
+  the deployability hints, and they are not errors by themselves.
 - **Dependency-graph diffing & refactors.** Before splitting a module or
   deleting a package, generate the graph and confirm what actually depends on
   it across languages - catch hidden cross-language coupling a grep would miss.
@@ -216,7 +219,7 @@ All docs are also published as an [mdbook site](https://metacall.github.io/meta-
 
 ## Roadmap
 
-The core GSoC 2026 milestones (Phases 1-7) are complete with release `v0.5.0`. Full details and post-v1 initiatives are tracked in [docs/src/ROADMAP.md](docs/src/ROADMAP.md).
+The core GSoC 2026 milestones (Phases 1-7) are complete with release `v0.7.0`. Full details and post-v1 initiatives are tracked in [docs/src/ROADMAP.md](docs/src/ROADMAP.md).
 
 ### Post-v1 Active Roadmap
 
