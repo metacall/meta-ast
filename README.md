@@ -161,6 +161,11 @@ meta-ast graph <path> --html                    # interactive Cytoscape.js dashb
 meta-ast graph <path> --datagraph               # export detailed datagraph.json (requires --features dataflow)
 meta-ast graph <path> --datagraph --datagraph-output dg.json   # choose the datagraph path
 meta-ast graph <path> --watch                   # watch mode: continuous re-analysis on file changes (requires --features watch)
+
+`--datagraph`, `--datagraph-output`, `--watch`, `--watch-debounce` and the `deploy`
+subcommand are compiled in only when their feature is enabled. A build without the
+feature rejects the flag at argument parsing with exit status 2, so the CLI surface
+depends on the feature set of the installed binary.
 meta-ast graph <path> --watch --watch-debounce 100 --html -o graph.html
 ```
 
