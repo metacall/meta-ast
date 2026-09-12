@@ -43,21 +43,23 @@ meta-ast deploy <path> --check
 
 ```
 run_deploy()
-  1. discover_files()                               - language-routed file list
-  2. pipeline::analyze_graph()                      - symbol, import, and SCC analysis
-  3. scanner::scan_file() per file (rayon parallel) - MetaCall call-site detection
-  4. inject MetaCall import edges into graph        - add_metacall_edge with path resolution
-  5. resolve client calls (two-phase)               - client_call::resolve_client_calls
-  6. SCC recompute with new edges                   - update SCC analysis
-  7. pod::partition_into_pods()                     - Union-Find over same-language edges
-  8. metrics::compute_file_metrics()                - AST node counts per file/pod
-  9. cut::find_cross_language_cuts()                - cheapest-edge split for cross-lang SCCs
- 10. cut::find_oversized_pod_cut() per pod          - second-pass rebalancing
- 11. dependency::resolve_dependencies()             - lockfile and manifest parsing
- 12. manifest::generate_pod_manifest()              - PodManifest serialization
- 13. mesh::generate_mesh_annotation()               - SCC-derived topology
- 14. write artifacts or check::check_cut_fairness() in --check mode
+  1. pipeline::analyze_graph()        - discovery, extraction, graph assembly, scope resolution,
+                                        client call projection and SCC analysis in one pass
+  2. scan_call_sites()                - MetaCall call-site detection over the extractions
+  3. inject_load_edges()              - load edges into the graph, with path resolution
+  4. orphaned_config_diagnostics()    - configuration files that no call site loads
+  5. partition_graph()                - Union-Find over same-language Import and Reference edges
+  6. detect_cuts()                    - cross-language SCC cuts plus oversized pods
+  7. build_documents()                - file and pod metrics, dependency resolution,
+                                        pod manifest and mesh annotation
+  8. write_documents()                - atomic writes, or the cut fairness check in --check mode
 ```
+
+The run returns every diagnostic it collected to the caller, which applies the diagnostic policy
+and decides the exit status. An ecosystem answers dependency questions from one table of sources:
+lockfiles are preferred over manifests, a lockfile that does not carry the entry falls through to
+the manifest for Python, Node and Go, and only Python and Node answer from an immediate
+subdirectory.
 
 ### Module map
 
@@ -68,7 +70,7 @@ src/deploy/
 ├── client_call.rs  resolve_client_calls(), resolve_script_to_file() - two-phase client invocation resolution
 ├── pod.rs          Union-Find partition_into_pods(), PodPartition, InterPodEdge
 ├── cut.rs          find_cross_language_cuts(), find_oversized_pod_cut(), CutEdge
-├── dependency.rs   classify_external(), resolve_dependencies(), per-language resolvers
+├── dependency.rs   one table of lockfile and manifest sources plus one reader per format
 ├── metrics.rs      compute_file_metrics(), compute_pod_metrics(), FileMetrics
 ├── manifest.rs     generate_pod_manifest(), PodManifest, ManifestEdge
 ├── mesh.rs         generate_mesh_annotation(), DeploymentUnit, CrossLanguageEdge

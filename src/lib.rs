@@ -1,3 +1,6 @@
+//! Polyglot static analysis: symbol extraction and cross-language dependency
+//! graphs from nine source languages, with optional MetaCall deployment
+//! manifests and dataflow extraction.
 pub mod cache;
 pub mod error;
 pub mod extractor;

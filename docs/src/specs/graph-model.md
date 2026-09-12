@@ -104,7 +104,10 @@ apply to the strum `Display`/`AsRefStr` and serde representations of `LangId`.
 
 Graph output schema version 2 adds `file_path` and `source_range` to serialized
 symbol nodes. `.metast` shards declare `SHARD_SCHEMA_VERSION` in `header.json`
-and in every record, and they spell symbol kinds and visibility in lowercase.
+and in every record, and they spell symbol kinds and visibility in lowercase. Version 5 stores
+the import specifier without its surrounding quotes and drops a specifier that is not valid UTF-8
+with a warning, so a version 4 reader refuses the payload instead of reading a value in the old
+shape.
 They do not persist numeric IDs: they store stable language-scoped endpoint
 names and regenerate symbol IDs when loaded. A reader refuses any other version,
 so an index written before a schema bump must be regenerated.

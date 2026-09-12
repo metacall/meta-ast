@@ -44,6 +44,7 @@ impl ShardManifestRecord {
     }
 
     /// Compute the BLAKE3 hex hash for source bytes.
+    #[must_use]
     pub fn compute_hash(bytes: &[u8]) -> String {
         blake3::hash(bytes).to_hex().to_string()
     }

@@ -5,9 +5,13 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct EmitConfig {
+    /// Explicit output path. `None` writes the document to stdout.
     pub output: Option<PathBuf>,
+    /// Serialization format for the text document.
     pub format: OutputFormat,
+    /// Generate the HTML dashboard instead of the text document.
     pub html: bool,
+    /// Open the written dashboard in the default browser.
     pub open_browser: bool,
 }
 
