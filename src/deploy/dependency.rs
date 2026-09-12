@@ -755,4 +755,293 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Every source form the resolver table lists must keep resolving the same
+    /// way: which file wins, whether a version is found, and the source label.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Expectation {
+        Lockfile(Option<&'static str>),
+        Manifest(Option<&'static str>),
+        Unresolved,
+    }
+
+    struct SourceCase {
+        name: &'static str,
+        language: LangId,
+        package: &'static str,
+        file: &'static str,
+        content: &'static str,
+        nested: bool,
+        expectation: Expectation,
+    }
+
+    #[test]
+    fn ecosystem_sources_resolve_through_one_table() {
+        use LangId::{C, Cpp, Go, JavaScript, Python, Ruby, Rust as RustLang};
+
+        let cases = [
+            SourceCase {
+                name: "uv lock",
+                language: Python,
+                package: "requests",
+                file: "uv.lock",
+                content: "[[package]]\nname = \"requests\"\nversion = \"2.32.3\"\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("2.32.3")),
+            },
+            SourceCase {
+                name: "poetry lock",
+                language: Python,
+                package: "requests",
+                file: "poetry.lock",
+                content: "[[package]]\nname = \"requests\"\nversion = \"2.32.3\"\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("2.32.3")),
+            },
+            SourceCase {
+                name: "requirements manifest",
+                language: Python,
+                package: "requests",
+                file: "requirements.txt",
+                content: "requests==2.32.3\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "pyproject manifest",
+                language: Python,
+                package: "requests",
+                file: "pyproject.toml",
+                content: "[project]\nname = \"app\"\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "pyproject in a subdirectory",
+                language: Python,
+                package: "requests",
+                file: "pyproject.toml",
+                content: "[project]\nname = \"app\"\n",
+                nested: true,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "no python source",
+                language: Python,
+                package: "requests",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+            SourceCase {
+                name: "yarn lock",
+                language: JavaScript,
+                package: "express",
+                file: "yarn.lock",
+                content: "\"express@^4.18.2\":\n  version \"4.18.2\"\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("4.18.2")),
+            },
+            SourceCase {
+                name: "pnpm lock",
+                language: JavaScript,
+                package: "express",
+                file: "pnpm-lock.yaml",
+                content: "  express@4.18.2:\n    version: 4.18.2\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("4.18.2")),
+            },
+            SourceCase {
+                name: "package json",
+                language: JavaScript,
+                package: "express",
+                file: "package.json",
+                content: "{\"dependencies\": {\"express\": \"4.18.2\"}}\n",
+                nested: false,
+                expectation: Expectation::Manifest(Some("4.18.2")),
+            },
+            SourceCase {
+                name: "package json in a subdirectory",
+                language: JavaScript,
+                package: "express",
+                file: "package.json",
+                content: "{\"dependencies\": {\"express\": \"4.18.2\"}}\n",
+                nested: true,
+                expectation: Expectation::Manifest(Some("4.18.2")),
+            },
+            SourceCase {
+                name: "no node source",
+                language: JavaScript,
+                package: "express",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+            SourceCase {
+                name: "cargo lock",
+                language: RustLang,
+                package: "serde",
+                file: "Cargo.lock",
+                content: "[[package]]\nname = \"serde\"\nversion = \"1.0.203\"\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("1.0.203")),
+            },
+            SourceCase {
+                name: "cargo manifest",
+                language: RustLang,
+                package: "serde",
+                file: "Cargo.toml",
+                content: "[dependencies]\nserde = \"1\"\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "no rust source",
+                language: RustLang,
+                package: "serde",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+            SourceCase {
+                name: "go sum",
+                language: Go,
+                package: "github.com/pkg/errors",
+                file: "go.sum",
+                content: "github.com/pkg/errors v0.9.1 h1:abc\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("v0.9.1")),
+            },
+            SourceCase {
+                name: "go mod",
+                language: Go,
+                package: "github.com/pkg/errors",
+                file: "go.mod",
+                content: "module app\n\nrequire (\n\tgithub.com/pkg/errors v0.9.1\n)\n",
+                nested: false,
+                expectation: Expectation::Manifest(Some("0.9.1")),
+            },
+            SourceCase {
+                name: "no go source",
+                language: Go,
+                package: "github.com/pkg/errors",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+            SourceCase {
+                name: "gemfile lock",
+                language: Ruby,
+                package: "rails",
+                file: "Gemfile.lock",
+                content: "GEM\n  specs:\n    rails (7.0.8.4)\n",
+                nested: false,
+                expectation: Expectation::Lockfile(Some("7.0.8.4")),
+            },
+            SourceCase {
+                name: "gemfile",
+                language: Ruby,
+                package: "rails",
+                file: "Gemfile",
+                content: "source \"https://rubygems.org\"\ngem \"rails\"\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "no ruby source",
+                language: Ruby,
+                package: "rails",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+            SourceCase {
+                name: "conan manifest",
+                language: C,
+                package: "zlib/1.3.1",
+                file: "conanfile.txt",
+                content: "[requires]\nzlib/1.3.1\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "vcpkg manifest",
+                language: Cpp,
+                package: "zlib",
+                file: "vcpkg.json",
+                content: "{\"dependencies\": [\"zlib\"]}\n",
+                nested: false,
+                expectation: Expectation::Manifest(None),
+            },
+            SourceCase {
+                name: "no c source",
+                language: C,
+                package: "sqlite3",
+                file: "",
+                content: "",
+                nested: false,
+                expectation: Expectation::Unresolved,
+            },
+        ];
+
+        for case in cases {
+            let dir = test_dir(case.name);
+            let target = if case.nested {
+                let nested = dir.join("pkg");
+                std::fs::create_dir_all(&nested).unwrap();
+                nested
+            } else {
+                dir.clone()
+            };
+            if !case.file.is_empty() {
+                std::fs::write(target.join(case.file), case.content).unwrap();
+            }
+
+            let external = ExternalNode {
+                raw_path: case.package.to_string(),
+                language: case.language,
+                classification: None,
+            };
+            let result = classify_external(&external, &dir);
+            let (source, version) = match &result {
+                ExternalClassification::Classified {
+                    source, version, ..
+                } => (Some(*source), version.clone()),
+                ExternalClassification::Unresolved { .. } => (None, None),
+            };
+
+            match case.expectation {
+                Expectation::Lockfile(expected) => {
+                    assert_eq!(
+                        source,
+                        Some(DependencySource::Lockfile),
+                        "{}: expected a lockfile hit, got {result:?}",
+                        case.name
+                    );
+                    assert_eq!(version.as_deref(), expected, "{}: version", case.name);
+                }
+                Expectation::Manifest(expected) => {
+                    assert_eq!(
+                        source,
+                        Some(DependencySource::Manifest),
+                        "{}: expected a manifest hit, got {result:?}",
+                        case.name
+                    );
+                    assert_eq!(version.as_deref(), expected, "{}: version", case.name);
+                }
+                Expectation::Unresolved => assert_eq!(
+                    source, None,
+                    "{}: expected no classification, got {result:?}",
+                    case.name
+                ),
+            }
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
 }
