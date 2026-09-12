@@ -123,3 +123,26 @@ fn to_graph_html_cytoscape_container_div() {
         "should contain cy container div"
     );
 }
+
+/// The analyzed project is untrusted input. A node name or path that contains
+/// a closing script tag must not be able to close the data element.
+#[test]
+fn script_payload_cannot_close_the_script_element() {
+    let payload = "</script><script>alert(1)</script>";
+    let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+    builder.add_file(PathBuf::from(format!("src/{payload}.py")), LangId::Python);
+    let graph = builder.build();
+    let scc = SccAnalysis::analyze(graph.graph());
+
+    let html = meta_ast::output::dashboard::to_graph_html(&graph, &scc, 1).unwrap();
+
+    assert_eq!(
+        html.matches("</script>").count(),
+        2,
+        "only the two template script elements end with a closing tag"
+    );
+    assert!(
+        html.contains("\\u003c/script\\u003e"),
+        "the payload is escaped, not removed"
+    );
+}

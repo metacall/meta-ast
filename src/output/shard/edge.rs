@@ -143,3 +143,29 @@ pub fn restore_shard_edges(graph: &mut CodeGraph, edges: &[ShardEdge]) -> Result
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flow_edge() -> ShardEdge {
+        ShardEdge {
+            source_name: "python file a.py . f#function!0 .".to_string(),
+            target_name: "python file b.py . g#function!0 .".to_string(),
+            kind: ShardEdgeKind::Flow,
+            confidence: 1.0,
+            flow_kind: None,
+        }
+    }
+
+    /// The refusal message must name the version that actually applies.
+    #[test]
+    fn dataflow_refusal_names_the_current_schema_version() {
+        let error = validate_edge(&flow_edge(), 1, 0).unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains(&crate::output::shard::file::SHARD_SCHEMA_VERSION.to_string()),
+            "message names the schema version in force: {message}"
+        );
+    }
+}
