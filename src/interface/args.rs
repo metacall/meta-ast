@@ -67,6 +67,10 @@ pub struct InspectArgs {
     /// Output format for the extracted symbols
     #[arg(short = 'f', long, default_value = "json", value_parser = parse_format)]
     pub format: crate::output::OutputFormat,
+
+    /// Diagnostic severity that makes the run exit with status 1
+    #[arg(long, value_enum, default_value_t = crate::interface::report::FailOn::Error)]
+    pub fail_on: crate::interface::report::FailOn,
 }
 
 #[derive(Parser)]
@@ -85,6 +89,10 @@ pub struct GraphArgs {
     /// Output serialization format for the graph structure
     #[arg(short = 'f', long, default_value = "json", value_parser = parse_format)]
     pub format: crate::output::OutputFormat,
+
+    /// Diagnostic severity that makes the run exit with status 1
+    #[arg(long, value_enum, default_value_t = crate::interface::report::FailOn::Error)]
+    pub fail_on: crate::interface::report::FailOn,
 
     /// Generate an interactive HTML dashboard with graph visualization
     #[arg(long)]
