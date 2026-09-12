@@ -15,9 +15,13 @@ use crate::model::{
 };
 use crate::output::shard::edge::{ShardEdge, validate_edge};
 use crate::output::shard::error::ShardError;
-use crate::output::shard::name::{node_belongs_to_file, normalized_path, stable_node_name};
+use crate::output::shard::name::{StableNameIndex, node_belongs_to_file, normalized_path};
 
-pub const SHARD_SCHEMA_VERSION: u32 = 3;
+/// Shard payload version.
+///
+/// Version 4 spells symbol kinds and visibility in lowercase, so version 3
+/// records no longer parse. Regenerate the index after an upgrade.
+pub const SHARD_SCHEMA_VERSION: u32 = 4;
 
 /// A per-file shard record stored in `.meta-ast/shards/<n>.jsonl`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +70,7 @@ impl ShardFile {
         for diagnostic in &extraction.diagnostics {
             normalized_path(&diagnostic.path)?;
         }
+        let names = StableNameIndex::new(graph)?;
         let symbols = extraction.symbols.iter().map(ShardSymbol::from).collect();
         #[cfg(feature = "dataflow")]
         let dropped_payload = dataflow_drop_diagnostic(extraction);
@@ -87,8 +92,18 @@ impl ShardFile {
                         || node_belongs_to_file(graph, edge.target(), &extraction.path))
             })
             .map(|edge| {
-                let source_name = stable_node_name(graph, edge.source())?;
-                let target_name = stable_node_name(graph, edge.target())?;
+                let source_name = names
+                    .name_of(edge.source())
+                    .ok_or(ShardError::MissingNodeOwner {
+                        node_index: edge.source().index(),
+                    })?
+                    .to_string();
+                let target_name = names
+                    .name_of(edge.target())
+                    .ok_or(ShardError::MissingNodeOwner {
+                        node_index: edge.target().index(),
+                    })?
+                    .to_string();
                 Ok(ShardEdge {
                     source_name,
                     target_name,

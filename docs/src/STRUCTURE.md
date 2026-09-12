@@ -55,11 +55,12 @@ src/
 │   ├── emitter.rs            EmitConfig, emit_inspect(), emit_graph() - CLI output dispatch
 │   ├── inspect.rs            Inspect-compatible JSON/YAML emission
 │   ├── graph.rs              Unified GraphOutput (schema_version, metadata, nodes, edges, sccs, deployability)
-│   ├── shard/                `.metast` v2 stable-name JSONL shard and index persistence
+│   ├── shard/                `.metast` stable-name JSONL shard and index persistence
 │   │   ├── mod.rs            Module root, re-exports, unit tests
 │   │   ├── error.rs          ShardError enum
 │   │   ├── file.rs           ShardFile, ShardSymbol, write_shard(), read_shard()
 │   │   ├── edge.rs           ShardEdge, ShardEdgeKind, restore_shard_edges()
+│   │   ├── index.rs          load_index(), hardened index verification
 │   │   ├── manifest.rs       ShardManifestRecord, write_manifest(), read_manifest()
 │   │   ├── header.rs         ShardHeader, write_header(), read_header()
 │   │   └── name.rs           Stable naming, descriptors, and parent hierarchy resolution
@@ -198,13 +199,13 @@ pub struct Symbol {
 Node and edge types:
 
 | Node | Fields |
-|------|--------|
+| ------ | -------- |
 | `FileNode` | id, path (project-root-relative), language, snapshot_id |
 | `SymbolNode` | id, name, kind, file_id, visibility, source_range |
 | `ExternalNode` | raw_path, language |
 
 | Edge | Direction |
-|------|-----------|
+| ------ | ----------- |
 | `Ownership` | FileNode -> SymbolNode, SymbolNode -> SymbolNode (nesting) |
 | `Import` | FileNode -> FileNode |
 | `Reference` | SymbolNode -> SymbolNode |
@@ -299,7 +300,7 @@ pub trait ImportResolver: Send + Sync {
 2. **`ImportResolver`** represents a stateful trait interface.
 3. Concrete adapters bridge the two:
    - `StatelessResolver`: Zero-cost wrapper delegating to static fn pointers.
-   - `PythonResolver`, `GoModResolver`, `JsResolver`, `TsConfigResolver`: Concrete structs implementing `ImportResolver`, prepped to hold caches or parse configs.
+   - `PythonResolver`, `GoModResolver`, `NodeResolver`: concrete structs implementing `ImportResolver` that memoize filesystem probes.
 4. **`make_resolver(LangId) -> Box<dyn ImportResolver>`**: Factory function constructing the stateful resolver for each language dynamically.
 
 #### Stateful Caching and Memoization Engines
@@ -307,10 +308,10 @@ pub trait ImportResolver: Send + Sync {
 To guarantee maximum throughput and avoid redundant filesystem traversal during large-scale workspace parsing, the stateful resolvers employ optimized, thread-safe caching strategies:
 
 - **`OnceLock` Module Boundary Scanning (`GoModResolver`)**: Scans for the root `go.mod` file and parses the module path at most once per execution using a standard `OnceLock`. Subsequent resolution calls query the in-memory boundary in $O(1)$ time.
-- **`RwLock` File Existence Memoization (`PythonResolver`, `JsResolver`, `TsConfigResolver`)**: Memoizes `exists()` and `is_file()` filesystem checks using an `RwLock<HashMap<PathBuf, bool>>`. This minimizes expensive system calls during TypeScript candidate extensions resolution (e.g. trying `.ts`, `.tsx`, `.js`) and Python relative path matching, while remaining safe for concurrency.
+- **`RwLock` File Existence Memoization (`PythonResolver`, `NodeResolver`)**: memoizes `exists()` and `is_file()` checks in an `RwLock<HashMap<PathBuf, bool>>`, which removes repeated system calls during candidate extension resolution while staying safe for concurrency.
 - **Stateless Fallback**: When candidate paths do not match or cannot be resolved using stateful logic, all resolvers gracefully fallback to their underlying stateless `LanguageSpec` function pointer, ensuring 100% backward compatibility.
 
-During graph assembly, resolvers are created once per run and cached inside the builder to ensure O(1) config-file reading and caching properties.
+During graph assembly, `make_resolver` builds one resolver set per graph build, so a memoized probe never outlives the build that created it.
 
 ### 3.4 Adding a New Language
 
@@ -329,13 +330,13 @@ No trait objects, no runtime plugins. Compile-time completeness checking via exh
 `detect_language(path: &Path) -> Option<LangId>` maps file extensions to `LangId` variants. Lives in `input/mod.rs`.
 
 | Extension(s) | LangId |
-|---|---|
+| --- | --- |
 | `.py`, `.pyi` | `Python` |
 | `.js`, `.mjs`, `.cjs` | `JavaScript` |
 | `.ts`, `.cts`, `.mts` | `TypeScript` |
 | `.tsx` | `Tsx` |
-| `.c` | `C` |
-| `.cc`, `.cpp`, `.cxx` | `Cpp` |
+| `.c`, `.h` | `C` |
+| `.cc`, `.cpp`, `.cxx`, `.hpp` | `Cpp` |
 | `.rs` | `Rust` |
 | `.go` | `Go` |
 | `.rb`, `.gemspec` | `Ruby` |
@@ -386,7 +387,7 @@ Parse errors do not abort extraction. The pipeline accumulates `Vec<Diagnostic>`
 ### 5.2 Pipeline Phases
 
 | Phase | Concurrency | Rationale |
-|-------|------------|-----------|
+| ------- | ------------ | ----------- |
 | File discovery | Sequential | Single walk, fast I/O |
 | Parse + Extract | rayon `par_iter` | CPU-bound, per-file independent, largest time slice |
 | Graph assembly | Sequential | petgraph mutation + cross-file resolution requires single-threaded access |
@@ -439,7 +440,7 @@ Diagnostics are accumulated in a `Vec<Diagnostic>` separate from the symbol mode
 
 1. Tree-sitter `ERROR` and `MISSING` nodes are skipped during extraction.
 2. Partial extraction is allowed and expected for malformed source files.
-3. If > 50% of a file's nodes are errors, the file is marked as unparseable but does not abort the pipeline.
+3. Any tree with an error node emits one Warning diagnostic that carries the error ratio. Extraction still returns partial results and never aborts the pipeline.
 4. Fatal errors are reserved for invalid configuration or unrecoverable I/O failures.
 
 ### 6.4 Query Compilation Failure Strategy
@@ -459,7 +460,7 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 ## 7. Rust Language Features Used
 
 | Feature | Usage |
-|---------|-------|
+| --------- | ------- |
 | Edition 2024 | MSRV 1.94.0 |
 | `#[non_exhaustive]` | All public enums (`LangId`, `SymbolKind`, `Visibility`, `Severity`) |
 | Newtype pattern | `FileId`, `SymbolId`, `SnapshotId`, `DataNodeId` via `define_id_type!` macro (`NonZeroU32` inner, 1-based generator) |
@@ -480,7 +481,7 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 ### 8.1 Runtime Dependencies
 
 | Crate | Version | Purpose |
-|-------|---------|---------|
+| ------- | --------- | --------- |
 | `tree-sitter` | 0.26.11 | Core parsing |
 | `tree-sitter-python` | 0.25.0 | Python grammar |
 | `tree-sitter-javascript` | 0.25.0 | JavaScript grammar |
@@ -509,7 +510,7 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 ### 8.2 Development Dependencies
 
 | Crate | Version | Purpose |
-|-------|---------|---------|
+| ------- | --------- | --------- |
 | `insta` | 1.48 | Snapshot testing for JSON output contracts |
 | `criterion` | 0.8 | Benchmark gating (`pipeline`, `graph`, `incremental`) |
 | `tempfile` | 3.27 | Temporary filesystem test fixtures |
@@ -583,7 +584,7 @@ language module generates snapshots via inline unit tests. Update workflow: `car
 ### Testing Strategy
 
 | Layer | Tool | Purpose |
-|-------|------|---------|
+| ------- | ------ | --------- |
 | Language detection | Unit tests | Extension-to-LangId mapping |
 | Per-language extraction | Fixture files + unit tests | Query correctness, capture mapping |
 | JSON output contract | `insta` snapshots in `src/language/snapshots/` | Regression detection |

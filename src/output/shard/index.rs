@@ -49,6 +49,13 @@ pub struct IndexLoadStats {
     pub skipped: usize,
 }
 
+/// A manifest record that was not loaded, with the reason it was skipped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShardSkip {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
 /// Rebuilt index contents.
 #[derive(Debug)]
 pub struct LoadedIndex {
@@ -56,6 +63,10 @@ pub struct LoadedIndex {
     pub extractions: Vec<Arc<FileExtraction>>,
     pub edges: Vec<ShardEdge>,
     pub stats: IndexLoadStats,
+    /// One entry per skipped manifest record, in manifest order. A stale file
+    /// and a corrupt shard are not the same condition, so the caller gets the
+    /// reason instead of a bare count.
+    pub skips: Vec<ShardSkip>,
 }
 
 /// Reports whether a manifest shard name stays inside `shards/`.
@@ -89,6 +100,7 @@ pub fn load_index(
     let manifest = read_manifest(BufReader::new(File::open(dir.join(MANIFEST_FILE))?))?;
 
     let mut shards: BTreeMap<String, Vec<ShardFile>> = BTreeMap::new();
+    let mut unreadable_shards: BTreeMap<String, String> = BTreeMap::new();
     for record in &manifest {
         if !is_safe_shard_name(&record.shard) {
             return Err(ShardError::UnsafeShardName {
@@ -100,8 +112,17 @@ pub fn load_index(
         }
         let path = dir.join(&record.shard);
         let files = match File::open(&path) {
-            Ok(file) => read_shard(BufReader::new(file))?,
-            Err(_) => continue,
+            Ok(file) => match read_shard(BufReader::new(file)) {
+                Ok(files) => files,
+                Err(error) => {
+                    unreadable_shards.insert(record.shard.clone(), error.to_string());
+                    continue;
+                }
+            },
+            Err(error) => {
+                unreadable_shards.insert(record.shard.clone(), error.to_string());
+                continue;
+            }
         };
         shards.insert(record.shard.clone(), files);
     }
@@ -117,31 +138,65 @@ pub fn load_index(
     let mut extractions = Vec::new();
     let mut edges = Vec::new();
     let mut stats = IndexLoadStats::default();
+    let mut skips: Vec<ShardSkip> = Vec::new();
     for record in &manifest {
         let Some(absolute) = resolve_record_path(&root_canon, &record.path)? else {
-            stats.skipped += 1;
+            record_skip(
+                &mut stats,
+                &mut skips,
+                &record.path,
+                "the file is gone or sits outside the index root".to_string(),
+            );
             continue;
         };
         let Some(shard) = by_path.remove(&record.path) else {
-            stats.skipped += 1;
+            let reason = unreadable_shards
+                .get(&record.shard)
+                .cloned()
+                .unwrap_or_else(|| format!("no record for this path in {}", record.shard));
+            record_skip(&mut stats, &mut skips, &record.path, reason);
             continue;
         };
         let Ok(metadata) = std::fs::metadata(&absolute) else {
-            stats.skipped += 1;
+            record_skip(
+                &mut stats,
+                &mut skips,
+                &record.path,
+                "the file cannot be read".to_string(),
+            );
             continue;
         };
         if metadata.len() != record.size {
-            stats.skipped += 1;
+            record_skip(
+                &mut stats,
+                &mut skips,
+                &record.path,
+                format!(
+                    "size changed: manifest claims {} bytes, the file has {}",
+                    record.size,
+                    metadata.len()
+                ),
+            );
             continue;
         }
         let Ok(bytes) = std::fs::read(&absolute) else {
-            stats.skipped += 1;
+            record_skip(
+                &mut stats,
+                &mut skips,
+                &record.path,
+                "the file cannot be read".to_string(),
+            );
             continue;
         };
         if options.verify_content_hash
             && ShardManifestRecord::compute_hash(&bytes) != record.content_hash
         {
-            stats.skipped += 1;
+            record_skip(
+                &mut stats,
+                &mut skips,
+                &record.path,
+                "the content hash does not match the manifest".to_string(),
+            );
             continue;
         }
         let LoadedShard {
@@ -149,8 +204,8 @@ pub fn load_index(
             edges: shard_edges,
         } = match shard.load(id_gen) {
             Ok(loaded) => loaded,
-            Err(_) => {
-                stats.skipped += 1;
+            Err(error) => {
+                record_skip(&mut stats, &mut skips, &record.path, error.to_string());
                 continue;
             }
         };
@@ -164,7 +219,21 @@ pub fn load_index(
         extractions,
         edges,
         stats,
+        skips,
     })
+}
+
+fn record_skip(
+    stats: &mut IndexLoadStats,
+    skips: &mut Vec<ShardSkip>,
+    path: &Path,
+    reason: String,
+) {
+    stats.skipped += 1;
+    skips.push(ShardSkip {
+        path: path.to_path_buf(),
+        reason,
+    });
 }
 
 /// Canonical record path when it exists under the root.
@@ -186,4 +255,71 @@ fn resolve_record_path(root_canon: &Path, path: &Path) -> Result<Option<PathBuf>
         });
     }
     Ok(Some(canonical))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::shard::header::write_header;
+    use crate::output::shard::manifest::{ShardManifestRecord, write_manifest};
+
+    /// A record the reader refuses is skipped with its reason, so a stale work
+    /// tree, a corrupt payload and a schema mismatch stay distinguishable.
+    #[test]
+    fn skipped_records_carry_the_reason() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let index_dir = root.join(INDEX_DIR_NAME);
+        std::fs::create_dir_all(index_dir.join("shards")).unwrap();
+
+        let source = root.join("a.py");
+        std::fs::write(&source, "def a():\n    pass\n").unwrap();
+
+        let mut header_bytes = Vec::new();
+        write_header(&mut header_bytes, &ShardHeader::new("2026-01-01T00:00:00Z")).unwrap();
+        std::fs::write(index_dir.join(HEADER_FILE), header_bytes).unwrap();
+
+        // Schema version 79 is not this build's version, so the record fails
+        // to load. Written raw because the writer rejects it on purpose.
+        let record = serde_json::json!({
+            "schema_version": 79,
+            "path": "a.py",
+            "language": "python",
+            "symbols": [],
+            "imports": [],
+            "references": [],
+            "diagnostics": [],
+            "ast_node_count": 1,
+            "edges": [],
+        });
+        std::fs::write(index_dir.join("shards/0.jsonl"), format!("{record}\n")).unwrap();
+
+        let bytes = std::fs::read(&source).unwrap();
+        let manifest = ShardManifestRecord::from_file_bytes(
+            PathBuf::from("a.py"),
+            &bytes,
+            0,
+            "shards/0.jsonl".to_string(),
+        );
+        let mut manifest_bytes = Vec::new();
+        write_manifest(&mut manifest_bytes, std::slice::from_ref(&manifest)).unwrap();
+        std::fs::write(index_dir.join(MANIFEST_FILE), manifest_bytes).unwrap();
+
+        let loaded = load_index(
+            root,
+            &IdGenerator::with_start(1),
+            &IndexLoadOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(loaded.stats.loaded, 0);
+        assert_eq!(loaded.stats.skipped, 1);
+        assert_eq!(loaded.skips.len(), 1);
+        assert_eq!(loaded.skips[0].path, PathBuf::from("a.py"));
+        assert!(
+            loaded.skips[0].reason.contains("79"),
+            "the reason names the refused version: {}",
+            loaded.skips[0].reason
+        );
+    }
 }

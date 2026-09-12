@@ -23,7 +23,8 @@ pub use file::{
 };
 pub use header::{ShardHeader, read_header, write_header};
 pub use index::{
-    INDEX_DIR_NAME, IndexLoadOptions, IndexLoadStats, LoadedIndex, is_safe_shard_name, load_index,
+    INDEX_DIR_NAME, IndexLoadOptions, IndexLoadStats, LoadedIndex, ShardSkip, is_safe_shard_name,
+    load_index,
 };
 pub use manifest::{ShardManifestRecord, read_manifest, write_manifest};
 

@@ -115,7 +115,7 @@ mod tests {
         };
         let val: serde_json::Value = serde_json::to_value(&entry).unwrap();
         assert_eq!(val["name"], "MyClass");
-        assert_eq!(val["visibility"], "Public");
+        assert_eq!(val["visibility"], "public");
         assert_eq!(val["signature"], "class MyClass");
         assert_eq!(val["docstring"], "a class");
         assert!(val["source_range"].is_object());
@@ -132,7 +132,7 @@ mod tests {
         };
         let val: serde_json::Value = serde_json::to_value(&entry).unwrap();
         assert_eq!(val["name"], "obj");
-        assert_eq!(val["visibility"], "Private");
+        assert_eq!(val["visibility"], "private");
         assert!(val["signature"].is_null());
         assert!(val["docstring"].is_null());
     }

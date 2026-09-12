@@ -87,8 +87,11 @@ These values also parse back through the CLI `--language` flag. The same names
 apply to the strum `Display`/`AsRefStr` and serde representations of `LangId`.
 
 Graph output schema version 2 adds `file_path` and `source_range` to serialized
-symbol nodes. `.metast` v2 shards do not persist numeric IDs. They store stable
-language-scoped endpoint names and regenerate symbol IDs when loaded.
+symbol nodes. `.metast` shards declare `SHARD_SCHEMA_VERSION` in `header.json`
+and in every record, and they spell symbol kinds and visibility in lowercase.
+They do not persist numeric IDs: they store stable language-scoped endpoint
+names and regenerate symbol IDs when loaded. A reader refuses any other version,
+so an index written before a schema bump must be regenerated.
 
 ## 7. Known limitations
 
