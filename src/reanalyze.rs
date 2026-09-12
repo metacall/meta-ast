@@ -363,11 +363,6 @@ mod tests {
         std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(path).unwrap()) == 0
     }
 
-    #[cfg(not(unix))]
-    fn writes_as_root(_path: &Path) -> bool {
-        false
-    }
-
     #[test]
     fn cold_analysis_populates_state() {
         let root = temp_dir("cold");
@@ -649,6 +644,8 @@ mod tests {
         assert_eq!(cs.files_added, 0);
     }
 
+    /// Only Unix can deny a read to a normal user.
+    #[cfg(unix)]
     #[test]
     fn read_failure_keeps_the_cached_entry() {
         let root = temp_dir("read_failure");

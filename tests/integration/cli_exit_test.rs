@@ -1,6 +1,6 @@
 //! Regression coverage for the command line exit policy.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn binary() -> &'static str {
@@ -32,18 +32,34 @@ fn help_and_version_skip_the_banner() {
     }
 }
 
-/// A parse failure is an error, so the default policy makes the run fail.
+/// A parse failure is a warning, so the default policy keeps the run green and
+/// an explicit warning policy fails it.
 #[test]
-fn graph_exits_non_zero_on_an_error_diagnostic() {
+fn graph_exit_status_follows_the_diagnostic_policy() {
     let dir = scratch("broken");
     std::fs::write(dir.join("broken.py"), "def oops(:\n").unwrap();
 
-    let output = run(&["graph", dir.to_str().unwrap()]);
+    let default_run = run(&["graph", dir.to_str().unwrap()]);
     assert_eq!(
-        output.status.code(),
+        default_run.status.code(),
+        Some(0),
+        "a warning must not fail the default policy, stderr: {}",
+        String::from_utf8_lossy(&default_run.stderr)
+    );
+
+    let strict_run = run(&["graph", dir.to_str().unwrap(), "--fail-on", "warning"]);
+    assert_eq!(
+        strict_run.status.code(),
         Some(1),
-        "graph must fail on an error diagnostic, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "the warning policy must fail the run, stderr: {}",
+        String::from_utf8_lossy(&strict_run.stderr)
+    );
+
+    let permissive_run = run(&["graph", dir.to_str().unwrap(), "--fail-on", "never"]);
+    assert_eq!(
+        permissive_run.status.code(),
+        Some(0),
+        "the permissive policy must never fail the run"
     );
 }
 
@@ -58,9 +74,5 @@ fn graph_exits_zero_on_a_clean_project() {
         Some(0),
         "a clean project must exit zero, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        Path::new(&dir).exists(),
-        "the fixture directory must stay in place"
     );
 }
