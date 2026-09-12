@@ -176,11 +176,7 @@ impl FlattenedScopeCache {
                         name: name.clone(),
                         confidence,
                         rank,
-                        path: ctx
-                            .file_paths
-                            .get(&current)
-                            .cloned()
-                            .unwrap_or_default(),
+                        path: ctx.file_paths.get(&current).cloned().unwrap_or_default(),
                     });
                 }
             }

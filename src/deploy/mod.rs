@@ -156,20 +156,6 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<()> {
             );
         }
     }
-    // 6b. Inject client-call edges (metacall('fn', ...) -> target symbol)
-    // and collect unresolved-invocation diagnostics.
-    let client_resolution = client_call::resolve_client_calls(
-        &analysis.graph,
-        &analysis.extractions,
-        &all_call_sites,
-        &config.root,
-    );
-    for (from_idx, to_idx, confidence) in client_resolution.edges {
-        analysis
-            .graph
-            .add_edge_normalized(from_idx, to_idx, EdgeKind::Reference, confidence);
-    }
-    diagnostics.extend(client_resolution.diagnostics);
 
     // 6c. Report orphaned MetaCall configuration files and surface every
     // diagnostic collected during analysis and edge injection.
