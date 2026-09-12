@@ -646,4 +646,109 @@ mod tests {
         );
         assert_eq!(edges[0].1, SymbolId::new(99).unwrap());
     }
+
+    #[test]
+    fn local_symbol_shadows_the_imported_symbol() {
+        let mut symbol_index: SymbolIndex = HashMap::new();
+        symbol_index.insert(
+            FileId::new(1).unwrap(),
+            vec![(
+                SymbolId::new(10).unwrap(),
+                "helper".into(),
+                LangId::Python,
+                Some(Visibility::Public),
+            )],
+        );
+        symbol_index.insert(
+            FileId::new(2).unwrap(),
+            vec![(
+                SymbolId::new(20).unwrap(),
+                "helper".into(),
+                LangId::Python,
+                Some(Visibility::Public),
+            )],
+        );
+
+        let ctx = ResolutionContext {
+            symbol_index,
+            import_adjacency: HashMap::from([(
+                FileId::new(1).unwrap(),
+                vec![FileId::new(2).unwrap()],
+            )]),
+            file_languages: HashMap::from([
+                (FileId::new(1).unwrap(), LangId::Python),
+                (FileId::new(2).unwrap(), LangId::Python),
+            ]),
+            file_paths: HashMap::from([
+                (FileId::new(1).unwrap(), PathBuf::from("/proj/main.py")),
+                (FileId::new(2).unwrap(), PathBuf::from("/proj/lib.py")),
+            ]),
+        };
+
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
+        let matches = cache.resolve(FileId::new(1).unwrap(), "helper").unwrap();
+        assert_eq!(
+            matches.len(),
+            1,
+            "the local definition must shadow the imported one"
+        );
+        assert_eq!(matches[0].0, SymbolId::new(10).unwrap());
+        assert_eq!(matches[0].1, 1.0);
+    }
+
+    #[test]
+    fn imported_candidates_are_ranked_by_path_not_by_id() {
+        let mut symbol_index: SymbolIndex = HashMap::new();
+        symbol_index.insert(FileId::new(1).unwrap(), vec![]);
+        // File 2 sorts before file 3 by path but holds the higher symbol id.
+        symbol_index.insert(
+            FileId::new(2).unwrap(),
+            vec![(
+                SymbolId::new(30).unwrap(),
+                "util".into(),
+                LangId::Python,
+                Some(Visibility::Public),
+            )],
+        );
+        symbol_index.insert(
+            FileId::new(3).unwrap(),
+            vec![(
+                SymbolId::new(20).unwrap(),
+                "util".into(),
+                LangId::Python,
+                Some(Visibility::Public),
+            )],
+        );
+
+        let ctx = ResolutionContext {
+            symbol_index,
+            import_adjacency: HashMap::from([(
+                FileId::new(1).unwrap(),
+                vec![FileId::new(2).unwrap(), FileId::new(3).unwrap()],
+            )]),
+            file_languages: HashMap::from([
+                (FileId::new(1).unwrap(), LangId::Python),
+                (FileId::new(2).unwrap(), LangId::Python),
+                (FileId::new(3).unwrap(), LangId::Python),
+            ]),
+            file_paths: HashMap::from([
+                (FileId::new(1).unwrap(), PathBuf::from("/proj/app.py")),
+                (FileId::new(2).unwrap(), PathBuf::from("/proj/a_util.py")),
+                (FileId::new(3).unwrap(), PathBuf::from("/proj/z_util.py")),
+            ]),
+        };
+
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
+        let matches = cache.resolve(FileId::new(1).unwrap(), "util").unwrap();
+        assert_eq!(
+            matches.len(),
+            2,
+            "an ambiguous import keeps both candidates"
+        );
+        assert_eq!(
+            matches[0].0,
+            SymbolId::new(30).unwrap(),
+            "candidate order must follow the file path, not the raw symbol id"
+        );
+    }
 }

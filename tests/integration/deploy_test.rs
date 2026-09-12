@@ -199,6 +199,114 @@ mod deploy_tests {
         );
     }
 
+    /// `-f yaml` must write the manifests in the requested format.
+    #[test]
+    fn deploy_yaml_format_writes_yaml_artifacts() {
+        let root =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mixed/python_calls_js");
+        let out_dir = tempdir().unwrap();
+        let out_path = out_dir.path().to_path_buf();
+
+        let config = DeployConfig {
+            root,
+            out: out_path.clone(),
+            format: OutputFormat::Yaml,
+            check: false,
+            max_pod_size: 20,
+        };
+        run_deploy(config).expect("Deploy failed");
+
+        let pods = out_path.join("metacall.pods.yaml");
+        let mesh = out_path.join("metacall.mesh.yaml");
+        assert!(
+            pods.exists(),
+            "the pod manifest must be written in the requested format"
+        );
+        assert!(
+            mesh.exists(),
+            "the mesh annotation must be written in the requested format"
+        );
+        let pods_text = fs::read_to_string(&pods).unwrap();
+        assert!(
+            pods_text.contains("deployments"),
+            "pod manifest content: {pods_text}"
+        );
+        let mesh_text = fs::read_to_string(&mesh).unwrap();
+        assert!(
+            mesh_text.contains("deployment_units"),
+            "mesh content: {mesh_text}"
+        );
+    }
+
+    /// An unmappable MetaCall load tag must be reported, not skipped silently.
+    #[test]
+    fn deploy_reports_an_unknown_load_tag() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("app.py"),
+            "from metacall import metacall_load_from_file\n\nmetacall_load_from_file(\"wasm\", [\"a.wasm\"])\n",
+        )
+        .unwrap();
+
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_meta-ast"))
+            .arg("deploy")
+            .arg(dir.path())
+            .arg("--out")
+            .arg(dir.path().join("out"))
+            .env("RUST_LOG", "warn")
+            .output()
+            .unwrap();
+
+        let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        assert!(
+            text.contains("wasm"),
+            "the unmappable tag must be named in a diagnostic, got:\n{text}"
+        );
+    }
+
+    /// An in-memory load has no file: it must not become a node named by its code.
+    #[test]
+    fn memory_load_is_not_named_by_its_code() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            "{\"name\":\"probe\",\"version\":\"1.0.0\"}\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("app.py"),
+            "from metacall import metacall_load_from_memory\n\nmetacall_load_from_memory(\"node\", \"console.log(1)\")\n",
+        )
+        .unwrap();
+
+        let out_dir = tempdir().unwrap();
+        let config = DeployConfig {
+            root: dir.path().to_path_buf(),
+            out: out_dir.path().to_path_buf(),
+            format: OutputFormat::Json,
+            check: false,
+            max_pod_size: 20,
+        };
+        run_deploy(config).expect("Deploy failed");
+
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(out_dir.path().join("metacall.pods.json")).unwrap(),
+        )
+        .unwrap();
+        let names: Vec<String> = manifest["deployments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|d| d["dependencies"].as_array().cloned().unwrap_or_default())
+            .filter_map(|dep| dep["name"].as_str().map(str::to_string))
+            .collect();
+        assert!(
+            !names.iter().any(|name| name.contains("console.log")),
+            "a memory load must not name a node after its inline code: {names:?}"
+        );
+    }
+
     fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
         fs::create_dir_all(dst)?;
         for entry in fs::read_dir(src)? {

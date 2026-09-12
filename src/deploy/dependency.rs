@@ -474,6 +474,22 @@ mod tests {
         }
     }
 
+    fn python_node(raw_path: &str) -> ExternalNode {
+        ExternalNode {
+            raw_path: raw_path.to_string(),
+            language: LangId::Python,
+            classification: None,
+        }
+    }
+
+    fn go_node(raw_path: &str) -> ExternalNode {
+        ExternalNode {
+            raw_path: raw_path.to_string(),
+            language: LangId::Go,
+            classification: None,
+        }
+    }
+
     fn test_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("meta_ast_ruby_dep_{name}"));
         if dir.exists() {
@@ -539,5 +555,103 @@ mod tests {
             }
             other => panic!("expected Unresolved, got {other:?}"),
         }
+    }
+
+    /// A lockfile entry name must match the package exactly, not as a substring.
+    #[test]
+    fn lockfile_match_requires_the_exact_entry() {
+        let dir = test_dir("lockfile_boundary");
+        let lf = dir.join("uv.lock");
+        std::fs::write(
+            &lf,
+            "[[package]]\nname = \"requests-toolbelt\"\nversion = \"4.0.0\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_version_from_lockfile(&lf, "requests"),
+            None,
+            "requests must not match the requests-toolbelt entry"
+        );
+        assert_eq!(
+            parse_version_from_lockfile(&lf, "requests-toolbelt").as_deref(),
+            Some("4.0.0")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A lockfile that does not list the package must not be reported as the
+    /// source of a resolved dependency.
+    #[test]
+    fn lockfile_without_the_entry_is_not_a_lockfile_hit() {
+        let dir = test_dir("lockfile_missing_entry");
+        std::fs::write(
+            dir.join("uv.lock"),
+            "[[package]]\nname = \"requests-toolbelt\"\nversion = \"4.0.0\"\n",
+        )
+        .unwrap();
+
+        let classification = classify_python(&python_node("requests"), &dir);
+        assert!(
+            !matches!(
+                classification,
+                ExternalClassification::Classified {
+                    source: DependencySource::Lockfile,
+                    ..
+                }
+            ),
+            "an entry the lockfile does not contain is not a lockfile hit: {classification:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A go.sum module path must match exactly, not as a prefix.
+    #[test]
+    fn go_sum_requires_an_exact_module_path() {
+        let dir = test_dir("go_sum_boundary");
+        let lf = dir.join("go.sum");
+        std::fs::write(&lf, "github.com/foo/bar/baz v1.0.0 h1:AAAA=\n").unwrap();
+
+        assert_eq!(
+            parse_version_from_go_sum(&lf, "github.com/foo/bar"),
+            None,
+            "a prefix must not match a different module"
+        );
+        assert_eq!(
+            parse_version_from_go_sum(&lf, "github.com/foo/bar/baz").as_deref(),
+            Some("v1.0.0")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// go.mod `require` lines carry the version.
+    #[test]
+    fn go_mod_require_line_yields_a_version() {
+        let dir = test_dir("go_mod_require");
+        std::fs::write(
+            dir.join("go.mod"),
+            "module example.com/app\n\ngo 1.21\n\nrequire github.com/foo/bar v1.2.3\n",
+        )
+        .unwrap();
+
+        let classification = classify_go(&go_node("github.com/foo/bar"), &dir);
+        match classification {
+            ExternalClassification::Classified {
+                version,
+                language,
+                source,
+                ..
+            } => {
+                assert_eq!(language, LangId::Go);
+                assert_eq!(source, DependencySource::Manifest);
+                let version = version.unwrap_or_default();
+                assert!(
+                    version.contains("1.2.3"),
+                    "the go.mod require version must be read, got {version:?}"
+                );
+            }
+            other => panic!("expected Classified, got {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -832,4 +832,25 @@ mod tests {
         );
         assert!(resolution.diagnostics.is_empty());
     }
+
+    /// A script path written with Windows separators must resolve on Unix.
+    #[test]
+    fn windows_script_separators_resolve_on_unix() {
+        let dir = std::env::temp_dir().join("meta_ast_script_separator");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let util = dir.join("sub").join("util.js");
+        std::fs::write(&util, "export const x = 1;\n").unwrap();
+
+        let path_to_idx =
+            std::collections::HashMap::from([(util.clone(), petgraph::graph::NodeIndex::new(0))]);
+        let source = dir.join("app.py");
+
+        let resolved = resolve_script_to_file(&dir, "sub\\util.js", &source, &path_to_idx);
+        assert!(
+            resolved.is_some(),
+            "a Windows-authored script path must resolve on Unix"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

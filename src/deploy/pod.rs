@@ -396,4 +396,45 @@ mod tests {
         assert_eq!(partition.inter_pod_edges.len(), 1);
         assert_eq!(partition.inter_pod_edges[0].confidence, 1.0);
     }
+
+    /// A symbol whose file has no file node must not panic the partition pass.
+    #[test]
+    fn partition_skips_symbols_with_a_missing_file_node() {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let real = FileId::new(1).unwrap();
+        let real_idx = graph.add_node(NodeData::File(FileNode::new(
+            real,
+            PathBuf::from("a.py"),
+            LangId::Python,
+            SnapshotId::new(1).unwrap(),
+        )));
+        graph.file_to_index.insert(real, real_idx);
+
+        // A symbol from a file that the partition does not know about.
+        let stale_file = FileId::new(99).unwrap();
+        let stale_sym = graph.add_node(NodeData::Symbol(SymbolNode {
+            id: SymbolId::new(501).unwrap(),
+            name: "stale".to_string(),
+            kind: SymbolKind::Function,
+            file_id: stale_file,
+            visibility: None,
+            source_range: test_range(),
+        }));
+        let real_sym = graph.add_node(NodeData::Symbol(SymbolNode {
+            id: SymbolId::new(502).unwrap(),
+            name: "real".to_string(),
+            kind: SymbolKind::Function,
+            file_id: real,
+            visibility: None,
+            source_range: test_range(),
+        }));
+        graph.add_edge_normalized(stale_sym, real_sym, EdgeKind::Reference, 0.5);
+
+        let partition = partition_into_pods(&graph);
+        assert_eq!(partition.pods.len(), 1, "only the known file forms a pod");
+        assert!(
+            !partition.pods[0].files.contains(&stale_file),
+            "the stale symbol's file must not enter a pod"
+        );
+    }
 }

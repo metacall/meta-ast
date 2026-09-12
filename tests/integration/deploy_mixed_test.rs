@@ -546,4 +546,54 @@ mod deploy_mixed_tests {
             "check mode should pass or report fairness"
         );
     }
+
+    /// Mesh edges and unit symbols must be canonically ordered.
+    #[test]
+    fn test_mesh_output_order_is_canonical() {
+        let (out_dir, _manifest) = run_deploy_on_fixture("three_lang_math");
+        let mesh: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(out_dir.path().join("metacall.mesh.json")).unwrap(),
+        )
+        .unwrap();
+
+        let pairs: Vec<(u64, u64)> = mesh["cross_language_edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|edge| {
+                (
+                    edge["from_unit"].as_u64().unwrap(),
+                    edge["to_unit"].as_u64().unwrap(),
+                )
+            })
+            .collect();
+        let mut expected_pairs = pairs.clone();
+        expected_pairs.sort();
+        assert_eq!(
+            pairs, expected_pairs,
+            "cross-language edges must be canonically ordered"
+        );
+
+        for unit in mesh["deployment_units"].as_array().unwrap() {
+            let keys: Vec<(String, String, String)> = unit["symbols"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|symbol| {
+                    (
+                        symbol["file"].as_str().unwrap_or_default().to_string(),
+                        symbol["name"].as_str().unwrap_or_default().to_string(),
+                        symbol["kind"].as_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect();
+            let mut expected_keys = keys.clone();
+            expected_keys.sort();
+            assert_eq!(
+                keys, expected_keys,
+                "unit symbols must be canonically ordered in unit {}",
+                unit["id"]
+            );
+        }
+    }
 }

@@ -382,6 +382,61 @@ mod tests {
     }
 
     #[test]
+    fn file_iteration_is_path_sorted() {
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        for name in ["e.rs", "a.rs", "d.rs", "b.rs", "c.rs"] {
+            builder.add_file(PathBuf::from(name), LangId::Rust);
+        }
+
+        let graph = builder.build();
+        let paths: Vec<PathBuf> = graph.files().map(|(_, file)| file.path.clone()).collect();
+        let mut sorted = paths.clone();
+        sorted.sort();
+
+        assert_eq!(paths, sorted, "file iteration must be path sorted");
+        let again: Vec<PathBuf> = graph.files().map(|(_, file)| file.path.clone()).collect();
+        assert_eq!(paths, again, "file iteration must be stable");
+    }
+
+    #[test]
+    fn symbol_iteration_is_path_then_name_sorted() {
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        let entries = [
+            ("b.rs", 3, "zeta"),
+            ("a.rs", 1, "beta"),
+            ("a.rs", 2, "alpha"),
+            ("c.rs", 4, "gamma"),
+        ];
+        for (path, id, name) in entries.iter() {
+            builder.add_file(PathBuf::from(path), LangId::Rust);
+            let mut symbol = test_symbol(*id, name);
+            symbol.file_path = PathBuf::from(path);
+            builder.add_symbol(&symbol).unwrap();
+        }
+        let mut sorted_entries = entries;
+        sorted_entries.sort_by_key(|(path, _, name)| (*path, *name));
+
+        let graph = builder.build();
+        let ordered: Vec<(String, String)> = graph
+            .symbols()
+            .map(|(_, symbol)| {
+                let path = graph
+                    .file_node(symbol.file_id)
+                    .map(|file| file.path.display().to_string())
+                    .unwrap_or_default();
+                (path, symbol.name.clone())
+            })
+            .collect();
+        let entries = sorted_entries;
+        let expected: Vec<(String, String)> = entries
+            .iter()
+            .map(|(path, _, name)| (path.to_string(), name.to_string()))
+            .collect();
+
+        assert_eq!(ordered, expected, "symbols must be path then name sorted");
+    }
+
+    #[test]
     fn code_graph_iteration_over_symbols() {
         let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
         let _file_id = builder.add_file(PathBuf::from("test.rs"), LangId::Rust);

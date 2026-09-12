@@ -741,4 +741,75 @@ mod tests {
         let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
         assert!(sites.is_empty());
     }
+
+    /// Rust classification must not accept a look-alike helper name, and the
+    /// genuine `metacall::load::*` names must still be detected.
+    #[test]
+    fn test_scan_rust_rejects_lookalike_helpers() {
+        let source = br#"
+fn f() { let a = reader.read_from_file("a"); }
+fn g() { let b = loader.load_from_memory_cache("b"); }
+fn h() { let c = copy_from_file_buffer("c"); }
+fn i() { let d = cache_from_configuration("d"); }
+"#;
+        let tree = parse(LangId::Rust, source);
+        let sites = scan_file(LangId::Rust, &tree, source, Path::new("lib.rs"));
+        assert!(
+            sites.is_empty(),
+            "look-alike helpers must not be MetaCall sites: {:?}",
+            sites
+                .iter()
+                .map(|s| (&s.variant, &s.scripts))
+                .collect::<Vec<_>>()
+        );
+
+        let genuine = b"metacall::load::from_file(Tag::NodeJS, [\"index.js\"], None)";
+        let tree = parse(LangId::Rust, genuine);
+        let sites = scan_file(LangId::Rust, &tree, genuine, Path::new("lib.rs"));
+        assert_eq!(sites.len(), 1, "the real load API must still be detected");
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+    }
+
+    /// The script-language predicates must accept the full MetaCall client API,
+    /// not only `metacall` and `metacall_await`.
+    #[test]
+    fn test_scan_python_accepts_the_full_client_api() {
+        let source = br#"
+metacallv("multiply", 2, 3)
+metacallt("multiply", "int", "int")
+metacall_no_arg()
+metacall_untyped("multiply", 2, 3)
+metacallfms_await("x")
+metacall_await_s("x", 1)
+"#;
+        let tree = parse(LangId::Python, source);
+        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let names: Vec<&str> = sites
+            .iter()
+            .filter_map(|s| s.function_name.as_deref().or(s.target_lang.as_deref()))
+            .collect();
+        assert_eq!(
+            sites.len(),
+            6,
+            "every client API name must be scanned, got {names:?}"
+        );
+    }
+
+    /// The Go package selector must match the package exactly.
+    ///
+    /// Two arguments are required: with one argument tree-sitter-go parses
+    /// `pkg.Fn(x)` as a type conversion, not a call.
+    #[test]
+    fn test_scan_go_rejects_a_lookalike_package() {
+        let source = b"metacallmock.Call(\"x\", 1)";
+        let tree = parse(LangId::Go, source);
+        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        assert!(sites.is_empty(), "metacallmock is not the MetaCall package");
+
+        let genuine = b"metacall.Call(\"x\", 1)";
+        let tree = parse(LangId::Go, genuine);
+        let sites = scan_file(LangId::Go, &tree, genuine, Path::new("main.go"));
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
+    }
 }

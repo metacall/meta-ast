@@ -3,6 +3,7 @@ use std::path::Path;
 
 use meta_ast::graph::{EdgeKind, GraphBuilder, NodeData};
 use meta_ast::model::SnapshotId;
+use petgraph::visit::EdgeRef;
 
 fn flatten_symbols(result: &meta_ast::extractor::ExtractionResult) -> Vec<meta_ast::model::Symbol> {
     result
@@ -687,7 +688,7 @@ fn edge_unresolved_ref_creates_no_edges() {
 }
 
 #[test]
-fn edge_selfref_does_not_create_self_loop() {
+fn edge_selfref_creates_a_self_loop() {
     let root = Path::new("tests/fixtures/multi/edge_selfref");
     let files = meta_ast::input::discover_files(root, None).unwrap();
     let snapshot_id = meta_ast::model::SnapshotId::new(1).unwrap();
@@ -739,12 +740,24 @@ fn edge_selfref_does_not_create_self_loop() {
     }
 
     let graph = builder.build();
-    let ref_count = graph
-        .edges_of_kind(meta_ast::graph::EdgeKind::Reference)
+    let self_loops = graph
+        .graph()
+        .edge_references()
+        .filter(|edge| {
+            edge.weight().kind == meta_ast::graph::EdgeKind::Reference
+                && edge.source() == edge.target()
+        })
         .count();
     assert_eq!(
-        ref_count, 0,
-        "self-calls should not create reference edges; got {ref_count}"
+        self_loops, 1,
+        "a recursive call must create exactly one self-loop reference edge"
+    );
+
+    let scc = meta_ast::graph::scc::SccAnalysis::analyze(graph.graph());
+    let hints: Vec<_> = scc.components.iter().map(|c| c.hint).collect();
+    assert!(
+        hints.contains(&meta_ast::graph::scc::DeployabilityHint::SelfLoop),
+        "a self-recursive unit must classify as SelfLoop, got {hints:?}"
     );
 }
 
