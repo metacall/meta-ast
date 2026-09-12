@@ -20,6 +20,13 @@ use crate::parser;
 
 pub use crate::model::FileExtraction;
 
+/// Largest source file the extractor reads, in bytes.
+///
+/// A generated file above this size is reported and skipped: parsing it would
+/// spike memory for a result no consumer can use, and the diagnostic keeps the
+/// skip visible instead of silently dropping the file.
+pub const MAX_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
+
 /// Controls what the extraction pass produces.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ExtractOptions {
@@ -206,6 +213,23 @@ fn extract_single_file(
     id_generators: &ExtractionIdGenerators,
     opts: &ExtractOptions,
 ) -> FileExtraction {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.len() > MAX_SOURCE_BYTES => {
+            return failed_extraction(
+                path,
+                *lang,
+                format!(
+                    "file is {} bytes, over the {MAX_SOURCE_BYTES} byte limit for a single source",
+                    metadata.len()
+                ),
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            return failed_extraction(path, *lang, format!("failed to read file: {error}"));
+        }
+    }
+
     let source = match std::fs::read(path) {
         Ok(source) => source,
         Err(error) => {
@@ -278,7 +302,18 @@ fn extract_source(
         });
     }
 
-    let raw_symbols = crate::language::extract_symbols_for(lang, &tree, source);
+    let raw_symbols = match crate::language::extract_symbols_for_checked(lang, &tree, source) {
+        Ok(symbols) => symbols,
+        Err(error) => {
+            diags.push(Diagnostic {
+                path: path.to_path_buf(),
+                severity: Severity::Error,
+                message: format!("symbol extraction failed: {error}"),
+                source_range: None,
+            });
+            Vec::new()
+        }
+    };
     let symbols = raw_symbols
         .into_iter()
         .map(|raw| Symbol {
@@ -298,11 +333,34 @@ fn extract_source(
     let (imports, references, text_diagnostics) = if opts.skip_imports_and_refs {
         (Vec::new(), Vec::new(), Vec::new())
     } else {
-        crate::language::extract_imports_and_references_for(lang, &tree, source, path)
+        match crate::language::extract_imports_and_references_for_checked(lang, &tree, source, path)
+        {
+            Ok(extracted) => extracted,
+            Err(error) => {
+                diags.push(Diagnostic {
+                    path: path.to_path_buf(),
+                    severity: Severity::Error,
+                    message: format!("import and reference extraction failed: {error}"),
+                    source_range: None,
+                });
+                (Vec::new(), Vec::new(), Vec::new())
+            }
+        }
     };
 
     #[cfg(feature = "metacall-deploy")]
-    let call_sites = crate::deploy::scanner::scan_file(lang, &tree, source, path);
+    let call_sites = match crate::deploy::scanner::scan_file(lang, &tree, source, path) {
+        Ok(sites) => sites,
+        Err(error) => {
+            diags.push(Diagnostic {
+                path: path.to_path_buf(),
+                severity: Severity::Error,
+                message: format!("deploy call site scan failed: {error}"),
+                source_range: None,
+            });
+            Vec::new()
+        }
+    };
 
     #[cfg(feature = "dataflow")]
     let (data_nodes, flow_edges) =

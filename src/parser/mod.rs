@@ -15,18 +15,22 @@ thread_local! {
     static PARSERS: RefCell<[Option<Parser>; LangId::COUNT]> = const { RefCell::new([const { None }; LangId::COUNT]) };
 }
 
+fn new_parser(lang: LangId) -> Result<Parser, Error> {
+    let mut parser = Parser::new();
+    let grammar = crate::language::grammar_for(lang);
+    parser
+        .set_language(&grammar)
+        .map_err(|e| Error::Config(format!("failed to set language: {e}")))?;
+    Ok(parser)
+}
+
 fn get_or_init_parser(
     parsers: &mut [Option<Parser>; LangId::COUNT],
     lang: LangId,
 ) -> Result<&mut Parser, Error> {
     let idx = lang as usize;
     if parsers[idx].is_none() {
-        let mut parser = Parser::new();
-        let grammar = crate::language::grammar_for(lang);
-        parser
-            .set_language(&grammar)
-            .map_err(|e| Error::Config(format!("failed to set language: {e}")))?;
-        parsers[idx] = Some(parser);
+        parsers[idx] = Some(new_parser(lang)?);
     }
     parsers[idx]
         .as_mut()
@@ -35,12 +39,28 @@ fn get_or_init_parser(
 
 pub(crate) fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tree, Error> {
     PARSERS.with(|cache| {
-        let parsers = &mut *cache.borrow_mut();
-        let parser = get_or_init_parser(parsers, lang)?;
-        parser.parse(source, None).ok_or_else(|| Error::Parse {
-            path: Default::default(),
-            message: "parser returned no tree".into(),
-        })
+        // A re-entrant call finds the pool borrowed. A fresh parser costs one
+        // grammar assignment and keeps the call panic free, which matters
+        // because the release profile aborts on panic, so a panic here would
+        // take the whole analysis down instead of failing one file.
+        let Ok(mut pool) = cache.try_borrow_mut() else {
+            let mut parser = new_parser(lang)?;
+            return parse_with(&mut parser, lang, source);
+        };
+        let parser = get_or_init_parser(&mut pool, lang)?;
+        parse_with(parser, lang, source)
+    })
+}
+
+fn parse_with(
+    parser: &mut Parser,
+    lang: LangId,
+    source: &[u8],
+) -> Result<tree_sitter::Tree, Error> {
+    parser.reset();
+    parser.parse(source, None).ok_or_else(|| Error::Parse {
+        path: Default::default(),
+        message: format!("the {lang:?} parser returned no tree"),
     })
 }
 

@@ -8,17 +8,47 @@ use super::{LanguageSpec, RawSymbol};
 use crate::model::{LineColumn, SourceRange, SymbolKind, Visibility};
 use tree_sitter::StreamingIterator;
 
-pub(crate) fn compile_query(
+/// Compile a query without panicking.
+///
+/// A broken query is a programming error, but the release profile aborts on
+/// panic, so the failure travels as a value: the analysis turns it into a
+/// per-file diagnostic and the process keeps running.
+/// Imports, references and the diagnostics for text that cannot be decoded.
+///
+/// The diagnostic channel travels with the extraction so a file with an
+/// undecodable specifier reports it without a second pass.
+pub(crate) type ImportExtraction = (
+    Vec<crate::model::UnresolvedImport>,
+    Vec<crate::model::UnresolvedReference>,
+    Vec<crate::error::Diagnostic>,
+);
+
+/// Definitions for one enclosing scope, grouped by name in source order.
+type DefinitionsByScope<'a> = std::collections::HashMap<
+    usize,
+    std::collections::HashMap<&'a str, Vec<(usize, crate::model::DataNodeId)>>,
+>;
+
+pub(crate) fn compile_query_checked(
     lang: &tree_sitter::Language,
     src: &str,
     label: &str,
-) -> tree_sitter::Query {
-    match tree_sitter::Query::new(lang, src) {
-        Ok(q) => q,
-        Err(e) => {
-            panic!("query compilation failed for {label}: {e}");
-        }
-    }
+) -> Result<tree_sitter::Query, String> {
+    tree_sitter::Query::new(lang, src)
+        .map_err(|error| format!("query compilation failed for {label}: {error}"))
+}
+
+/// Borrow a compiled query from a lazily initialized slot.
+pub(crate) fn query_from(
+    cached: &Result<tree_sitter::Query, String>,
+    language: crate::language::LangId,
+) -> Result<&tree_sitter::Query, crate::error::Error> {
+    cached
+        .as_ref()
+        .map_err(|message| crate::error::Error::Query {
+            language,
+            message: message.clone(),
+        })
 }
 
 #[inline]
@@ -73,11 +103,11 @@ pub(crate) fn extract_with_spec<'a>(
     tree: &'a tree_sitter::Tree,
     source: &'a [u8],
     spec: &LanguageSpec,
-) -> Vec<RawSymbol<'a>> {
+) -> Result<Vec<RawSymbol<'a>>, crate::error::Error> {
     use std::collections::HashMap;
     let mut symbols_map: HashMap<usize, (RawSymbol<'a>, usize)> = HashMap::new();
     let mut query_cursor = tree_sitter::QueryCursor::new();
-    let query = (spec.query_fn)();
+    let query = (spec.query_fn)()?;
     let mut matches = query_cursor.matches(query, tree.root_node(), source);
 
     while let Some(m) = matches.next() {
@@ -202,7 +232,7 @@ pub(crate) fn extract_with_spec<'a>(
     let mut result: Vec<_> = symbols_map.into_values().map(|(s, _)| s).collect();
     associate_docstrings(&mut result, source, tree, spec);
     result.sort_by_key(|s| s.source_range.byte_start);
-    result
+    Ok(result)
 }
 
 /// Associate doc comments with symbols via post-processing.
@@ -411,20 +441,16 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     source: &'a [u8],
     spec: &LanguageSpec,
     file_path: &std::path::Path,
-) -> (
-    Vec<crate::model::UnresolvedImport>,
-    Vec<crate::model::UnresolvedReference>,
-    Vec<crate::error::Diagnostic>,
-) {
-    let query = (spec.import_ref_query_fn)();
+) -> Result<ImportExtraction, crate::error::Error> {
+    let query = (spec.import_ref_query_fn)()?;
     let Some(path_idx) = query.capture_index_for_name("import.path") else {
-        return (Vec::new(), Vec::new(), Vec::new());
+        return Ok((Vec::new(), Vec::new(), Vec::new()));
     };
     let alias_idx = query.capture_index_for_name("import.alias");
     let symbol_idx = query.capture_index_for_name("import.symbol");
     let star_idx = query.capture_index_for_name("import.star");
     let Some(ref_idx) = query.capture_index_for_name("reference.name") else {
-        return (Vec::new(), Vec::new(), Vec::new());
+        return Ok((Vec::new(), Vec::new(), Vec::new()));
     };
 
     let mut query_cursor = tree_sitter::QueryCursor::new();
@@ -536,7 +562,7 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     imports.sort_by_key(|i| i.range.byte_start);
     references.sort_by_key(|r| r.range.byte_start);
 
-    (imports, references, diagnostics)
+    Ok((imports, references, diagnostics))
 }
 
 /// JS-family AST node kinds that introduce a new intra-procedural scope.
@@ -607,12 +633,14 @@ pub(crate) fn extract_def_use_dataflow(
     id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
 ) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
     use crate::graph::edge::CONFIDENCE_DEF_USE;
-    use crate::model::{DataNode, DataNodeId, DataScope, FlowEdge, FlowKind};
+    use crate::model::{DataNode, DataScope, FlowEdge, FlowKind};
     use tree_sitter::StreamingIterator;
 
     let mut cursor = tree_sitter::QueryCursor::new();
-    let mut defs: Vec<(String, usize, tree_sitter::Node, bool)> = Vec::new();
-    let mut uses: Vec<(String, usize, tree_sitter::Node, usize)> = Vec::new();
+    // Names borrow the source: the text is only materialized for a node that
+    // is actually emitted, so an unmatched use costs no allocation.
+    let mut defs: Vec<(&str, usize, tree_sitter::Node, bool)> = Vec::new();
+    let mut uses: Vec<(&str, usize, tree_sitter::Node, usize)> = Vec::new();
 
     let mut matches = cursor.matches(query, tree.root_node(), source);
     while let Some(m) = matches.next() {
@@ -621,7 +649,7 @@ pub(crate) fn extract_def_use_dataflow(
             let node = capture.node;
             let byte_pos = node.start_byte();
             let name = match node.utf8_text(source) {
-                Ok(t) => t.to_string(),
+                Ok(text) => text,
                 Err(_) => continue,
             };
             match capture_name {
@@ -636,16 +664,14 @@ pub(crate) fn extract_def_use_dataflow(
         }
     }
 
-    let mut nodes: Vec<DataNode> = Vec::new();
+    let mut nodes: Vec<DataNode> = Vec::with_capacity(defs.len() + uses.len());
     // Definitions grouped by their enclosing scope and name, in source order:
     // a use looks up its own bucket instead of scanning every definition, and
-    // the nearest preceding definition is the last entry before the use.
-    let mut defs_by_scope: std::collections::HashMap<
-        usize,
-        std::collections::HashMap<String, Vec<(usize, DataNodeId)>>,
-    > = std::collections::HashMap::new();
-    for (name, byte_pos, node, is_param) in &defs {
-        let scope = if *is_param {
+    // the nearest preceding definition is the last entry before the use. The
+    // name key borrows the source, so grouping allocates no text.
+    let mut defs_by_scope: DefinitionsByScope<'_> = std::collections::HashMap::new();
+    for (name, byte_pos, node, is_param) in defs {
+        let scope = if is_param {
             DataScope::Parameter
         } else {
             DataScope::Local
@@ -653,18 +679,18 @@ pub(crate) fn extract_def_use_dataflow(
         let dn = DataNode {
             id: id_gen.next(),
             symbol_id: None,
-            name: Some(name.clone()),
+            name: Some(name.to_string()),
             scope,
             type_hint: None,
-            source_range: source_range_from_node(node),
+            source_range: source_range_from_node(&node),
         };
-        let scope_start = find_enclosing_scope(tree.root_node(), *byte_pos, function_kinds);
+        let scope_start = find_enclosing_scope(tree.root_node(), byte_pos, function_kinds);
         defs_by_scope
             .entry(scope_start)
             .or_default()
-            .entry(name.clone())
+            .entry(name)
             .or_default()
-            .push((*byte_pos, dn.id));
+            .push((byte_pos, dn.id));
         nodes.push(dn);
     }
     for by_name in defs_by_scope.values_mut() {
@@ -673,13 +699,13 @@ pub(crate) fn extract_def_use_dataflow(
         }
     }
 
-    let mut edges: Vec<FlowEdge> = Vec::new();
-    for (use_name, use_pos, use_node, use_func_start) in &uses {
+    let mut edges: Vec<FlowEdge> = Vec::with_capacity(uses.len());
+    for (use_name, use_pos, use_node, use_func_start) in uses {
         let best_def = defs_by_scope
-            .get(use_func_start)
-            .and_then(|by_name| by_name.get(use_name.as_str()))
+            .get(&use_func_start)
+            .and_then(|by_name| by_name.get(use_name))
             .and_then(|candidates| {
-                let preceding = candidates.partition_point(|(byte_pos, _)| byte_pos < use_pos);
+                let preceding = candidates.partition_point(|(byte_pos, _)| *byte_pos < use_pos);
                 preceding
                     .checked_sub(1)
                     .and_then(|index| candidates.get(index))
@@ -690,10 +716,10 @@ pub(crate) fn extract_def_use_dataflow(
             let use_dn = DataNode {
                 id: id_gen.next(),
                 symbol_id: None,
-                name: Some(use_name.clone()),
+                name: Some(use_name.to_string()),
                 scope: DataScope::Local,
                 type_hint: None,
-                source_range: source_range_from_node(use_node),
+                source_range: source_range_from_node(&use_node),
             };
             let target_id = use_dn.id;
             nodes.push(use_dn);

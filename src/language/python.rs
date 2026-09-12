@@ -1,4 +1,5 @@
 use crate::language::DefaultVisibility;
+use crate::language::LangId;
 use crate::language::pack::define_language_pack;
 use std::path::{Path, PathBuf};
 
@@ -116,6 +117,44 @@ define_language_pack!(
         accessor: python_import_ref_query,
         import: PYTHON_IMPORT_QUERY_STR,
         reference: PYTHON_REFERENCE_QUERY_STR,
+    },
+    dataflow: {
+        static: PYTHON_DATAFLOW_QUERY,
+        accessor: python_dataflow_query,
+        query: r#"
+; Assignments
+(assignment
+  left: (identifier) @def.var)
+(augmented_assignment
+  left: (identifier) @def.var)
+(for_statement
+  left: (identifier) @def.var)
+
+; Function parameters
+(parameters
+  (identifier) @def.param)
+(parameters
+  (default_parameter
+    name: (identifier) @def.param))
+
+; Usages in expression context
+(call
+  function: (identifier) @use.var)
+(argument_list
+  (identifier) @use.var)
+(binary_operator
+  (identifier) @use.var)
+(return_statement
+  (identifier) @use.var)
+(assignment
+  right: (identifier) @use.var)
+(expression_statement
+  (identifier) @use.var)
+(attribute
+  object: (identifier) @use.var)
+(subscript
+  value: (identifier) @use.var)
+"#,
     },
     import_statement_kinds: ["import_statement", "import_from_statement"],
     class_like_parents: ["class_definition"],
@@ -370,49 +409,6 @@ define_language_pack!(
 
 // ── Dataflow extraction ─────────────────────────────────────────────
 
-#[cfg(feature = "dataflow")]
-static PYTHON_DATAFLOW_QUERY: std::sync::LazyLock<tree_sitter::Query> =
-    std::sync::LazyLock::new(|| {
-        crate::language::common::compile_query(
-            &tree_sitter_python::LANGUAGE.into(),
-            r#"
-; Assignments
-(assignment
-  left: (identifier) @def.var)
-(augmented_assignment
-  left: (identifier) @def.var)
-(for_statement
-  left: (identifier) @def.var)
-
-; Function parameters
-(parameters
-  (identifier) @def.param)
-(parameters
-  (default_parameter
-    name: (identifier) @def.param))
-
-; Usages in expression context
-(call
-  function: (identifier) @use.var)
-(argument_list
-  (identifier) @use.var)
-(binary_operator
-  (identifier) @use.var)
-(return_statement
-  (identifier) @use.var)
-(assignment
-  right: (identifier) @use.var)
-(expression_statement
-  (identifier) @use.var)
-(attribute
-  object: (identifier) @use.var)
-(subscript
-  value: (identifier) @use.var)
-"#,
-            "Python dataflow",
-        )
-    });
-
 /// Python AST node kinds that introduce a new intra-procedural scope.
 #[cfg(feature = "dataflow")]
 pub(crate) const PYTHON_FUNCTION_KINDS: &[&str] = &["function_definition"];
@@ -424,10 +420,13 @@ pub fn extract_python_dataflow(
     source: &[u8],
     id_gen: &crate::model::IdGenerator<crate::model::DataNodeId>,
 ) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
+    let Some(query) = python_dataflow_query() else {
+        return (Vec::new(), Vec::new());
+    };
     crate::language::common::extract_def_use_dataflow(
         tree,
         source,
-        &PYTHON_DATAFLOW_QUERY,
+        query,
         PYTHON_FUNCTION_KINDS,
         id_gen,
     )

@@ -15,6 +15,7 @@
 //! - `attr_reader`, `alias`, `include`, and `extend` are not handled.
 //! - Extension-less `Gemfile` and `Rakefile` are not detected.
 
+use crate::language::LangId;
 use crate::language::pack::define_language_pack;
 use crate::language::{DefaultVisibility, DocCommentConfig};
 use std::path::{Path, PathBuf};

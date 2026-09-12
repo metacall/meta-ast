@@ -175,6 +175,9 @@ impl ImportResolver for StatelessResolver {
 }
 
 /// Stateful resolver for Python import paths.
+///
+/// Only positive answers are memoized, so a module created after a miss is
+/// found on the next resolve instead of being answered from a stale entry.
 pub struct PythonResolver {
     f: fn(&str, &Path, &Path) -> Option<PathBuf>,
     exists_cache: RwLock<HashMap<PathBuf, bool>>,
@@ -209,7 +212,7 @@ impl ImportResolver for PythonResolver {
                 return res;
             }
             let res = path.exists();
-            if let Ok(mut cache) = self.exists_cache.write() {
+            if res && let Ok(mut cache) = self.exists_cache.write() {
                 cache.insert(path.to_path_buf(), res);
             }
             res
@@ -274,9 +277,13 @@ impl ImportResolver for GoModResolver {
         let module_info = match cached {
             Some(info) => info,
             None => {
+                // A missing go.mod is re-checked on the next resolve, so a
+                // module file written after the first miss is not cached away.
                 let computed = find_go_module(project_root);
-                if let Ok(mut guard) = self.cached_module.write() {
-                    *guard = Some(computed.clone());
+                if let Some(found) = computed.as_ref()
+                    && let Ok(mut guard) = self.cached_module.write()
+                {
+                    *guard = Some(Some(found.clone()));
                 }
                 computed
             }
@@ -357,7 +364,7 @@ impl ImportResolver for NodeResolver {
                 return res;
             }
             let res = path.is_file();
-            if let Ok(mut cache) = self.is_file_cache.write() {
+            if res && let Ok(mut cache) = self.is_file_cache.write() {
                 cache.insert(path.to_path_buf(), res);
             }
             res

@@ -1,3 +1,4 @@
+use crate::language::LangId;
 use crate::language::pack::define_language_pack;
 use crate::language::{C_LIKE_DOC_COMMENT, DefaultVisibility};
 use std::path::{Path, PathBuf};

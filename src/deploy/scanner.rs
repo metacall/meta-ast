@@ -6,6 +6,8 @@ use crate::graph::edge::CONFIDENCE_COMPUTED;
 use crate::language::LangId;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+
+use crate::language::common::query_from;
 use tree_sitter::{Node, Query, QueryCursor, StreamingIterator, Tree};
 
 use serde::{Deserialize, Serialize};
@@ -228,8 +230,8 @@ fn collect_strings_recursive(node: Node, source: &[u8], scripts: &mut Vec<String
     }
 }
 
-static PYTHON_QUERY: LazyLock<Query> = LazyLock::new(|| {
-    crate::language::common::compile_query(
+static PYTHON_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
+    crate::language::common::compile_query_checked(
         &tree_sitter_python::LANGUAGE.into(),
         &deploy_source(
             r#"
@@ -243,8 +245,8 @@ static PYTHON_QUERY: LazyLock<Query> = LazyLock::new(|| {
     )
 });
 
-static JS_QUERY: LazyLock<Query> = LazyLock::new(|| {
-    crate::language::common::compile_query(
+static JS_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
+    crate::language::common::compile_query_checked(
         &tree_sitter_javascript::LANGUAGE.into(),
         &deploy_source(
             r#"
@@ -258,8 +260,8 @@ static JS_QUERY: LazyLock<Query> = LazyLock::new(|| {
     )
 });
 
-static TS_QUERY: LazyLock<Query> = LazyLock::new(|| {
-    crate::language::common::compile_query(
+static TS_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
+    crate::language::common::compile_query_checked(
         &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         &deploy_source(
             r#"
@@ -273,8 +275,8 @@ static TS_QUERY: LazyLock<Query> = LazyLock::new(|| {
     )
 });
 
-static TSX_QUERY: LazyLock<Query> = LazyLock::new(|| {
-    crate::language::common::compile_query(
+static TSX_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
+    crate::language::common::compile_query_checked(
         &tree_sitter_typescript::LANGUAGE_TSX.into(),
         &deploy_source(
             r#"
@@ -288,8 +290,8 @@ static TSX_QUERY: LazyLock<Query> = LazyLock::new(|| {
     )
 });
 
-static C_QUERY: LazyLock<Query> = LazyLock::new(|| {
-    crate::language::common::compile_query(
+static C_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
+    crate::language::common::compile_query_checked(
         &tree_sitter_c::LANGUAGE.into(),
         &deploy_source(
             r#"
@@ -303,8 +305,8 @@ static C_QUERY: LazyLock<Query> = LazyLock::new(|| {
     )
 });
 
-static CPP_QUERY: LazyLock<Query> = LazyLock::new(|| {
-    crate::language::common::compile_query(
+static CPP_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
+    crate::language::common::compile_query_checked(
         &tree_sitter_cpp::LANGUAGE.into(),
         &deploy_source(
             r#"
@@ -318,8 +320,8 @@ static CPP_QUERY: LazyLock<Query> = LazyLock::new(|| {
     )
 });
 
-static RUST_QUERY: LazyLock<Query> = LazyLock::new(|| {
-    crate::language::common::compile_query(
+static RUST_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
+    crate::language::common::compile_query_checked(
         &tree_sitter_rust::LANGUAGE.into(),
         &deploy_source(
             r#"
@@ -341,8 +343,8 @@ static RUST_QUERY: LazyLock<Query> = LazyLock::new(|| {
     )
 });
 
-static GO_QUERY: LazyLock<Query> = LazyLock::new(|| {
-    crate::language::common::compile_query(
+static GO_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
+    crate::language::common::compile_query_checked(
         &tree_sitter_go::LANGUAGE.into(),
         &deploy_source(
             r#"
@@ -368,8 +370,8 @@ static GO_QUERY: LazyLock<Query> = LazyLock::new(|| {
     )
 });
 
-static RUBY_QUERY: LazyLock<Query> = LazyLock::new(|| {
-    crate::language::common::compile_query(
+static RUBY_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
+    crate::language::common::compile_query_checked(
         &tree_sitter_ruby::LANGUAGE.into(),
         &deploy_source(
             r#"
@@ -383,17 +385,22 @@ static RUBY_QUERY: LazyLock<Query> = LazyLock::new(|| {
     )
 });
 
-pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<CallSite> {
+pub fn scan_file(
+    id: LangId,
+    tree: &Tree,
+    source: &[u8],
+    path: &Path,
+) -> Result<Vec<CallSite>, crate::Error> {
     let query = match id {
-        LangId::Python => &*PYTHON_QUERY,
-        LangId::JavaScript => &*JS_QUERY,
-        LangId::TypeScript => &*TS_QUERY,
-        LangId::Tsx => &*TSX_QUERY,
-        LangId::C => &*C_QUERY,
-        LangId::Cpp => &*CPP_QUERY,
-        LangId::Rust => &*RUST_QUERY,
-        LangId::Go => &*GO_QUERY,
-        LangId::Ruby => &*RUBY_QUERY,
+        LangId::Python => query_from(&PYTHON_QUERY, id)?,
+        LangId::JavaScript => query_from(&JS_QUERY, id)?,
+        LangId::TypeScript => query_from(&TS_QUERY, id)?,
+        LangId::Tsx => query_from(&TSX_QUERY, id)?,
+        LangId::C => query_from(&C_QUERY, id)?,
+        LangId::Cpp => query_from(&CPP_QUERY, id)?,
+        LangId::Rust => query_from(&RUST_QUERY, id)?,
+        LangId::Go => query_from(&GO_QUERY, id)?,
+        LangId::Ruby => query_from(&RUBY_QUERY, id)?,
     };
 
     let mut cursor = QueryCursor::new();
@@ -404,10 +411,10 @@ pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<Cal
     // Capture indices are static query-shape facts; a missing name means a
     // malformed query constant, not runtime data. Bail out rather than panic.
     let Some(fn_name_idx) = query.capture_index_for_name("fn_name") else {
-        return call_sites;
+        return Ok(call_sites);
     };
     let Some(args_idx) = query.capture_index_for_name("args") else {
-        return call_sites;
+        return Ok(call_sites);
     };
 
     while let Some(mat) = matches.next() {
@@ -533,12 +540,23 @@ pub fn scan_file(id: LangId, tree: &Tree, source: &[u8], path: &Path) -> Vec<Cal
         }
     }
 
-    call_sites
+    Ok(call_sites)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A built-in query must compile; a failure is a defect, not test data.
+    fn scan_sites(id: LangId, tree: &Tree, source: &[u8], path: &str) -> Vec<CallSite> {
+        let result = scan_file(id, tree, source, Path::new(path));
+        assert!(
+            result.is_ok(),
+            "the built-in query compiles: {:?}",
+            result.as_ref().err()
+        );
+        result.unwrap()
+    }
     use crate::language::grammar_for;
 
     fn parse(id: LangId, source: &[u8]) -> Tree {
@@ -551,7 +569,7 @@ mod tests {
     fn test_scan_python() {
         let source = b"metacall_load_from_file('node', ['sum.js'])";
         let tree = parse(LangId::Python, source);
-        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
         assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
@@ -563,7 +581,7 @@ mod tests {
     fn test_scan_javascript() {
         let source = b"metacall_load_from_file('py', ['sum.py'])";
         let tree = parse(LangId::JavaScript, source);
-        let sites = scan_file(LangId::JavaScript, &tree, source, Path::new("test.js"));
+        let sites = scan_sites(LangId::JavaScript, &tree, source, "test.js");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
         assert_eq!(sites[0].target_lang.as_deref(), Some("py"));
@@ -574,7 +592,7 @@ mod tests {
     fn test_scan_rust() {
         let source = b"metacall::load_from_file(\"py\", [\"sum.py\"])";
         let tree = parse(LangId::Rust, source);
-        let sites = scan_file(LangId::Rust, &tree, source, Path::new("lib.rs"));
+        let sites = scan_sites(LangId::Rust, &tree, source, "lib.rs");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
         assert_eq!(sites[0].target_lang.as_deref(), Some("py"));
@@ -585,7 +603,7 @@ mod tests {
     fn test_scan_computed_args() {
         let source = b"metacall_load_from_file(LANG, ['sum.js'])";
         let tree = parse(LangId::Python, source);
-        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].confidence, 0.4);
         assert_eq!(sites[0].target_lang.as_deref(), Some("LANG"));
@@ -596,7 +614,7 @@ mod tests {
         // After `use metacall::metacall_load_from_file`, the call is bare.
         let source = b"metacall_load_from_file(\"py\", [\"sum.py\"])";
         let tree = parse(LangId::Rust, source);
-        let sites = scan_file(LangId::Rust, &tree, source, Path::new("lib.rs"));
+        let sites = scan_sites(LangId::Rust, &tree, source, "lib.rs");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
         assert_eq!(sites[0].target_lang.as_deref(), Some("py"));
@@ -607,7 +625,7 @@ mod tests {
     fn test_scan_python_load_from_memory() {
         let source = b"metacall_load_from_memory('node', 'console.log(\"hi\")')";
         let tree = parse(LangId::Python, source);
-        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromMemory);
         assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
@@ -617,7 +635,7 @@ mod tests {
     fn test_scan_python_load_from_package() {
         let source = b"metacall_load_from_package('node', 'express')";
         let tree = parse(LangId::Python, source);
-        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromPackage);
         assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
@@ -628,7 +646,7 @@ mod tests {
     fn test_scan_go_load_from_memory() {
         let source = b"metacall.LoadFromMemory(\"node\", []string{\"const x = 1;\"})";
         let tree = parse(LangId::Go, source);
-        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        let sites = scan_sites(LangId::Go, &tree, source, "main.go");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromMemory);
         assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
@@ -638,7 +656,7 @@ mod tests {
     fn test_scan_python_client_call() {
         let source = b"metacall('sum', 1, 2)";
         let tree = parse(LangId::Python, source);
-        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
@@ -652,7 +670,7 @@ mod tests {
     fn test_scan_python_client_await() {
         let source = b"metacall_await('sum', 1)";
         let tree = parse(LangId::Python, source);
-        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert!(sites[0].is_async);
@@ -663,7 +681,7 @@ mod tests {
     fn test_scan_python_computed_function_name() {
         let source = b"metacall(fn_name, 1)";
         let tree = parse(LangId::Python, source);
-        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("fn_name"));
@@ -674,7 +692,7 @@ mod tests {
     fn test_scan_javascript_client_call() {
         let source = b"metacall('sum', 1, 2)";
         let tree = parse(LangId::JavaScript, source);
-        let sites = scan_file(LangId::JavaScript, &tree, source, Path::new("test.js"));
+        let sites = scan_sites(LangId::JavaScript, &tree, source, "test.js");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
@@ -684,7 +702,7 @@ mod tests {
     fn test_scan_c_load_from_file() {
         let source = b"metacall_load_from_file(\"node\", paths, size, &handle);";
         let tree = parse(LangId::C, source);
-        let sites = scan_file(LangId::C, &tree, source, Path::new("test.c"));
+        let sites = scan_sites(LangId::C, &tree, source, "test.c");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
         assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
@@ -694,7 +712,7 @@ mod tests {
     fn test_scan_c_client_call() {
         let source = b"metacall(\"sum\", 1, 2);\nmetacallv(\"sum\", args);";
         let tree = parse(LangId::C, source);
-        let sites = scan_file(LangId::C, &tree, source, Path::new("test.c"));
+        let sites = scan_sites(LangId::C, &tree, source, "test.c");
         assert_eq!(sites.len(), 2);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[1].variant, CallSiteVariant::ClientCall);
@@ -705,7 +723,7 @@ mod tests {
     fn test_scan_go_client_call() {
         let source = b"metacall.Call(\"sum\", 1, 2)";
         let tree = parse(LangId::Go, source);
-        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        let sites = scan_sites(LangId::Go, &tree, source, "main.go");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
@@ -715,7 +733,7 @@ mod tests {
     fn test_scan_go_client_await() {
         let source = b"metacall.Await(\"sum\", resolve, reject, ctx, 1)";
         let tree = parse(LangId::Go, source);
-        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        let sites = scan_sites(LangId::Go, &tree, source, "main.go");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert!(sites[0].is_async);
@@ -725,7 +743,7 @@ mod tests {
     fn test_scan_typescript_client_call() {
         let source = b"metacall('sum', 1, 2)";
         let tree = parse(LangId::TypeScript, source);
-        let sites = scan_file(LangId::TypeScript, &tree, source, Path::new("test.ts"));
+        let sites = scan_sites(LangId::TypeScript, &tree, source, "test.ts");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
@@ -735,7 +753,7 @@ mod tests {
     fn test_scan_tsx_client_call() {
         let source = b"metacall('sum', 1, 2)";
         let tree = parse(LangId::Tsx, source);
-        let sites = scan_file(LangId::Tsx, &tree, source, Path::new("test.tsx"));
+        let sites = scan_sites(LangId::Tsx, &tree, source, "test.tsx");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
@@ -745,7 +763,7 @@ mod tests {
     fn test_scan_cpp_client_call() {
         let source = b"metacall(\"sum\", 1, 2);";
         let tree = parse(LangId::Cpp, source);
-        let sites = scan_file(LangId::Cpp, &tree, source, Path::new("test.cpp"));
+        let sites = scan_sites(LangId::Cpp, &tree, source, "test.cpp");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
@@ -755,7 +773,7 @@ mod tests {
     fn test_scan_node_metacallfms() {
         let source = b"metacallfms('sum', '{\"a\":1}')";
         let tree = parse(LangId::JavaScript, source);
-        let sites = scan_file(LangId::JavaScript, &tree, source, Path::new("test.js"));
+        let sites = scan_sites(LangId::JavaScript, &tree, source, "test.js");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
@@ -765,7 +783,7 @@ mod tests {
     fn test_scan_rust_metacall_no_arg() {
         let source = b"metacall::metacall_no_arg(\"greet\")";
         let tree = parse(LangId::Rust, source);
-        let sites = scan_file(LangId::Rust, &tree, source, Path::new("lib.rs"));
+        let sites = scan_sites(LangId::Rust, &tree, source, "lib.rs");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("greet"));
@@ -775,7 +793,7 @@ mod tests {
     fn test_scan_rust_metacall_untyped_no_arg() {
         let source = b"metacall::metacall_untyped_no_arg(\"greet\")";
         let tree = parse(LangId::Rust, source);
-        let sites = scan_file(LangId::Rust, &tree, source, Path::new("lib.rs"));
+        let sites = scan_sites(LangId::Rust, &tree, source, "lib.rs");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("greet"));
@@ -786,7 +804,7 @@ mod tests {
     fn test_scan_go_call_unsafe() {
         let source = b"metacall.CallUnsafe(\"sum\", 1, 2)";
         let tree = parse(LangId::Go, source);
-        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        let sites = scan_sites(LangId::Go, &tree, source, "main.go");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
@@ -797,7 +815,7 @@ mod tests {
     fn test_scan_go_await_unsafe_is_async() {
         let source = b"metacall.AwaitUnsafe(\"sum\", resolve, reject, ctx)";
         let tree = parse(LangId::Go, source);
-        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        let sites = scan_sites(LangId::Go, &tree, source, "main.go");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert!(sites[0].is_async);
@@ -807,7 +825,7 @@ mod tests {
     fn test_scan_c_metacallv_s() {
         let source = b"metacallv_s(\"sum\", args, size);";
         let tree = parse(LangId::C, source);
-        let sites = scan_file(LangId::C, &tree, source, Path::new("test.c"));
+        let sites = scan_sites(LangId::C, &tree, source, "test.c");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
@@ -817,7 +835,7 @@ mod tests {
     fn test_scan_c_metacall_await_s_is_async() {
         let source = b"metacall_await_s(\"sum\", args, size, resolve, reject, data);";
         let tree = parse(LangId::C, source);
-        let sites = scan_file(LangId::C, &tree, source, Path::new("test.c"));
+        let sites = scan_sites(LangId::C, &tree, source, "test.c");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert!(sites[0].is_async);
@@ -829,7 +847,7 @@ mod tests {
         // so confidence must drop to 0.4.
         let source = b"metacall(f'fn_{suffix}', 1)";
         let tree = parse(LangId::Python, source);
-        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert!(sites[0].function_name.as_deref().unwrap().contains("fn_"));
@@ -840,7 +858,7 @@ mod tests {
     fn test_scan_javascript_template_string_is_computed_name() {
         let source = b"metacall(`fn_${suffix}`, 1)";
         let tree = parse(LangId::JavaScript, source);
-        let sites = scan_file(LangId::JavaScript, &tree, source, Path::new("test.js"));
+        let sites = scan_sites(LangId::JavaScript, &tree, source, "test.js");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].confidence, 0.4);
@@ -852,12 +870,12 @@ mod tests {
         // first in C/Node, handle first in Rust), so it is not matched.
         let py_source = b"metacall_handle('node', 'sum')";
         let py_tree = parse(LangId::Python, py_source);
-        let py_sites = scan_file(LangId::Python, &py_tree, py_source, Path::new("test.py"));
+        let py_sites = scan_sites(LangId::Python, &py_tree, py_source, "test.py");
         assert!(py_sites.is_empty());
 
         let c_source = b"metacall_handle(\"node\", \"sum\");";
         let c_tree = parse(LangId::C, c_source);
-        let c_sites = scan_file(LangId::C, &c_tree, c_source, Path::new("test.c"));
+        let c_sites = scan_sites(LangId::C, &c_tree, c_source, "test.c");
         assert!(c_sites.is_empty());
     }
 
@@ -865,7 +883,7 @@ mod tests {
     fn test_scan_rust_client_call() {
         let source = b"metacall::metacall(\"sum\", &[1, 2])";
         let tree = parse(LangId::Rust, source);
-        let sites = scan_file(LangId::Rust, &tree, source, Path::new("lib.rs"));
+        let sites = scan_sites(LangId::Rust, &tree, source, "lib.rs");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
@@ -875,7 +893,7 @@ mod tests {
     fn test_scan_rust_from_single_file() {
         let source = b"metacall::load::from_single_file(\"py\", \"x.py\")";
         let tree = parse(LangId::Rust, source);
-        let sites = scan_file(LangId::Rust, &tree, source, Path::new("lib.rs"));
+        let sites = scan_sites(LangId::Rust, &tree, source, "lib.rs");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
         assert_eq!(sites[0].scripts, vec!["x.py"]);
@@ -885,7 +903,7 @@ mod tests {
     fn test_scan_ignores_metacall_inspect() {
         let source = b"metacall_inspect()";
         let tree = parse(LangId::Python, source);
-        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
         assert!(sites.is_empty());
     }
 
@@ -900,7 +918,7 @@ fn h() { let c = copy_from_file_buffer("c"); }
 fn i() { let d = cache_from_configuration("d"); }
 "#;
         let tree = parse(LangId::Rust, source);
-        let sites = scan_file(LangId::Rust, &tree, source, Path::new("lib.rs"));
+        let sites = scan_sites(LangId::Rust, &tree, source, "lib.rs");
         assert!(
             sites.is_empty(),
             "look-alike helpers must not be MetaCall sites: {:?}",
@@ -912,7 +930,7 @@ fn i() { let d = cache_from_configuration("d"); }
 
         let genuine = b"metacall::load::from_file(Tag::NodeJS, [\"index.js\"], None)";
         let tree = parse(LangId::Rust, genuine);
-        let sites = scan_file(LangId::Rust, &tree, genuine, Path::new("lib.rs"));
+        let sites = scan_sites(LangId::Rust, &tree, genuine, "lib.rs");
         assert_eq!(sites.len(), 1, "the real load API must still be detected");
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
     }
@@ -930,7 +948,7 @@ metacallfms_await("x")
 metacall_await_s("x", 1)
 "#;
         let tree = parse(LangId::Python, source);
-        let sites = scan_file(LangId::Python, &tree, source, Path::new("test.py"));
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
         let names: Vec<&str> = sites
             .iter()
             .filter_map(|s| s.function_name.as_deref().or(s.target_lang.as_deref()))
@@ -951,7 +969,7 @@ metacall_await_s("x", 1)
         // This grammar parses a one argument call as a type conversion.
         let source = b"package main\nfunc main() { metacall.Call(handler) }";
         let tree = parse(LangId::Go, source);
-        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        let sites = scan_sites(LangId::Go, &tree, source, "main.go");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
         assert_eq!(sites[0].function_name.as_deref(), Some("handler"));
@@ -961,12 +979,12 @@ metacall_await_s("x", 1)
     fn test_scan_go_rejects_a_lookalike_package() {
         let source = b"metacallmock.Call(\"x\", 1)";
         let tree = parse(LangId::Go, source);
-        let sites = scan_file(LangId::Go, &tree, source, Path::new("main.go"));
+        let sites = scan_sites(LangId::Go, &tree, source, "main.go");
         assert!(sites.is_empty(), "metacallmock is not the MetaCall package");
 
         let genuine = b"metacall.Call(\"x\", 1)";
         let tree = parse(LangId::Go, genuine);
-        let sites = scan_file(LangId::Go, &tree, genuine, Path::new("main.go"));
+        let sites = scan_sites(LangId::Go, &tree, genuine, "main.go");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
     }
