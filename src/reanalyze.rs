@@ -81,9 +81,12 @@ impl WatchState {
     }
 
     /// Allocate the next monotonic snapshot ID.
-    pub(crate) fn next_snapshot_id(&mut self) -> SnapshotId {
-        self.snapshot_counter += 1;
-        SnapshotId::new(self.snapshot_counter).expect("snapshot counter exhausted (> u32::MAX)")
+    pub(crate) fn next_snapshot_id(&mut self) -> Result<SnapshotId, crate::Error> {
+        self.snapshot_counter = self
+            .snapshot_counter
+            .checked_add(1)
+            .ok_or(crate::Error::IdExhausted)?;
+        SnapshotId::new(self.snapshot_counter).ok_or(crate::Error::IdExhausted)
     }
 }
 
@@ -209,12 +212,17 @@ pub fn reanalyze_extractions(
     }
 
     let max_id = state.cache.max_symbol_id();
+    let next_symbol_id = max_id.checked_add(1).ok_or(crate::Error::IdExhausted)?;
     #[cfg(feature = "dataflow")]
-    let max_data_id = state.cache.max_data_node_id();
+    let next_data_id = state
+        .cache
+        .max_data_node_id()
+        .checked_add(1)
+        .ok_or(crate::Error::IdExhausted)?;
     #[cfg(feature = "dataflow")]
-    let id_generators = ExtractionIdGenerators::with_starts(max_id + 1, max_data_id + 1);
+    let id_generators = ExtractionIdGenerators::with_starts(next_symbol_id, next_data_id);
     #[cfg(not(feature = "dataflow"))]
-    let id_generators = ExtractionIdGenerators::with_symbol_start(max_id + 1);
+    let id_generators = ExtractionIdGenerators::with_symbol_start(next_symbol_id);
 
     let options = ExtractOptions {
         skip_imports_and_refs: false,
@@ -302,7 +310,7 @@ pub fn incremental_reanalyze(
     let started = Instant::now();
     let (merged, change_set, mut diagnostics) = reanalyze_extractions(root, languages, &[], state)?;
 
-    let snapshot_id = state.next_snapshot_id();
+    let snapshot_id = state.next_snapshot_id()?;
     let (graph, scc) = GraphBuilder::from_extractions(&merged, root, snapshot_id, &mut diagnostics);
     diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
 
@@ -767,9 +775,16 @@ mod tests {
     #[test]
     fn snapshot_id_allocation_is_monotonic() {
         let mut state = WatchState::new();
-        let s1 = state.next_snapshot_id();
-        let s2 = state.next_snapshot_id();
+        let s1 = state.next_snapshot_id().unwrap();
+        let s2 = state.next_snapshot_id().unwrap();
         assert_eq!(s1.to_raw(), 1);
         assert_eq!(s2.to_raw(), 2);
+    }
+
+    #[test]
+    fn snapshot_counter_exhaustion_is_an_error() {
+        let mut state = WatchState::new();
+        state.snapshot_counter = u32::MAX;
+        assert!(state.next_snapshot_id().is_err());
     }
 }

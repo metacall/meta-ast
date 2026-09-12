@@ -34,6 +34,9 @@ pub enum Error {
     #[error("config: {0}")]
     Config(String),
 
+    #[error("identifier space exhausted")]
+    IdExhausted,
+
     #[error("invalid source URI '{uri}': {message}")]
     InvalidSourceUri { uri: String, message: String },
 
