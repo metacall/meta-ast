@@ -378,7 +378,7 @@ Parse errors do not abort extraction. The pipeline accumulates `Vec<Diagnostic>`
 
 ### 5.1 rayon Integration
 
-`rayon = "1.10"` is used for file-level parallelism in the parse + extract phase.
+`rayon = "1.12"` is used for file-level parallelism in the parse + extract phase.
 
 - A thread-local pool of `Parser` instances (one per language) is maintained within each worker thread via `thread_local!` and `RefCell` caching. This avoids sharing the non-`Sync` `Parser` across threads.
 - Emitted `Tree` and symbol models are `Send` and are safely returned from rayon workers to the main thread for graph assembly.
@@ -482,7 +482,7 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 
 | Crate | Version | Purpose |
 | ------- | --------- | --------- |
-| `tree-sitter` | 0.26.11 | Core parsing |
+| `tree-sitter` | 0.27.0 | Core parsing |
 | `tree-sitter-python` | 0.25.0 | Python grammar |
 | `tree-sitter-javascript` | 0.25.0 | JavaScript grammar |
 | `tree-sitter-typescript` | 0.23.2 | TypeScript + TSX grammars |
@@ -493,6 +493,7 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 | `tree-sitter-ruby` | 0.23.1 | Ruby grammar |
 | `petgraph` | 0.8.3 | Directed graph + Tarjan SCC |
 | `serde` + `serde_json` | 1.0 | JSON serialization |
+| `url` | 2.5 | File URI parsing for editor overlays |
 | `yaml_serde` | 0.10 | YAML serialization |
 | `strum` | 0.28 | Enum derive macros (Display, AsRefStr) |
 | `webbrowser` | 1.2 | Auto-open HTML dashboard in browser |
@@ -502,7 +503,7 @@ Tree-sitter queries are hardcoded constants in each language pack. If a query fa
 | `anyhow` | 1.0 | Application error boundary |
 | `dunce` | 1.0 | Cross-platform path canonicalization |
 | `ignore` | 0.4 | Gitignore-aware file walking |
-| `blake3` | 1.5 | Cryptographic content hashing (optional under `watch`) |
+| `blake3` | 1.8 | Cryptographic content hashing (optional under `watch`) |
 | `notify` | 8.2 | File system notification watcher (optional under `watch`) |
 | `notify-debouncer-mini` | 0.7 | Debounced event loop (optional under `watch`) |
 | `tracing` + `tracing-subscriber` | 0.1 / 0.3 | Structured diagnostics |

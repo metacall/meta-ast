@@ -7,14 +7,14 @@ expression: symbols
     "name": "hello",
     "kind": "function",
     "source_range": {
-      "byte_start": 0,
-      "byte_end": 40,
+      "byte_start": 93,
+      "byte_end": 133,
       "start": {
-        "line": 0,
+        "line": 1,
         "column": 0
       },
       "end": {
-        "line": 2,
+        "line": 3,
         "column": 1
       }
     },
@@ -27,14 +27,14 @@ expression: symbols
     "name": "fetchData",
     "kind": "function",
     "source_range": {
-      "byte_start": 42,
-      "byte_end": 142,
+      "byte_start": 135,
+      "byte_end": 235,
       "start": {
-        "line": 4,
+        "line": 5,
         "column": 0
       },
       "end": {
-        "line": 7,
+        "line": 8,
         "column": 1
       }
     },
@@ -47,15 +47,15 @@ expression: symbols
     "name": "compute",
     "kind": "function",
     "source_range": {
-      "byte_start": 150,
-      "byte_end": 196,
+      "byte_start": 243,
+      "byte_end": 268,
       "start": {
-        "line": 9,
+        "line": 10,
         "column": 6
       },
       "end": {
-        "line": 11,
-        "column": 1
+        "line": 10,
+        "column": 31
       }
     },
     "visibility": null,
@@ -67,14 +67,14 @@ expression: symbols
     "name": "greet",
     "kind": "function",
     "source_range": {
-      "byte_start": 205,
-      "byte_end": 239,
+      "byte_start": 277,
+      "byte_end": 311,
       "start": {
-        "line": 13,
+        "line": 12,
         "column": 6
       },
       "end": {
-        "line": 13,
+        "line": 12,
         "column": 40
       }
     },

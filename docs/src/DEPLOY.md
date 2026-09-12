@@ -141,6 +141,7 @@ When an Import edge and a Reference edge connect the same pod pair, the fusion k
 | C++ | `c` |
 | Rust | `rs` |
 | Go | `go` |
+| Ruby | `rb` |
 
 C and C++ share the `c` loader (libclang). Go has no MetaCall loader yet; deploy emits a warning and the tag stays for manifests.
 
