@@ -271,7 +271,10 @@ pub fn reanalyze_extractions(
 
     let mut merged: Vec<Arc<FileExtraction>> =
         Vec::with_capacity(state.cache.len() + new_extractions.len());
-    for (path, fp) in &current_fingerprints {
+    for path in targets.keys() {
+        let Some(fp) = current_fingerprints.get(path) else {
+            continue;
+        };
         if state.cache.fingerprint_of(path) == Some(*fp)
             && let Some(extraction) = state.cache.get(path)
         {
@@ -292,10 +295,10 @@ pub fn reanalyze_extractions(
         .flat_map(|file| file.diagnostics.iter().cloned())
         .collect();
     let mut read_diagnostics = read_diagnostics;
-    read_diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
+    read_diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
     diagnostics.extend(read_diagnostics);
     diagnostics.extend(overlay_diagnostics);
-    diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
+    diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
 
     Ok((merged, change_set, diagnostics))
 }
@@ -317,7 +320,7 @@ pub fn incremental_reanalyze(
 
     let snapshot_id = state.next_snapshot_id()?;
     let (graph, scc) = GraphBuilder::from_extractions(&merged, root, snapshot_id, &mut diagnostics);
-    diagnostics.sort_by(|a, b| (&a.path, &a.message).cmp(&(&b.path, &b.message)));
+    diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
 
     tracing::info!(
         total = merged.len(),

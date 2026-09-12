@@ -17,6 +17,22 @@ pub struct Diagnostic {
     pub source_range: Option<SourceRange>,
 }
 
+impl Diagnostic {
+    /// Total ordering key: path, message, then the source position.
+    ///
+    /// The range keeps two diagnostics with the same path and message in a
+    /// stable order, so a run never reorders them between passes.
+    pub fn sort_key(&self) -> (&std::path::Path, &str, usize) {
+        (
+            self.path.as_path(),
+            self.message.as_str(),
+            self.source_range
+                .as_ref()
+                .map_or(usize::MAX, |range| range.byte_start),
+        )
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("IO: {0}")]
