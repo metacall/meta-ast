@@ -134,9 +134,11 @@ When both an Import edge and a Reference edge connect the same pod pair, confide
 | JavaScript | `node` |
 | TypeScript / TSX | `ts` |
 | C | `c` |
-| C++ | `cpp` |
+| C++ | `c` |
 | Rust | `rs` |
 | Go | `go` |
+
+C and C++ share the `c` loader (libclang). Go has no MetaCall loader yet; deploy emits a warning and the tag stays for manifests.
 
 ---
 

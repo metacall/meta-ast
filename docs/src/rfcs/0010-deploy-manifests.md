@@ -76,11 +76,11 @@ A mapping is required:
 | `TypeScript`      | `"ts"`               |
 | `Tsx`             | `"ts"`               |
 | `C`               | `"c"`                |
-| `Cpp`             | `"cpp"`              |
+| `Cpp`             | `"c"`                |
 | `Rust`            | `"rs"`               |
 | `Go`              | `"go"`               |
 
-_Note: Ruby (`rb`) and Java (`java`) are MetaCall-supported but not currently in meta-ast's 8-language extraction engine. Deployment manifests for these will be generated if they are targets of `metacall_load_from_*` calls, but meta-ast will not extract symbols from their source files._
+_Note: C and C++ share the `c` loader (libclang). Go has no MetaCall loader yet; the tag stays for manifests and deploy emits a warning._
 
 ---
 
