@@ -128,6 +128,7 @@ mod tests {
                     column: 10,
                 },
             },
+            name_range: None,
             visibility: None,
             signature: None,
             docstring: None,
@@ -163,6 +164,7 @@ mod tests {
                     column: 10,
                 },
             },
+            name_range: None,
             visibility: None,
             signature: None,
             docstring: None,
@@ -194,6 +196,8 @@ mod tests {
             scc,
             snapshot_id: SnapshotId::new(1).unwrap(),
             extractions: vec![],
+            scope: crate::graph::resolver::FlattenedScopeCache::default(),
+            references: Vec::new(),
         };
 
         let config = EmitConfig {
@@ -226,6 +230,8 @@ mod tests {
             scc,
             snapshot_id: SnapshotId::new(1).unwrap(),
             extractions: vec![],
+            scope: crate::graph::resolver::FlattenedScopeCache::default(),
+            references: Vec::new(),
         };
 
         let config = EmitConfig {

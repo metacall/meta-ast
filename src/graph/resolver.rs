@@ -14,7 +14,7 @@ use crate::graph::edge::{
     CONFIDENCE_CROSS_LANGUAGE, CONFIDENCE_OWN_OR_DIRECT, CONFIDENCE_TRANSITIVE,
 };
 use crate::language::LangId;
-use crate::model::{FileExtraction, FileId, SymbolId, Visibility};
+use crate::model::{FileExtraction, FileId, SourceRange, SymbolId, Visibility};
 
 pub type ScopeMap = HashMap<String, Vec<(SymbolId, f32)>>;
 pub(crate) type SymbolIndexEntry = (SymbolId, String, LangId, Option<Visibility>);
@@ -73,7 +73,7 @@ impl ResolutionContext {
 ///
 /// Scope = own symbols + public symbols from imported files transitively.
 /// Local symbols take priority over imported (shadowing).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FlattenedScopeCache {
     scopes: HashMap<FileId, ScopeMap>,
 }
@@ -275,32 +275,57 @@ impl FlattenedScopeCache {
     }
 }
 
-/// Resolve all references across extracted files.
+/// One resolved use of a name, with the site that produced it.
 ///
-/// Returns a list of (source_symbol_id, target_symbol_id, confidence) triples
-/// representing ReferenceEdges to add. Confidence is threaded from the
-/// FlattenedScopeCache (1.0 local/direct, 0.8 transitive, 0.6 cross-language).
-/// Warnings for unresolved references are appended to `diagnostics`.
-pub fn resolve_all_references<F>(
+/// The graph edge alone names the source and target symbols; this record keeps
+/// the reference range too, so a consumer can point at the exact use instead of
+/// re-deriving the mapping from names.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedReference {
+    /// Path of the referencing file, as extracted.
+    pub file_path: PathBuf,
+    /// Range of the unresolved reference itself.
+    pub range: SourceRange,
+    /// Symbol that contains the reference.
+    pub source: SymbolId,
+    /// Symbol the name resolves to.
+    pub target: SymbolId,
+    /// Confidence threaded from the scope cache.
+    pub confidence: f32,
+}
+
+/// Resolve every reference and keep its use site.
+///
+/// Records follow extraction order and, within one file, reference order. A
+/// reference with no scope match emits one Warning and no record; the warnings
+/// are appended to `diagnostics` exactly as `resolve_all_references` reports
+/// them. Confidence is threaded from the `FlattenedScopeCache` (1.0
+/// local/direct, 0.8 transitive, 0.6 cross-language).
+///
+/// A self-recursive reference, such as a function that calls itself, keeps
+/// `source == target`. The record is a real use site; the graph folds it into a
+/// self-loop `Reference` edge, which is what classifies a self-recursive unit
+/// as a `SelfLoop` deployability hint.
+pub fn resolve_references_detailed<F>(
     extractions: &[F],
     path_to_file_id: &HashMap<PathBuf, FileId>,
     scope_cache: &FlattenedScopeCache,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<(SymbolId, SymbolId, f32)>
+) -> Vec<ResolvedReference>
 where
     F: std::borrow::Borrow<FileExtraction> + Sync,
 {
     #[allow(clippy::type_complexity)]
-    let results: Vec<(Vec<(SymbolId, SymbolId, f32)>, Vec<Diagnostic>)> = extractions
+    let results: Vec<(Vec<ResolvedReference>, Vec<Diagnostic>)> = extractions
         .par_iter()
         .map(|file_ext| {
             let file_ext = file_ext.borrow();
-            let mut local_edges = Vec::new();
+            let mut local_refs = Vec::new();
             let mut local_diags = Vec::new();
 
             let file_id = match path_to_file_id.get(&file_ext.path) {
                 Some(&id) => id,
-                None => return (local_edges, local_diags),
+                None => return (local_refs, local_diags),
             };
 
             let file_path = &file_ext.path;
@@ -319,7 +344,13 @@ where
 
                     if let Some(source) = source_sym {
                         for &(target_id, confidence) in matches {
-                            local_edges.push((source.id, target_id, confidence));
+                            local_refs.push(ResolvedReference {
+                                file_path: file_path.clone(),
+                                range: ref_.range.clone(),
+                                source: source.id,
+                                target: target_id,
+                                confidence,
+                            });
                         }
                     }
                 } else {
@@ -331,29 +362,57 @@ where
                     });
                 }
             }
-            (local_edges, local_diags)
+            (local_refs, local_diags)
         })
         .collect();
 
-    let mut edges = Vec::new();
-    for (local_edges, local_diags) in results {
-        edges.extend(local_edges);
+    let mut resolved = Vec::new();
+    for (mut local_refs, local_diags) in results {
+        resolved.append(&mut local_refs);
         diagnostics.extend(local_diags);
     }
+    resolved
+}
 
-    // Deduplicate: max-merge confidence for same (src, dst) pairs
-    let mut seen: HashMap<(SymbolId, SymbolId), f32> = HashMap::with_capacity(edges.len());
-    for (src, dst, conf) in edges {
-        seen.entry((src, dst))
-            .and_modify(|e| *e = e.max(conf))
-            .or_insert(conf);
+/// Fold resolved use sites into one edge per `(source, target)` pair.
+///
+/// Duplicates max-merge their confidence and the result is ordered by symbol
+/// id, so the edge list does not depend on discovery or resolution order. A
+/// self-recursive use site folds into a self edge, which is intended: the SCC
+/// pass reports such a unit as a `SelfLoop` hint.
+pub fn reference_edges(resolved: &[ResolvedReference]) -> Vec<(SymbolId, SymbolId, f32)> {
+    let mut seen: HashMap<(SymbolId, SymbolId), f32> = HashMap::with_capacity(resolved.len());
+    for reference in resolved {
+        seen.entry((reference.source, reference.target))
+            .and_modify(|confidence| *confidence = confidence.max(reference.confidence))
+            .or_insert(reference.confidence);
     }
-    let mut deduped: Vec<_> = seen
+    let mut edges: Vec<_> = seen
         .into_iter()
-        .map(|((src, dst), conf)| (src, dst, conf))
+        .map(|((source, target), confidence)| (source, target, confidence))
         .collect();
-    deduped.sort_by_key(|(a, b, _)| (a.to_raw(), b.to_raw()));
-    deduped
+    edges.sort_by_key(|(source, target, _)| (source.to_raw(), target.to_raw()));
+    edges
+}
+
+/// Resolve all references across extracted files.
+///
+/// Returns a list of (source_symbol_id, target_symbol_id, confidence) triples
+/// representing ReferenceEdges to add. Confidence is threaded from the
+/// FlattenedScopeCache (1.0 local/direct, 0.8 transitive, 0.6 cross-language).
+/// Warnings for unresolved references are appended to `diagnostics`.
+pub fn resolve_all_references<F>(
+    extractions: &[F],
+    path_to_file_id: &HashMap<PathBuf, FileId>,
+    scope_cache: &FlattenedScopeCache,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<(SymbolId, SymbolId, f32)>
+where
+    F: std::borrow::Borrow<FileExtraction> + Sync,
+{
+    let resolved =
+        resolve_references_detailed(extractions, path_to_file_id, scope_cache, diagnostics);
+    reference_edges(&resolved)
 }
 
 /// Build a symbol index from extracted files and a path-to-FileId mapping.
@@ -396,6 +455,115 @@ mod tests {
         assert!(cache.is_empty());
         assert_eq!(cache.len(), 0);
         assert!(cache.resolve(FileId::new(1).unwrap(), "foo").is_none());
+    }
+
+    #[test]
+    fn detailed_resolution_keeps_each_use_site_and_the_triples_are_unchanged() {
+        use crate::model::{LineColumn, Symbol, SymbolKind, UnresolvedReference};
+
+        fn range(start: usize, end: usize) -> SourceRange {
+            SourceRange {
+                byte_start: start,
+                byte_end: end,
+                start: LineColumn {
+                    line: 0,
+                    column: start,
+                },
+                end: LineColumn {
+                    line: 0,
+                    column: end,
+                },
+            }
+        }
+
+        fn symbol(id: u32, name: &str, start: usize, end: usize, path: &std::path::Path) -> Symbol {
+            Symbol {
+                id: SymbolId::new(id).unwrap(),
+                name: name.to_string(),
+                kind: SymbolKind::Function,
+                language: LangId::Python,
+                file_path: path.to_path_buf(),
+                source_range: range(start, end),
+                name_range: None,
+                visibility: None,
+                signature: None,
+                docstring: None,
+                is_async: false,
+            }
+        }
+
+        let path = PathBuf::from("a.py");
+        let file_id = FileId::new(1).unwrap();
+        let mut file = FileExtraction::empty(path.clone(), LangId::Python);
+        file.symbols = vec![
+            symbol(1, "caller", 0, 100, &path),
+            symbol(2, "helper", 200, 210, &path),
+        ];
+        file.references = vec![
+            UnresolvedReference {
+                name: "helper".into(),
+                range: range(10, 16),
+            },
+            UnresolvedReference {
+                name: "helper".into(),
+                range: range(30, 36),
+            },
+        ];
+        let mut symbol_index: SymbolIndex = HashMap::new();
+        symbol_index.insert(
+            file_id,
+            vec![
+                (
+                    SymbolId::new(1).unwrap(),
+                    "caller".into(),
+                    LangId::Python,
+                    None,
+                ),
+                (
+                    SymbolId::new(2).unwrap(),
+                    "helper".into(),
+                    LangId::Python,
+                    None,
+                ),
+            ],
+        );
+        let ctx = ResolutionContext {
+            symbol_index,
+            import_adjacency: HashMap::new(),
+            file_languages: HashMap::from([(file_id, LangId::Python)]),
+            file_paths: HashMap::from([(file_id, path.clone())]),
+        };
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
+        let extractions = vec![file];
+        let paths = HashMap::from([(path, file_id)]);
+
+        let mut diagnostics = Vec::new();
+        let resolved = resolve_references_detailed(&extractions, &paths, &cache, &mut diagnostics);
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(resolved.len(), 2, "one record per use site");
+        assert_eq!(resolved[0].range.byte_start, 10);
+        assert_eq!(resolved[1].range.byte_start, 30);
+        assert!(
+            resolved
+                .iter()
+                .all(|record| record.source == SymbolId::new(1).unwrap())
+        );
+        assert!(
+            resolved.iter().all(
+                |record| record.target == SymbolId::new(2).unwrap() && record.confidence == 1.0
+            )
+        );
+
+        let mut wrapper_diagnostics = Vec::new();
+        let triples =
+            resolve_all_references(&extractions, &paths, &cache, &mut wrapper_diagnostics);
+        assert!(wrapper_diagnostics.is_empty());
+        assert_eq!(
+            triples,
+            vec![(SymbolId::new(1).unwrap(), SymbolId::new(2).unwrap(), 1.0)],
+            "the wrapper max-merges the two use sites into one edge"
+        );
     }
 
     #[test]
@@ -578,6 +746,7 @@ mod tests {
                 start: LineColumn { line: 0, column: 0 },
                 end: LineColumn { line: 2, column: 0 },
             },
+            name_range: None,
             visibility: None,
             signature: None,
             docstring: None,
@@ -633,6 +802,7 @@ mod tests {
                 start: LineColumn { line: 1, column: 0 },
                 end: LineColumn { line: 3, column: 0 },
             },
+            name_range: None,
             visibility: None,
             signature: None,
             docstring: None,
@@ -652,6 +822,7 @@ mod tests {
                 start: LineColumn { line: 0, column: 0 },
                 end: LineColumn { line: 5, column: 0 },
             },
+            name_range: None,
             visibility: None,
             signature: None,
             docstring: None,

@@ -227,6 +227,7 @@ pub fn reanalyze_extractions(
 
     let options = ExtractOptions {
         skip_imports_and_refs: false,
+        keep_text: false,
     };
 
     let mut new_extractions: Vec<FileExtraction> = if changed_disk.is_empty() {
@@ -736,6 +737,7 @@ mod tests {
                 start: crate::model::LineColumn { line: 0, column: 0 },
                 end: crate::model::LineColumn { line: 0, column: 0 },
             },
+            name_range: None,
             visibility: None,
             signature: None,
             docstring: None,

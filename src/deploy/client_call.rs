@@ -94,7 +94,7 @@ fn resolve_sites<F>(
     extractions: &[F],
     call_sites: &[CallSite],
     root: &Path,
-) -> (Vec<ResolvedCall>, Vec<Diagnostic>)
+) -> (Vec<ResolvedClientCall>, Vec<Diagnostic>)
 where
     F: std::borrow::Borrow<FileExtraction> + Sync,
 {
@@ -121,7 +121,7 @@ where
         }
     }
 
-    let mut resolved: Vec<ResolvedCall> = Vec::new();
+    let mut resolved: Vec<ResolvedClientCall> = Vec::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
     // Files each source file loads, in load-site order (deduplicated). The
@@ -257,7 +257,7 @@ where
         let mut emitted = 0;
         for sid in candidates {
             if graph.symbol_node_index(sid).is_some() {
-                resolved.push(ResolvedCall {
+                resolved.push(ResolvedClientCall {
                     source_file: site.source_file.clone(),
                     source_range: site.source_range.clone(),
                     target: sid,
@@ -274,26 +274,39 @@ where
     (resolved, diagnostics)
 }
 
-/// One resolved invocation target.
-struct ResolvedCall {
-    source_file: PathBuf,
-    source_range: Option<crate::model::SourceRange>,
-    target: SymbolId,
-    confidence: f32,
+/// One resolved invocation target, with the call site that produced it.
+///
+/// The caller projections name the calling file and the enclosing symbol; this
+/// record keeps the call-site range too, so a consumer can point at the
+/// invocation instead of re-deriving it from the graph.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedClientCall {
+    /// File that contains the call site, as extracted.
+    pub source_file: PathBuf,
+    /// Range of the call site, when the source spelled one.
+    pub source_range: Option<crate::model::SourceRange>,
+    /// Symbol the invocation resolves to.
+    pub target: SymbolId,
+    /// Ladder confidence: 1.0 unique load-confirmed, 0.8 multiple
+    /// load-confirmed, 0.6 unique global, 0.5 multiple global, 0.4 computed.
+    pub confidence: f32,
 }
 
 /// Both call-edge projections of one resolution pass.
-pub(crate) struct ClientCallProjections {
+#[derive(Debug)]
+pub struct ClientCallProjections {
     /// File node to symbol node. Deployment needs the calling file, because a
     /// top-level call has no enclosing symbol.
     pub file_edges: Vec<(NodeIndex, NodeIndex, f32)>,
     /// Symbol node to symbol node. Navigation keys on the caller symbol.
     pub symbol_edges: Vec<(SymbolId, SymbolId, f32)>,
+    /// One entry per resolved target, in resolution order.
+    pub resolved: Vec<ResolvedClientCall>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
 /// Resolve ClientCall sites once and emit both projections.
-pub(crate) fn resolve_client_call_projections<F>(
+pub fn resolve_client_call_projections<F>(
     graph: &CodeGraph,
     extractions: &[F],
     call_sites: &[CallSite],
@@ -319,7 +332,7 @@ where
 
     let mut file_edges = Vec::with_capacity(resolved.len());
     let mut symbol_edges = Vec::with_capacity(resolved.len());
-    for call in resolved {
+    for call in &resolved {
         if let (Some(&caller_idx), Some(target_idx)) = (
             path_to_idx.get(&call.source_file),
             graph.symbol_node_index(call.target),
@@ -338,6 +351,7 @@ where
     ClientCallProjections {
         file_edges,
         symbol_edges,
+        resolved,
         diagnostics,
     }
 }
@@ -399,6 +413,7 @@ mod tests {
             language: lang,
             file_path: PathBuf::from(path),
             source_range: test_range(),
+            name_range: None,
             visibility: Some(Visibility::Public),
             signature: None,
             docstring: None,
@@ -515,6 +530,37 @@ mod tests {
         assert_eq!(to, sym_idx);
         assert_eq!(confidence, 1.0);
         assert!(resolution.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn resolved_targets_keep_the_call_site_range() {
+        let mut fx = Fixture::new();
+        let (py_id, _) = fx.add_file("orchestrator.py", LangId::Python);
+        let (js_id, _) = fx.add_file("math.js", LangId::JavaScript);
+        let multiply = symbol(1, "multiply", "math.js", LangId::JavaScript);
+        fx.add_symbol(&multiply, js_id, "math.js", LangId::JavaScript);
+        let run = symbol(2, "run", "orchestrator.py", LangId::Python);
+        fx.add_symbol(&run, py_id, "orchestrator.py", LangId::Python);
+        let mut call = client_call("orchestrator.py", "multiply", 1.0);
+        call.source_range = Some(test_range());
+
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &[load_from_file("orchestrator.py", vec!["math.js"]), call],
+            Path::new("."),
+        );
+
+        assert_eq!(resolution.resolved.len(), 1);
+        let record = &resolution.resolved[0];
+        assert_eq!(record.target, SymbolId::new(1).unwrap());
+        assert_eq!(record.source_range, Some(test_range()));
+        assert_eq!(record.confidence, 1.0);
+        assert_eq!(
+            resolution.symbol_edges,
+            vec![(SymbolId::new(2).unwrap(), SymbolId::new(1).unwrap(), 1.0)],
+            "the symbol projection keys on the enclosing caller"
+        );
     }
 
     #[test]

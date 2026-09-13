@@ -116,6 +116,21 @@ fn observe(analysis: &GraphAnalysis, diagnostics: &[meta_ast::Diagnostic]) -> Ob
     }
 }
 
+fn reference_sites(analysis: &GraphAnalysis) -> BTreeSet<String> {
+    analysis
+        .references
+        .iter()
+        .map(|reference| {
+            format!(
+                "{}|{}..{}",
+                reference.file_path.display(),
+                reference.range.byte_start,
+                reference.range.byte_end
+            )
+        })
+        .collect()
+}
+
 fn assert_paths_agree(root: &Path) {
     let snapshot_id = SnapshotId::new(1);
     assert!(snapshot_id.is_some(), "1 is a valid snapshot id");
@@ -175,6 +190,40 @@ fn assert_paths_agree(root: &Path) {
         "a cold incremental pass must add every discovered file"
     );
     assert_eq!(change_set.files_unchanged, 0);
+
+    // The shared assembly stage hands out the scope cache and one record per
+    // resolved use site. Raw identifiers differ between runs, so the sites are
+    // compared by path and range.
+    assert_eq!(
+        reference_sites(&one_shot),
+        reference_sites(&incremental),
+        "resolved reference sites differ for {}",
+        root.display()
+    );
+    for analysis in [&one_shot, &incremental] {
+        assert_eq!(
+            analysis.scope.len(),
+            analysis.extractions.len(),
+            "the scope cache covers every extraction of {}",
+            root.display()
+        );
+        for (file_id, file) in analysis.graph.files() {
+            let Some(symbol) = analysis
+                .extractions
+                .iter()
+                .find(|extraction| extraction.path == file.path)
+                .and_then(|extraction| extraction.symbols.first())
+            else {
+                continue;
+            };
+            assert!(
+                analysis.scope.resolve(file_id, &symbol.name).is_some(),
+                "{} must resolve its own symbol {}",
+                file.path.display(),
+                symbol.name
+            );
+        }
+    }
 }
 
 #[test]

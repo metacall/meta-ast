@@ -20,6 +20,10 @@ pub struct GraphAnalysis {
     pub scc: SccAnalysis,
     pub snapshot_id: SnapshotId,
     pub extractions: Vec<Arc<crate::model::FileExtraction>>,
+    /// Flattened scope cache from the same pass. Resolves a name for a file id.
+    pub scope: crate::graph::resolver::FlattenedScopeCache,
+    /// One record per resolved use site, in extraction and reference order.
+    pub references: Vec<crate::graph::resolver::ResolvedReference>,
 }
 
 /// Assemble the graph, the scope cache, the resolved references, the client
@@ -34,16 +38,18 @@ pub fn build_analysis(
     snapshot_id: SnapshotId,
 ) -> (GraphAnalysis, Vec<Diagnostic>) {
     let mut diagnostics = Vec::new();
-    let (graph, scc) =
-        GraphBuilder::from_extractions(&extractions, root, snapshot_id, &mut diagnostics);
+    let parts =
+        GraphBuilder::from_extractions_detailed(&extractions, root, snapshot_id, &mut diagnostics);
     diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
 
     (
         GraphAnalysis {
-            graph,
-            scc,
+            graph: parts.graph,
+            scc: parts.scc,
             snapshot_id,
             extractions,
+            scope: parts.scope,
+            references: parts.references,
         },
         diagnostics,
     )

@@ -167,6 +167,7 @@ mod tests {
                 start: crate::model::LineColumn { line: 0, column: 0 },
                 end: crate::model::LineColumn { line: 0, column: 1 },
             },
+            name_range: None,
             visibility: None,
             signature: None,
             docstring: None,

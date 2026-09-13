@@ -273,6 +273,7 @@ mod tests {
             language: LangId::Rust,
             file_path: test_path(),
             source_range: test_source_range(),
+            name_range: None,
             visibility: Some(Visibility::Public),
             signature: None,
             docstring: None,

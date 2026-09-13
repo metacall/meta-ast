@@ -377,7 +377,7 @@ impl GraphBuilder {
         (graph, scc)
     }
 
-    /// Build the graph, SCC, and the flattened scope cache.
+    /// Build the graph, the SCC, the scope cache, and the resolved references.
     pub fn from_extractions_with_scope<F>(
         extractions: &[F],
         root: &std::path::Path,
@@ -388,6 +388,27 @@ impl GraphBuilder {
         crate::graph::SccAnalysis,
         crate::graph::resolver::FlattenedScopeCache,
     )
+    where
+        F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
+    {
+        let parts = Self::from_extractions_detailed(extractions, root, snapshot_id, diagnostics);
+        (parts.graph, parts.scc, parts.scope)
+    }
+
+    /// Build everything one analysis pass produces from a set of extractions.
+    ///
+    /// Stages: file and symbol node registration, import edge resolution, cross
+    /// file reference resolution with the flattened scope cache, client-call
+    /// edge injection, and SCC analysis. Errors during symbol addition are
+    /// non-fatal and appended to `diagnostics`. Both the one-shot and the
+    /// incremental entry point call this, so the analysis of a tree cannot
+    /// depend on which entry point produced it.
+    pub fn from_extractions_detailed<F>(
+        extractions: &[F],
+        root: &std::path::Path,
+        snapshot_id: crate::model::SnapshotId,
+        diagnostics: &mut Vec<crate::error::Diagnostic>,
+    ) -> AnalysisParts
     where
         F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
     {
@@ -406,7 +427,7 @@ impl GraphBuilder {
             &path_to_file_id,
             diagnostics,
         );
-        let scope_cache =
+        let (scope_cache, references) =
             resolve_references(&mut builder, extractions, &path_to_file_id, diagnostics);
 
         let graph = builder.build();
@@ -417,8 +438,24 @@ impl GraphBuilder {
 
         let scc = crate::graph::SccAnalysis::analyze(graph.graph());
 
-        (graph, scc, scope_cache)
+        AnalysisParts {
+            graph,
+            scc,
+            scope: scope_cache,
+            references,
+        }
     }
+}
+
+/// Everything one analysis pass produces from a set of extractions.
+#[derive(Debug)]
+pub struct AnalysisParts {
+    pub graph: CodeGraph,
+    pub scc: crate::graph::SccAnalysis,
+    /// Flattened scope cache used to resolve a name from a cursor position.
+    pub scope: crate::graph::resolver::FlattenedScopeCache,
+    /// One record per resolved use site, in extraction and reference order.
+    pub references: Vec<crate::graph::resolver::ResolvedReference>,
 }
 /// Registers every file as a node.
 fn register_files<F>(builder: &mut GraphBuilder, extractions: &[F])
@@ -560,7 +597,10 @@ fn resolve_references<F>(
     extractions: &[F],
     path_to_file_id: &HashMap<std::path::PathBuf, crate::model::FileId>,
     diagnostics: &mut Vec<crate::error::Diagnostic>,
-) -> crate::graph::resolver::FlattenedScopeCache
+) -> (
+    crate::graph::resolver::FlattenedScopeCache,
+    Vec<crate::graph::resolver::ResolvedReference>,
+)
 where
     F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
 {
@@ -571,16 +611,16 @@ where
         import_adjacency,
     );
     let scope_cache = crate::graph::resolver::FlattenedScopeCache::build(&context, diagnostics);
-    let reference_edges = crate::graph::resolver::resolve_all_references(
+    let references = crate::graph::resolver::resolve_references_detailed(
         extractions,
         path_to_file_id,
         &scope_cache,
         diagnostics,
     );
-    for (from, to, confidence) in reference_edges {
+    for (from, to, confidence) in crate::graph::resolver::reference_edges(&references) {
         builder.add_reference(from, to, confidence);
     }
-    scope_cache
+    (scope_cache, references)
 }
 
 /// Adds the client-call projections as ordinary reference edges.
@@ -682,6 +722,7 @@ mod tests {
             language: LangId::Python,
             file_path: PathBuf::from("test.py"),
             source_range: test_source_range(),
+            name_range: None,
             visibility: Some(Visibility::Public),
             signature: None,
             docstring: None,
@@ -814,6 +855,7 @@ mod tests {
                     column: 10,
                 },
             },
+            name_range: None,
             visibility: None,
             signature: None,
             docstring: None,
@@ -865,6 +907,7 @@ mod tests {
                 start: LineColumn { line: 0, column: 0 },
                 end: LineColumn { line: 0, column: 5 },
             },
+            name_range: None,
             visibility: None,
             signature: None,
             docstring: None,
@@ -934,6 +977,7 @@ mod tests {
             language: LangId::Rust,
             file_path,
             source_range: test_source_range(),
+            name_range: None,
             visibility: Some(Visibility::Public),
             signature: None,
             docstring: None,
@@ -1081,7 +1125,8 @@ mod tests {
             &file_ids,
             &mut diagnostics,
         );
-        let scope = resolve_references(&mut builder, &extractions, &file_ids, &mut diagnostics);
+        let (scope, _references) =
+            resolve_references(&mut builder, &extractions, &file_ids, &mut diagnostics);
 
         assert_eq!(scope.iter_scopes().count(), 2);
         let graph = builder.build();
@@ -1148,6 +1193,7 @@ mod tests {
             language: LangId::Python,
             file_path: file_path.to_path_buf(),
             source_range: test_source_range(),
+            name_range: None,
             visibility: Some(Visibility::Public),
             signature: None,
             docstring: None,

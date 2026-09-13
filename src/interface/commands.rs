@@ -23,6 +23,7 @@ pub fn inspect(args: InspectArgs) -> anyhow::Result<ExitCode> {
         &files,
         &crate::extractor::ExtractOptions {
             skip_imports_and_refs: true,
+            keep_text: false,
         },
     );
 

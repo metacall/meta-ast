@@ -118,6 +118,7 @@ pub(crate) fn extract_with_spec<'a>(
         let mut is_async = false;
         let mut visibility: Option<Visibility> = None;
         let mut primary_node: Option<tree_sitter::Node<'a>> = None;
+        let mut name_range: Option<SourceRange> = None;
 
         let capture_count = m.captures().len();
 
@@ -127,6 +128,7 @@ pub(crate) fn extract_with_spec<'a>(
                 "name" => {
                     if let Ok(text) = capture.node.utf8_text(source) {
                         name = Some(std::borrow::Cow::Borrowed(text));
+                        name_range = Some(source_range_from_node(&capture.node));
                     }
                 }
                 "signature" => {
@@ -213,6 +215,7 @@ pub(crate) fn extract_with_spec<'a>(
                 name,
                 kind,
                 source_range: source_range_from_node(&node),
+                name_range,
                 visibility,
                 signature,
                 docstring,
@@ -774,6 +777,44 @@ mod tests {
 
         let name = field_text(&function, "name", source).unwrap();
         assert_eq!(name, "hello");
+    }
+
+    #[test]
+    fn name_range_is_the_identifier_inside_the_symbol() {
+        for (lang, source, name) in [
+            (
+                LangId::Python,
+                "def greet(value):\n    return value\n",
+                "greet",
+            ),
+            (
+                LangId::Rust,
+                "fn greet(value: usize) -> usize { value }\n",
+                "greet",
+            ),
+            (
+                LangId::C,
+                "int greet(int value) { return value; }\n",
+                "greet",
+            ),
+        ] {
+            let mut parser = Parser::new();
+            parser
+                .set_language(&crate::language::grammar_for(lang))
+                .unwrap();
+            let tree = parser.parse(source, None).unwrap();
+            let symbols =
+                super::extract_with_spec(&tree, source.as_bytes(), crate::language::spec_for(lang))
+                    .unwrap();
+            let symbol = symbols
+                .iter()
+                .find(|symbol| symbol.name == name)
+                .unwrap_or_else(|| panic!("{lang:?} did not extract {name}"));
+            let name_range = symbol.name_range.clone().expect("name range");
+            assert!(name_range.byte_start >= symbol.source_range.byte_start);
+            assert!(name_range.byte_end <= symbol.source_range.byte_end);
+            assert_eq!(&source[name_range.byte_start..name_range.byte_end], name);
+        }
     }
 
     #[test]

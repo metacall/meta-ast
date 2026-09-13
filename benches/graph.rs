@@ -34,6 +34,7 @@ fn create_test_symbol(id: u32, name: &str, file_path: &str) -> Symbol {
                 column: 10,
             },
         },
+        name_range: None,
         visibility: Some(Visibility::Public),
         signature: None,
         docstring: None,

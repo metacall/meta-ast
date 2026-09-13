@@ -127,6 +127,8 @@ pub struct RawSymbol<'a> {
     pub name: std::borrow::Cow<'a, str>,
     pub kind: crate::model::SymbolKind,
     pub source_range: crate::model::SourceRange,
+    /// Range of the captured name node, when the query has a `@name` capture.
+    pub name_range: Option<crate::model::SourceRange>,
     pub visibility: Option<crate::model::Visibility>,
     pub signature: Option<std::borrow::Cow<'a, str>>,
     pub docstring: Option<std::borrow::Cow<'a, str>>,

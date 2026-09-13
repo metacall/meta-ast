@@ -23,6 +23,7 @@ fn extract_root(root: &Path) -> ExtractionResult {
         &files,
         &ExtractOptions {
             skip_imports_and_refs: false,
+            keep_text: false,
         },
     )
 }

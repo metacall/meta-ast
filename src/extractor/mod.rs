@@ -7,6 +7,12 @@
 //! Set `ExtractOptions::skip_imports_and_refs` to `true` when only
 //! symbol listing is needed (e.g. inspect mode); skips the import and
 //! reference query passes, roughly halving per-file extraction time.
+//!
+//! Set `ExtractOptions::keep_text` to `true` to retain the analyzed source text
+//! on each extraction. An editor or language server needs it to convert ranges
+//! against the exact bytes the analysis read, instead of re-reading a file that
+//! may have changed. Off by default: the CLI does not need it and the text is
+//! held for the lifetime of every extraction.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,6 +40,10 @@ pub struct ExtractOptions {
     /// and AST node counts. Halves per-file extraction cost for pure
     /// symbol-inspection workflows.
     pub skip_imports_and_refs: bool,
+    /// Retain the analyzed source text on each extraction. Off by default:
+    /// the CLI does not need it, and an editor or language server uses it to
+    /// convert ranges against the exact text the analysis read.
+    pub keep_text: bool,
 }
 
 pub struct ExtractionResult {
@@ -323,6 +333,7 @@ fn extract_source(
             language: lang,
             file_path: path.to_path_buf(),
             source_range: raw.source_range,
+            name_range: raw.name_range,
             visibility: raw.visibility,
             signature: raw.signature.map(|s| s.into_owned()),
             docstring: raw.docstring.map(|s| s.into_owned()),
@@ -373,6 +384,14 @@ fn extract_source(
     out.diagnostics = diags;
     out.diagnostics.extend(text_diagnostics);
     out.ast_node_count = metrics.node_count;
+    // Ranges index the analyzed bytes, so a lossy copy would shift every
+    // offset. A file that is not valid UTF-8 keeps no text and the consumer
+    // falls back to its own source lookup.
+    if opts.keep_text {
+        out.text = std::str::from_utf8(source)
+            .ok()
+            .map(std::sync::Arc::<str>::from);
+    }
     #[cfg(feature = "metacall-deploy")]
     {
         out.call_sites = call_sites;
@@ -595,6 +614,39 @@ mod tests {
         assert_eq!(result.file.path, path);
         assert_eq!(result.file.symbols[0].name, "unsaved");
         assert_eq!(result.file.symbols[0].id, SymbolId::new(40).unwrap());
+    }
+
+    #[test]
+    fn text_retention_is_opt_in_for_both_entry_points() {
+        let path = test_dir().join("retained.py");
+        let source = "def retained(): pass\n";
+        std::fs::write(&path, source).unwrap();
+        let id_generators = ExtractionIdGenerators::new();
+        let files = [(path.clone(), LangId::Python)];
+
+        let without = extract_with_id_gen(&files, &ExtractOptions::default(), &id_generators);
+        assert_eq!(without.files[0].text, None);
+
+        let opts = ExtractOptions {
+            keep_text: true,
+            ..ExtractOptions::default()
+        };
+        let from_disk = extract_with_id_gen(&files, &opts, &id_generators);
+        assert_eq!(from_disk.files[0].text.as_deref(), Some(source));
+
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        let from_buffer = extract_text_with_id_gen(
+            InMemorySource {
+                uri: &uri,
+                text: source,
+                version: 1,
+                language: LangId::Python,
+            },
+            &opts,
+            &id_generators,
+        )
+        .unwrap();
+        assert_eq!(from_buffer.file.text.as_deref(), Some(source));
     }
 
     #[test]

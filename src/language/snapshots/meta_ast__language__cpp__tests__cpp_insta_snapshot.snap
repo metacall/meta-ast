@@ -18,6 +18,18 @@ expression: symbols
         "column": 1
       }
     },
+    "name_range": {
+      "byte_start": 25,
+      "byte_end": 31,
+      "start": {
+        "line": 2,
+        "column": 6
+      },
+      "end": {
+        "line": 2,
+        "column": 12
+      }
+    },
     "visibility": null,
     "signature": null,
     "docstring": null,
@@ -36,6 +48,18 @@ expression: symbols
       "end": {
         "line": 4,
         "column": 45
+      }
+    },
+    "name_range": {
+      "byte_start": 46,
+      "byte_end": 52,
+      "start": {
+        "line": 4,
+        "column": 4
+      },
+      "end": {
+        "line": 4,
+        "column": 10
       }
     },
     "visibility": null,
@@ -58,6 +82,18 @@ expression: symbols
         "column": 32
       }
     },
+    "name_range": {
+      "byte_start": 100,
+      "byte_end": 107,
+      "start": {
+        "line": 5,
+        "column": 12
+      },
+      "end": {
+        "line": 5,
+        "column": 19
+      }
+    },
     "visibility": null,
     "signature": "()",
     "docstring": null,
@@ -76,6 +112,18 @@ expression: symbols
       "end": {
         "line": 7,
         "column": 49
+      }
+    },
+    "name_range": {
+      "byte_start": 146,
+      "byte_end": 151,
+      "start": {
+        "line": 7,
+        "column": 24
+      },
+      "end": {
+        "line": 7,
+        "column": 29
       }
     },
     "visibility": null,
@@ -98,6 +146,18 @@ expression: symbols
         "column": 44
       }
     },
+    "name_range": {
+      "byte_start": 188,
+      "byte_end": 196,
+      "start": {
+        "line": 8,
+        "column": 16
+      },
+      "end": {
+        "line": 8,
+        "column": 24
+      }
+    },
     "visibility": null,
     "signature": "()",
     "docstring": null,
@@ -116,6 +176,18 @@ expression: symbols
       "end": {
         "line": 19,
         "column": 1
+      }
+    },
+    "name_range": {
+      "byte_start": 260,
+      "byte_end": 263,
+      "start": {
+        "line": 14,
+        "column": 6
+      },
+      "end": {
+        "line": 14,
+        "column": 9
       }
     },
     "visibility": null,
@@ -138,6 +210,18 @@ expression: symbols
         "column": 43
       }
     },
+    "name_range": {
+      "byte_start": 294,
+      "byte_end": 297,
+      "start": {
+        "line": 16,
+        "column": 4
+      },
+      "end": {
+        "line": 16,
+        "column": 7
+      }
+    },
     "visibility": null,
     "signature": "(std::string name)",
     "docstring": null,
@@ -156,6 +240,18 @@ expression: symbols
       "end": {
         "line": 18,
         "column": 52
+      }
+    },
+    "name_range": {
+      "byte_start": 351,
+      "byte_end": 356,
+      "start": {
+        "line": 18,
+        "column": 16
+      },
+      "end": {
+        "line": 18,
+        "column": 21
       }
     },
     "visibility": null,

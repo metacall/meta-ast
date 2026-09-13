@@ -60,6 +60,51 @@ pub const CONFIDENCE_COMPUTED: f32 = 0.4;
 /// Dataflow def-use edge confidence.
 pub const CONFIDENCE_DEF_USE: f32 = 0.9;
 
+/// Coarse class of a confidence value. Exact ladder matching, no interpolation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ConfidenceTier {
+    /// Own file, or a direct same-language import, or a unique load-confirmed
+    /// call.
+    OwnOrDirect,
+    /// Definition-use edge.
+    DefUse,
+    /// Transitive same-language import, or multiple load-confirmed calls.
+    Transitive,
+    /// Cross-language import, or a unique global call match.
+    CrossLanguage,
+    /// Multiple global call candidates.
+    ClientMultiGlobal,
+    /// Computed call name.
+    Computed,
+    /// Not one of the ladder values.
+    Unknown,
+}
+
+/// Classify a confidence value by exact equality with the ladder constants.
+///
+/// A value the ladder does not define is [`ConfidenceTier::Unknown`], so a
+/// consumer decides how to present it instead of letting it fall between two
+/// tiers.
+pub fn confidence_tier(confidence: f32) -> ConfidenceTier {
+    if confidence == CONFIDENCE_OWN_OR_DIRECT || confidence == CONFIDENCE_CLIENT_UNIQUE_LOAD {
+        ConfidenceTier::OwnOrDirect
+    } else if confidence == CONFIDENCE_DEF_USE {
+        ConfidenceTier::DefUse
+    } else if confidence == CONFIDENCE_TRANSITIVE || confidence == CONFIDENCE_CLIENT_MULTI_LOAD {
+        ConfidenceTier::Transitive
+    } else if confidence == CONFIDENCE_CROSS_LANGUAGE
+        || confidence == CONFIDENCE_CLIENT_UNIQUE_GLOBAL
+    {
+        ConfidenceTier::CrossLanguage
+    } else if confidence == CONFIDENCE_CLIENT_MULTI_GLOBAL {
+        ConfidenceTier::ClientMultiGlobal
+    } else if confidence == CONFIDENCE_COMPUTED {
+        ConfidenceTier::Computed
+    } else {
+        ConfidenceTier::Unknown
+    }
+}
+
 impl EdgeKind {
     /// Returns true if this edge kind participates in SCC computation.
     pub fn participates_in_scc(self) -> bool {
@@ -215,5 +260,39 @@ mod tests {
         let edge: EdgeData = Default::default();
         assert_eq!(edge.confidence, 1.0);
         assert!(edge.participates_in_scc());
+    }
+
+    #[test]
+    fn every_ladder_value_has_exactly_one_tier() {
+        for (confidence, tier) in [
+            (CONFIDENCE_OWN_OR_DIRECT, ConfidenceTier::OwnOrDirect),
+            (CONFIDENCE_CLIENT_UNIQUE_LOAD, ConfidenceTier::OwnOrDirect),
+            (CONFIDENCE_DEF_USE, ConfidenceTier::DefUse),
+            (CONFIDENCE_TRANSITIVE, ConfidenceTier::Transitive),
+            (CONFIDENCE_CLIENT_MULTI_LOAD, ConfidenceTier::Transitive),
+            (CONFIDENCE_CROSS_LANGUAGE, ConfidenceTier::CrossLanguage),
+            (
+                CONFIDENCE_CLIENT_UNIQUE_GLOBAL,
+                ConfidenceTier::CrossLanguage,
+            ),
+            (
+                CONFIDENCE_CLIENT_MULTI_GLOBAL,
+                ConfidenceTier::ClientMultiGlobal,
+            ),
+            (CONFIDENCE_COMPUTED, ConfidenceTier::Computed),
+        ] {
+            assert_eq!(confidence_tier(confidence), tier, "at {confidence}");
+        }
+    }
+
+    #[test]
+    fn a_value_between_ladder_steps_is_unknown() {
+        for confidence in [0.7, 0.0, 1.5, -1.0] {
+            assert_eq!(
+                confidence_tier(confidence),
+                ConfidenceTier::Unknown,
+                "at {confidence}"
+            );
+        }
     }
 }

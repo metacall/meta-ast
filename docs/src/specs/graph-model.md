@@ -69,6 +69,10 @@ projections never collide, because their source endpoints are different node kin
 5. A name resolves to the nearest definition only. The own file shadows a direct
 same-language import, a direct import shadows a transitive one, and a cross-language
 import ranks last. Equally ranked candidates stay visible and order by path.
+
+`confidence_tier` classifies a confidence value by exact equality with the
+constants above (`ConfidenceTier::Unknown` for anything else), so a consumer groups
+results without interpolating between ladder steps.
 6. An import edge between two languages carries the cross-language confidence, not
 the direct one.
 
@@ -107,7 +111,8 @@ symbol nodes. `.metast` shards declare `SHARD_SCHEMA_VERSION` in `header.json`
 and in every record, and they spell symbol kinds and visibility in lowercase. Version 5 stores
 the import specifier without its surrounding quotes and drops a specifier that is not valid UTF-8
 with a warning, so a version 4 reader refuses the payload instead of reading a value in the old
-shape.
+shape. Version 5 also stores an optional `name_range` per symbol, the identifier range an editor
+reveals; it is absent in records written before the field existed and those records still parse.
 They do not persist numeric IDs: they store stable language-scoped endpoint
 names and regenerate symbol IDs when loaded. A reader refuses any other version,
 so an index written before a schema bump must be regenerated.

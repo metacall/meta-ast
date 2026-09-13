@@ -54,6 +54,18 @@ mod tests {
         }
     }
 
+    fn name_range() -> SourceRange {
+        SourceRange {
+            byte_start: 4,
+            byte_end: 11,
+            start: LineColumn { line: 0, column: 4 },
+            end: LineColumn {
+                line: 0,
+                column: 11,
+            },
+        }
+    }
+
     fn extraction() -> FileExtraction {
         let path = PathBuf::from("src/example.py");
         let mut out = FileExtraction::empty(path.clone(), LangId::Python);
@@ -64,6 +76,7 @@ mod tests {
             language: LangId::Python,
             file_path: path,
             source_range: range(),
+            name_range: Some(name_range()),
             visibility: Some(Visibility::Public),
             signature: Some("def encrypt(value: str)".to_string()),
             docstring: Some("Encrypt a value.".to_string()),
@@ -71,6 +84,36 @@ mod tests {
         }];
         out.ast_node_count = 7;
         out
+    }
+
+    #[test]
+    fn a_shard_round_trip_keeps_no_source_text() {
+        let mut extraction = extraction();
+        extraction.text = Some(std::sync::Arc::from("# retained source text marker\n"));
+        let mut diagnostics = Vec::new();
+        let (graph, _) = GraphBuilder::from_extractions(
+            std::slice::from_ref(&extraction),
+            Path::new("."),
+            SnapshotId::new(1).unwrap(),
+            &mut diagnostics,
+        );
+        let shard = ShardFile::from_extraction(&extraction, &graph).unwrap();
+        let mut bytes = Vec::new();
+        write_shard(&mut bytes, &[shard]).unwrap();
+        let json = String::from_utf8(bytes.clone()).unwrap();
+        assert!(
+            !json.contains("retained source text marker"),
+            "shard records carry symbol data, not source"
+        );
+
+        let decoded = read_shard(Cursor::new(bytes)).unwrap();
+        let loaded = decoded
+            .into_iter()
+            .next()
+            .unwrap()
+            .load(&IdGenerator::with_start(1))
+            .unwrap();
+        assert!(loaded.file.text.is_none());
     }
 
     #[test]
@@ -97,6 +140,7 @@ mod tests {
         assert_eq!(loaded.file.symbols[0].id, SymbolId::new(500).unwrap());
         assert_eq!(loaded.file.symbols[0].name, "encrypt");
         assert_eq!(loaded.file.symbols[0].source_range, range());
+        assert_eq!(loaded.file.symbols[0].name_range, Some(name_range()));
         assert_eq!(loaded.edges.len(), 1);
     }
 
@@ -314,6 +358,7 @@ mod tests {
                     column: 10,
                 },
             },
+            name_range: None,
             visibility: Some(Visibility::Public),
             signature: Some("def process(a: int)".to_string()),
             docstring: None,
@@ -334,6 +379,7 @@ mod tests {
                     column: 10,
                 },
             },
+            name_range: None,
             visibility: Some(Visibility::Public),
             signature: Some("def process(a: str)".to_string()),
             docstring: None,

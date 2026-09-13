@@ -39,8 +39,8 @@ pub mod scc;
 
 use std::collections::HashMap;
 
-pub use builder::GraphBuilder;
-pub use edge::{EdgeData, EdgeKind};
+pub use builder::{AnalysisParts, GraphBuilder};
+pub use edge::{ConfidenceTier, EdgeData, EdgeKind, confidence_tier};
 pub use node::{
     DataGraphNode, ExternalClassification, ExternalNode, FileNode, NodeData, SymbolNode,
 };
@@ -336,6 +336,7 @@ mod tests {
             language: LangId::Rust,
             file_path: PathBuf::from("test.rs"),
             source_range: test_range(),
+            name_range: None,
             visibility: Some(Visibility::Public),
             signature: None,
             docstring: None,

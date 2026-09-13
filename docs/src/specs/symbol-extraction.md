@@ -56,7 +56,13 @@ Each extracted symbol maps to canonical shape:
 - `language`
 - `file`
 - `source_range`
-- optional: `signature`, `visibility`, `docstring`, `async`
+- optional: `name_range` (the identifier range when the query captured `@name`),
+  `signature`, `visibility`, `docstring`, `async`
+
+The extraction also carries the analyzed source text when the caller sets
+`ExtractOptions::keep_text`. Ranges index those bytes, so a consumer that needs
+them for position conversion must use that text rather than re-reading the
+file. Shard records never persist it.
 
 ## 5. Error tolerance policy
 

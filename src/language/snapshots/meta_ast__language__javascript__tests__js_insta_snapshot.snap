@@ -18,6 +18,18 @@ expression: symbols
         "column": 1
       }
     },
+    "name_range": {
+      "byte_start": 9,
+      "byte_end": 14,
+      "start": {
+        "line": 0,
+        "column": 9
+      },
+      "end": {
+        "line": 0,
+        "column": 14
+      }
+    },
     "visibility": null,
     "signature": "()",
     "docstring": null,
@@ -36,6 +48,18 @@ expression: symbols
       "end": {
         "line": 7,
         "column": 1
+      }
+    },
+    "name_range": {
+      "byte_start": 57,
+      "byte_end": 66,
+      "start": {
+        "line": 4,
+        "column": 15
+      },
+      "end": {
+        "line": 4,
+        "column": 24
       }
     },
     "visibility": null,
@@ -58,6 +82,18 @@ expression: symbols
         "column": 31
       }
     },
+    "name_range": {
+      "byte_start": 150,
+      "byte_end": 157,
+      "start": {
+        "line": 9,
+        "column": 6
+      },
+      "end": {
+        "line": 9,
+        "column": 13
+      }
+    },
     "visibility": null,
     "signature": "(x, y)",
     "docstring": null,
@@ -78,6 +114,18 @@ expression: symbols
         "column": 40
       }
     },
+    "name_range": {
+      "byte_start": 184,
+      "byte_end": 189,
+      "start": {
+        "line": 11,
+        "column": 6
+      },
+      "end": {
+        "line": 11,
+        "column": 11
+      }
+    },
     "visibility": null,
     "signature": "(name)",
     "docstring": null,
@@ -96,6 +144,18 @@ expression: symbols
       "end": {
         "line": 16,
         "column": 1
+      }
+    },
+    "name_range": {
+      "byte_start": 243,
+      "byte_end": 247,
+      "start": {
+        "line": 13,
+        "column": 22
+      },
+      "end": {
+        "line": 13,
+        "column": 26
       }
     },
     "visibility": "public",

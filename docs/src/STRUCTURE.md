@@ -30,12 +30,12 @@ src/
 ├── extractor/
 │   └── mod.rs                  Pipeline orchestration: parallel parse + extract per file (symbols, imports, references, call sites, dataflow)
 ├── graph/
-│   ├── builder.rs              GraphBuilder: named stages for files, symbols, dataflow, imports, references and client calls
-│   ├── edge.rs                 EdgeKind enum (Ownership / Import / Reference / Flow) with confidence + flow_kind, one merge rule
+│   ├── builder.rs              GraphBuilder: named stages for files, symbols, dataflow, imports, references and client calls; AnalysisParts
+│   ├── edge.rs                 EdgeKind enum (Ownership / Import / Reference / Flow) with confidence + flow_kind, one merge rule, confidence_tier
 │   ├── mod.rs                  CodeGraph (DiGraph), add_edge_normalized_with_flow, re-exports
 │   ├── naming.rs               Node display name and kind name; one authority for the graph output
 │   ├── node.rs                 NodeData enum (File / Symbol / External / Data)
-│   ├── resolver.rs             FlattenedScopeCache, ResolutionContext, resolve_all_references
+│   ├── resolver.rs             FlattenedScopeCache, ResolutionContext, resolve_references_detailed, ResolvedReference, resolve_all_references
 │   └── scc.rs                  Tarjan SCC + DeployabilityHint in a single edge walk
 ├── input/
 │   └── mod.rs                  File discovery, filtering, language routing, portable paths
@@ -187,12 +187,21 @@ pub struct Symbol {
     pub language: LangId,
     pub file_path: PathBuf,
     pub source_range: SourceRange,
+    /// Identifier range when the language pack captured one; editors reveal
+    /// this range instead of the whole declaration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_range: Option<SourceRange>,
     pub visibility: Option<Visibility>,
     pub signature: Option<String>,
     pub docstring: Option<String>,
     pub is_async: bool,
 }
 ```
+
+`FileExtraction` also carries `text: Option<Arc<str>>`, filled only when
+`ExtractOptions::keep_text` asks for it. Shards never persist the text, and the
+field is not serialized. The full symbol and extraction contract lives in
+`docs/src/specs/symbol-extraction.md`.
 
 ### 2.4 Graph Model
 

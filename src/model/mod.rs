@@ -41,6 +41,13 @@ pub struct FileExtraction {
     pub diagnostics: Vec<crate::error::Diagnostic>,
     /// Total number of tree-sitter AST nodes in the parse tree.
     pub ast_node_count: usize,
+    /// Analyzed source text, retained only when the caller asked for it and the
+    /// bytes are valid UTF-8. Ranges index these bytes, so a lossy copy would
+    /// shift every offset; consumers convert positions against this text
+    /// instead of re-reading the file. Never serialized: shard records carry
+    /// symbol data, not source.
+    #[serde(skip)]
+    pub text: Option<std::sync::Arc<str>>,
     #[cfg(feature = "metacall-deploy")]
     pub call_sites: Vec<crate::deploy::scanner::CallSite>,
     #[cfg(feature = "dataflow")]
@@ -63,6 +70,7 @@ impl FileExtraction {
             references: Vec::new(),
             diagnostics: Vec::new(),
             ast_node_count: 0,
+            text: None,
             #[cfg(feature = "metacall-deploy")]
             call_sites: Vec::new(),
             #[cfg(feature = "dataflow")]
@@ -169,6 +177,12 @@ pub struct Symbol {
     pub language: LangId,
     pub file_path: PathBuf,
     pub source_range: SourceRange,
+    /// Range of the symbol name, when the language pack captured one.
+    ///
+    /// Selection ranges and definition links point at the name, not at the
+    /// whole declaration, so an editor reveals the identifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_range: Option<SourceRange>,
     pub visibility: Option<Visibility>,
     pub signature: Option<String>,
     pub docstring: Option<String>,
@@ -267,6 +281,7 @@ mod tests {
             language: LangId::Rust,
             file_path: PathBuf::from("src/main.rs"),
             source_range: sample_source_range(),
+            name_range: None,
             visibility: Some(Visibility::Public),
             signature: Some("fn my_func() -> bool".into()),
             docstring: Some("does a thing".into()),
@@ -292,6 +307,7 @@ mod tests {
             language: LangId::Python,
             file_path: PathBuf::from("a.py"),
             source_range: sample_source_range(),
+            name_range: None,
             visibility: None,
             signature: None,
             docstring: None,
@@ -382,6 +398,7 @@ mod tests {
             language: LangId::Go,
             file_path: PathBuf::from("main.go"),
             source_range: sample_source_range(),
+            name_range: None,
             visibility: Some(Visibility::Private),
             signature: Some("func (t T) roundtripFn()".into()),
             docstring: Some("doc".into()),

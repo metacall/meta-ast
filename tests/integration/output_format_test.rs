@@ -19,6 +19,7 @@ fn sample_symbol(id: u32, name: &str, kind: SymbolKind) -> Symbol {
                 column: 10,
             },
         },
+        name_range: None,
         visibility: Some(Visibility::Public),
         signature: Some("fn test()".into()),
         docstring: Some("A test function".into()),

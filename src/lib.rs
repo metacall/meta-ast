@@ -40,10 +40,13 @@ pub use reanalyze::{ChangeSet, Overlay, WatchState, incremental_reanalyze, reana
 // Graph module re-exports
 pub use graph::{
     CodeGraph,
-    builder::GraphBuilder,
-    edge::{EdgeData, EdgeKind},
+    builder::{AnalysisParts, GraphBuilder},
+    edge::{ConfidenceTier, EdgeData, EdgeKind, confidence_tier},
     node::{ExternalNode, FileNode, NodeData, SymbolNode},
-    resolver::{FlattenedScopeCache, ScopeMap},
+    resolver::{
+        FlattenedScopeCache, ResolvedReference, ScopeMap, reference_edges,
+        resolve_references_detailed,
+    },
     scc::{DeployabilityHint, Scc, SccAnalysis},
 };
 

@@ -48,6 +48,11 @@ pub struct ShardSymbol {
     pub name: String,
     pub kind: SymbolKind,
     pub source_range: SourceRange,
+    /// Range of the symbol name, absent in records written before the field
+    /// existed and when the language pack reported none. Consumers fall back to
+    /// the declaration range themselves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_range: Option<SourceRange>,
     pub visibility: Option<Visibility>,
     pub signature: Option<String>,
     pub docstring: Option<String>,
@@ -210,6 +215,7 @@ impl From<&Symbol> for ShardSymbol {
             name: symbol.name.clone(),
             kind: symbol.kind,
             source_range: symbol.source_range.clone(),
+            name_range: symbol.name_range.clone(),
             visibility: symbol.visibility,
             signature: symbol.signature.clone(),
             docstring: symbol.docstring.clone(),
@@ -227,6 +233,7 @@ impl ShardSymbol {
             language,
             file_path: file_path.to_path_buf(),
             source_range: self.source_range,
+            name_range: self.name_range,
             visibility: self.visibility,
             signature: self.signature,
             docstring: self.docstring,

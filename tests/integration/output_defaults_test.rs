@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use meta_ast::graph::resolver::FlattenedScopeCache;
 use meta_ast::graph::{GraphBuilder, SccAnalysis};
 use meta_ast::model::SnapshotId;
 use meta_ast::output::emitter::{EmitConfig, emit_graph};
@@ -27,6 +28,8 @@ fn empty_analysis() -> GraphAnalysis {
         scc,
         snapshot_id,
         extractions: vec![],
+        scope: FlattenedScopeCache::default(),
+        references: Vec::new(),
     }
 }
 
