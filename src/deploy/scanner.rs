@@ -195,8 +195,9 @@ fn is_async_call(name: &str) -> bool {
 }
 
 fn strip_quotes(s: &str) -> String {
-    s.trim_matches(|c| c == '"' || c == '\'' || c == '`')
-        .to_string()
+    // One pair only: trim_matches would eat repeated quotes into new text.
+    let s = s.strip_prefix(['"', '\'', '`']).unwrap_or(s);
+    s.strip_suffix(['"', '\'', '`']).unwrap_or(s).to_string()
 }
 
 /// True when the string node is static text; interpolations (f-strings,
@@ -239,6 +240,13 @@ static PYTHON_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
   function: (identifier) @fn_name
   arguments: (argument_list) @args
   (#match? @fn_name "@FN@"))
+(call
+  function: (attribute
+    object: (identifier) @obj_name
+    attribute: (identifier) @fn_name)
+  arguments: (argument_list) @args
+  (#match? @obj_name "^metacall$")
+  (#match? @fn_name "@FN@"))
 "#,
         ),
         "Python deploy",
@@ -253,6 +261,13 @@ static JS_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
 (call_expression
   function: (identifier) @fn_name
   arguments: (arguments) @args
+  (#match? @fn_name "@FN@"))
+(call_expression
+  function: (member_expression
+    object: (identifier) @obj_name
+    property: (property_identifier) @fn_name)
+  arguments: (arguments) @args
+  (#match? @obj_name "^metacall$")
   (#match? @fn_name "@FN@"))
 "#,
         ),
@@ -269,6 +284,13 @@ static TS_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
   function: (identifier) @fn_name
   arguments: (arguments) @args
   (#match? @fn_name "@FN@"))
+(call_expression
+  function: (member_expression
+    object: (identifier) @obj_name
+    property: (property_identifier) @fn_name)
+  arguments: (arguments) @args
+  (#match? @obj_name "^metacall$")
+  (#match? @fn_name "@FN@"))
 "#,
         ),
         "TS deploy",
@@ -283,6 +305,13 @@ static TSX_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
 (call_expression
   function: (identifier) @fn_name
   arguments: (arguments) @args
+  (#match? @fn_name "@FN@"))
+(call_expression
+  function: (member_expression
+    object: (identifier) @obj_name
+    property: (property_identifier) @fn_name)
+  arguments: (arguments) @args
+  (#match? @obj_name "^metacall$")
   (#match? @fn_name "@FN@"))
 "#,
         ),
@@ -314,6 +343,13 @@ static CPP_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
   function: (identifier) @fn_name
   arguments: (argument_list) @args
   (#match? @fn_name "@FN@"))
+(call_expression
+  function: (qualified_identifier
+    scope: (namespace_identifier) @scope_name
+    name: (identifier) @fn_name)
+  arguments: (argument_list) @args
+  (#match? @scope_name "^metacall$")
+  (#match? @fn_name "@FN@"))
 "#,
         ),
         "CPP deploy",
@@ -333,8 +369,12 @@ static RUST_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
     (scoped_identifier
         path: (scoped_identifier path: (identifier) @mod_name name: (identifier) @sub_mod)
         name: (identifier) @fn_name)
-    (identifier) @fn_name
   ]
+  arguments: (arguments) @args
+  (#match? @mod_name "^metacall$")
+  (#match? @fn_name "@FN@"))
+(call_expression
+  function: (identifier) @fn_name
   arguments: (arguments) @args
   (#match? @fn_name "@FN@"))
 "#,
@@ -481,8 +521,13 @@ pub fn scan_file(
                     if kind.contains("string") || kind == "string_literal" {
                         target_lang = Some(strip_quotes(text));
                     } else {
-                        target_lang = Some(text.to_string());
-                        confidence = CONFIDENCE_COMPUTED;
+                        // A Rust loader path spells `Tag::NodeJS`: the tag is
+                        // the last segment. A known tag stays certain.
+                        let segment = text.rsplit("::").next().unwrap_or(text);
+                        target_lang = Some(segment.to_string());
+                        if crate::deploy::tags::from_metacall_tag(segment).is_none() {
+                            confidence = CONFIDENCE_COMPUTED;
+                        }
                     }
                 }
 
@@ -495,15 +540,13 @@ pub fn scan_file(
                         || kind == "composite_literal"
                     {
                         collect_strings_recursive(*scripts_node, source, &mut scripts);
-                    } else {
-                        let text = get_node_text(*scripts_node, source);
-                        if kind.contains("string") || kind == "string_literal" {
-                            scripts.push(strip_quotes(text));
-                        } else {
-                            scripts.push(text.to_string());
-                            confidence = CONFIDENCE_COMPUTED;
-                        }
+                    } else if kind.contains("string") || kind == "string_literal" {
+                        scripts.push(strip_quotes(get_node_text(*scripts_node, source)));
                     }
+                    // Anything else names a variable holding the scripts, such
+                    // as the C array pointer in (tag, paths, size, handle).
+                    // Its text is not a path, so it contributes no scripts
+                    // instead of a phantom node named after the variable.
                 }
             }
 
@@ -987,5 +1030,109 @@ metacall_await_s("x", 1)
         let sites = scan_sites(LangId::Go, &tree, genuine, "main.go");
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
+    }
+
+    #[test]
+    fn test_scan_c_array_pointer_contributes_no_scripts() {
+        let source = b"metacall_load_from_file(\"node\", paths, size, &handle);";
+        let tree = parse(LangId::C, source);
+        let sites = scan_sites(LangId::C, &tree, source, "test.c");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+        assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
+        assert!(
+            sites[0].scripts.is_empty(),
+            "a variable is not a path: {:?}",
+            sites[0].scripts
+        );
+        assert_eq!(sites[0].confidence, 1.0);
+    }
+
+    #[test]
+    fn test_scan_python_variable_scripts_contribute_no_scripts() {
+        let source = b"metacall_load_from_file('node', scripts)";
+        let tree = parse(LangId::Python, source);
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+        assert!(
+            sites[0].scripts.is_empty(),
+            "a variable is not a path: {:?}",
+            sites[0].scripts
+        );
+    }
+
+    #[test]
+    fn test_scan_rust_tag_path_resolves() {
+        let source = b"metacall::load::from_file(Tag::NodeJS, [\"index.js\"], None)";
+        let tree = parse(LangId::Rust, source);
+        let sites = scan_sites(LangId::Rust, &tree, source, "lib.rs");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+        assert_eq!(sites[0].target_lang.as_deref(), Some("NodeJS"));
+        assert_eq!(sites[0].scripts, vec!["index.js"]);
+        assert_eq!(sites[0].confidence, 1.0);
+    }
+
+    #[test]
+    fn test_scan_rust_rejects_a_lookalike_path() {
+        let source = b"other::load_from_file(\"py\", [\"sum.py\"])";
+        let tree = parse(LangId::Rust, source);
+        let sites = scan_sites(LangId::Rust, &tree, source, "lib.rs");
+        assert!(sites.is_empty(), "other:: is not the metacall path");
+    }
+
+    #[test]
+    fn test_scan_python_member_load_is_detected() {
+        let source = b"metacall.load_from_file('node', ['a.py'])";
+        let tree = parse(LangId::Python, source);
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+        assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
+        assert_eq!(sites[0].scripts, vec!["a.py"]);
+    }
+
+    #[test]
+    fn test_scan_python_member_call_on_another_object_is_ignored() {
+        let source = b"db.Call('x')";
+        let tree = parse(LangId::Python, source);
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
+        assert!(sites.is_empty(), "db.Call is not a MetaCall invocation");
+    }
+
+    #[test]
+    fn test_scan_javascript_member_load_is_detected() {
+        let source = b"metacall.load_from_file('node', ['a.js'])";
+        let tree = parse(LangId::JavaScript, source);
+        let sites = scan_sites(LangId::JavaScript, &tree, source, "test.js");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+        assert_eq!(sites[0].scripts, vec!["a.js"]);
+    }
+
+    #[test]
+    fn test_scan_javascript_member_call_on_another_object_is_ignored() {
+        let source = b"db.Call('x')";
+        let tree = parse(LangId::JavaScript, source);
+        let sites = scan_sites(LangId::JavaScript, &tree, source, "test.js");
+        assert!(sites.is_empty(), "db.Call is not a MetaCall invocation");
+    }
+
+    #[test]
+    fn test_scan_cpp_qualified_load_is_detected() {
+        let source = b"metacall::load_from_file(\"node\", scripts);";
+        let tree = parse(LangId::Cpp, source);
+        let sites = scan_sites(LangId::Cpp, &tree, source, "test.cpp");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+        assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
+    }
+
+    #[test]
+    fn strip_quotes_strips_one_pair() {
+        assert_eq!(strip_quotes("\"react\""), "react");
+        assert_eq!(strip_quotes("\"\"x\"\""), "\"x\"");
+        assert_eq!(strip_quotes("'a'"), "a");
     }
 }
