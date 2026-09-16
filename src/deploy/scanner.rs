@@ -514,6 +514,16 @@ pub fn scan_file(
                         confidence = CONFIDENCE_COMPUTED;
                     }
                 }
+            } else if variant == CallSiteVariant::LoadFromConfiguration {
+                // A configuration load takes one argument: the config path.
+                // It travels in scripts, where both config readers look;
+                // the tag stays empty because the language comes from the
+                // configuration itself.
+                if let Some(path_node) = named_children.first()
+                    && is_plain_string(*path_node)
+                {
+                    scripts.push(strip_quotes(get_node_text(*path_node, source)));
+                }
             } else {
                 if let Some(lang_node) = named_children.first() {
                     let text = get_node_text(*lang_node, source);
@@ -683,6 +693,17 @@ mod tests {
         assert_eq!(sites[0].variant, CallSiteVariant::LoadFromPackage);
         assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
         assert_eq!(sites[0].scripts, vec!["express"]);
+    }
+
+    #[test]
+    fn test_scan_load_from_configuration_carries_the_path_in_scripts() {
+        let source = b"metacall_load_from_configuration('cfg/deploy.json')";
+        let tree = parse(LangId::Python, source);
+        let sites = scan_sites(LangId::Python, &tree, source, "test.py");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromConfiguration);
+        assert_eq!(sites[0].scripts, vec!["cfg/deploy.json"]);
+        assert_eq!(sites[0].target_lang, None);
     }
 
     #[test]

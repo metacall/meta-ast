@@ -10,6 +10,15 @@ use std::path::Path;
 use crate::graph::node::{DependencySource, ExternalClassification, ExternalNode};
 use crate::language::LangId;
 
+/// Read a lockfile with a size cap.
+///
+/// An oversized lockfile yields no version, exactly like an unreadable one:
+/// lockfiles are advisory version pins, never load-bearing analysis input.
+fn read_lockfile(path: &Path) -> Option<String> {
+    let bytes = crate::extractor::read_source_bytes(path).ok()?;
+    String::from_utf8(bytes).ok()
+}
+
 /// A resolved dependency entry for the pod manifest.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DependencyEntry {
@@ -383,7 +392,7 @@ fn version_assignment(line: &str) -> Option<String> {
 }
 
 fn entry_value_version(path: &Path, package: &str) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_lockfile(path)?;
     let mut inside_entry = false;
 
     for line in content.lines() {
@@ -422,7 +431,7 @@ fn entry_value_version(path: &Path, package: &str) -> Option<String> {
 }
 
 fn json_dependency_version(path: &Path, package: &str) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_lockfile(path)?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     // Check dependencies/devDependencies for the package.
     for section in ["dependencies", "devDependencies", "peerDependencies"] {
@@ -436,7 +445,7 @@ fn json_dependency_version(path: &Path, package: &str) -> Option<String> {
 }
 
 fn toml_package_version(path: &Path, package: &str) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_lockfile(path)?;
     // Cargo.lock uses TOML; search for [[package]] sections with name = "..."
     let mut in_package_section = false;
     for line in content.lines() {
@@ -457,7 +466,7 @@ fn toml_package_version(path: &Path, package: &str) -> Option<String> {
 }
 
 fn exact_token_version(path: &Path, package: &str) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_lockfile(path)?;
     // go.sum format: <module> <version> <hash>, one line per module version.
     for line in content.lines() {
         let mut parts = line.split_whitespace();
@@ -473,7 +482,7 @@ fn exact_token_version(path: &Path, package: &str) -> Option<String> {
 
 /// Read a `require` line, in single or block form, and drop the `v` prefix.
 fn go_require_version(path: &Path, module: &str) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_lockfile(path)?;
     let mut inside_block = false;
 
     for line in content.lines() {
@@ -505,7 +514,7 @@ fn go_require_version(path: &Path, module: &str) -> Option<String> {
 }
 
 fn parenthesized_version(path: &Path, name: &str) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_lockfile(path)?;
     // Gemfile.lock lists each gem as "  <name> (<version>)" under a specs
     // section. The name has no quotes; match the indented line exactly.
     for line in content.lines() {

@@ -140,14 +140,21 @@ where
                 let Some(config_script) = site.scripts.first() else {
                     continue;
                 };
-                let config_file = root.join(config_script);
-                let bytes = match std::fs::read(&config_file) {
+                let Some(config_file) = super::config::join_contained(root, config_script) else {
+                    diagnostics.push(super::config::config_diagnostic(
+                        &site.source_file,
+                        site.source_range.as_ref(),
+                        format!("MetaCall configuration escapes the project root: {config_script}"),
+                    ));
+                    continue;
+                };
+                let bytes = match super::config::read_config_file(&config_file) {
                     Ok(bytes) => bytes,
-                    Err(error) => {
+                    Err(message) => {
                         diagnostics.push(super::config::config_diagnostic(
                             &config_file,
                             site.source_range.as_ref(),
-                            format!("unreadable MetaCall configuration: {error}"),
+                            message,
                         ));
                         continue;
                     }

@@ -304,4 +304,85 @@ metacall_load_from_file('py', ['other.py'])
             "expected at least 1 cross-language edge"
         );
     }
+
+    #[test]
+    fn test_config_reference_outside_root_is_reported() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+
+        // A valid configuration outside the root: it must never be read.
+        let outside = root
+            .parent()
+            .unwrap()
+            .join(format!("meta_ast_outside_{}.json", std::process::id()));
+        fs::write(&outside, r#"{"language_id":"node","scripts":["evil.js"]}"#).unwrap();
+        // Point at the real outside file without hardcoding the temp name.
+        let name = outside.file_name().unwrap().to_string_lossy().to_string();
+        fs::write(
+            root.join("main.py"),
+            format!("metacall_load_from_configuration('../{name}')"),
+        )
+        .unwrap();
+
+        let (_out_dir, config) = setup_config(root);
+        let diagnostics = run_deploy(config).expect("Deploy failed");
+
+        let escapes: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("escapes the project root"))
+            .collect();
+        assert_eq!(escapes.len(), 1, "the escape is reported: {diagnostics:?}");
+        assert!(
+            diagnostics.iter().all(|d| d.path != outside),
+            "the outside file is never read: {diagnostics:?}"
+        );
+
+        let _ = fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn test_absolute_config_reference_is_reported() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join("main.py"),
+            "metacall_load_from_configuration('/etc/x.json')",
+        )
+        .unwrap();
+
+        let (_out_dir, config) = setup_config(root);
+        let diagnostics = run_deploy(config).expect("Deploy failed");
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("escapes the project root")),
+            "an absolute reference is reported: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn test_escaping_scripts_are_reported() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join("main.py"),
+            "metacall_load_from_file('node', ['../../etc/shadow'])\n\
+             metacall_load_from_file('node', ['/etc/passwd'])",
+        )
+        .unwrap();
+
+        let (_out_dir, config) = setup_config(root);
+        let diagnostics = run_deploy(config).expect("Deploy failed");
+
+        let escapes: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("escapes its base directory"))
+            .collect();
+        assert_eq!(
+            escapes.len(),
+            2,
+            "both escapes are reported: {diagnostics:?}"
+        );
+    }
 }

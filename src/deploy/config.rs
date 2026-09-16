@@ -49,6 +49,65 @@ pub(crate) fn parse_load_configuration(bytes: &[u8]) -> Result<LoadConfiguration
     })
 }
 
+/// MetaCall configuration file read, in bytes.
+///
+/// Configurations are small JSON documents; anything larger is reported
+/// instead of buffered without bound.
+pub(crate) const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+
+/// Join a user-supplied reference onto the root, refusing escapes.
+///
+/// Absolute references and `..` escapes return `None`: the caller reports
+/// the reference instead of reading outside the project. The check is
+/// lexical; a symlink inside the root pointing out still follows it.
+pub(crate) fn join_contained(root: &Path, reference: &str) -> Option<PathBuf> {
+    let reference_path = Path::new(reference);
+    if reference_path.is_absolute() {
+        return None;
+    }
+    let joined = root.join(reference_path);
+    normalize(&joined)
+        .starts_with(normalize(root))
+        .then_some(joined)
+}
+
+/// Read a configuration file with the size cap enforced during the read.
+///
+/// Both failure modes arrive as a message the caller attaches to the call
+/// site that named the file.
+pub(crate) fn read_config_file(path: &Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)
+        .map_err(|error| format!("unreadable MetaCall configuration: {error}"))?;
+    let mut bounded = file.take(MAX_CONFIG_BYTES + 1);
+    let mut bytes = Vec::new();
+    bounded
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("unreadable MetaCall configuration: {error}"))?;
+    if bytes.len() as u64 > MAX_CONFIG_BYTES {
+        return Err(format!(
+            "MetaCall configuration is over the {MAX_CONFIG_BYTES} byte limit"
+        ));
+    }
+    Ok(bytes)
+}
+
+/// True when a script reference escapes its resolution base.
+///
+/// Absolute references outside the base and `..` escapes never resolve to
+/// project files through the lookup strategies, so the caller reports them
+/// instead of minting an external node named after the escape.
+pub(crate) fn escapes_base(base: &Path, script: &str) -> bool {
+    let script_path = Path::new(script);
+    let base = normalize(base);
+    let joined = if script_path.is_absolute() {
+        normalize(script_path)
+    } else {
+        normalize(&base.join(script_path))
+    };
+    !joined.starts_with(&base)
+}
+
 /// Base directory for script resolution.
 ///
 /// An absolute `path` wins. A relative `path` joins the configuration
@@ -164,5 +223,69 @@ mod tests {
             Path::new("/proj"),
         );
         assert_eq!(base, PathBuf::from("/proj"));
+    }
+
+    #[test]
+    fn contained_join_accepts_inside_references() {
+        let root = Path::new("/proj");
+        assert_eq!(
+            join_contained(root, "cfg/deploy.json"),
+            Some(PathBuf::from("/proj/cfg/deploy.json"))
+        );
+        assert_eq!(
+            join_contained(root, "sub/../deploy.json"),
+            Some(PathBuf::from("/proj/sub/../deploy.json")),
+            "a dot-dot that stays inside resolves"
+        );
+    }
+
+    #[test]
+    fn contained_join_refuses_escapes() {
+        let root = Path::new("/proj");
+        assert_eq!(join_contained(root, "/etc/x.json"), None);
+        assert_eq!(join_contained(root, "../../etc/x.json"), None);
+        assert_eq!(join_contained(root, "../project/x.json"), None);
+    }
+
+    #[test]
+    fn escapes_base_flags_outside_scripts() {
+        let base = Path::new("/proj");
+        assert!(!escapes_base(base, "sum.js"));
+        assert!(!escapes_base(base, "sub/../sum.js"));
+        assert!(!escapes_base(base, "/proj/sum.js"));
+        assert!(escapes_base(base, "/etc/passwd"));
+        assert!(escapes_base(base, "../../etc/passwd"));
+    }
+
+    #[test]
+    fn missing_config_is_unreadable() {
+        let missing = Path::new("/proj/does-not-exist.json");
+        let error = read_config_file(missing).unwrap_err();
+        assert!(
+            error.contains("unreadable"),
+            "the message attaches to a call site: {error}"
+        );
+    }
+
+    #[test]
+    fn oversized_config_is_reported() {
+        let dir = std::env::temp_dir().join("meta_ast_config_cap");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("big.json");
+        let chunk = vec![b'x'; 64 * 1024];
+        let mut file = std::fs::File::create(&path).unwrap();
+        use std::io::Write;
+        for _ in 0..=MAX_CONFIG_BYTES / chunk.len() as u64 {
+            file.write_all(&chunk).unwrap();
+        }
+        drop(file);
+
+        let error = read_config_file(&path).unwrap_err();
+        assert!(
+            error.contains(&MAX_CONFIG_BYTES.to_string()),
+            "the error names the cap: {error}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
