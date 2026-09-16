@@ -181,17 +181,36 @@ impl EdgeData {
 
     /// Merges a repeated `(source, target, kind)` edge into this one.
     ///
-    /// The stronger confidence wins and the first flow kind is kept. This is
-    /// the only copy of the rule; every writer calls it.
+    /// The stronger finite confidence wins and the first flow kind is kept.
+    /// Non-finite input carries no signal: it never displaces a finite
+    /// value, so the merge result does not depend on arrival order. An edge
+    /// whose every input was non-finite keeps its value; the output layer
+    /// counts and normalizes such edges. This is the only copy of the rule;
+    /// every writer calls it.
     pub(crate) fn merge_repeated(
         &mut self,
         confidence: f32,
         flow_kind: Option<crate::model::FlowKind>,
     ) {
-        self.confidence = self.confidence.max(confidence.clamp(0.0, 1.0));
+        self.confidence = finite_max(self.confidence, confidence.clamp(0.0, 1.0));
         if self.flow_kind.is_none() {
             self.flow_kind = flow_kind;
         }
+    }
+}
+
+/// The stronger finite signal, independent of order.
+///
+/// `f32::max` propagates NaN positionally (`max(x, NAN)` is NaN but
+/// `max(NAN, x)` is `x`), so merges through it depend on arrival order.
+/// A non-finite input loses to any finite one; two non-finite inputs keep
+/// the first, which the output layer counts and normalizes.
+pub(crate) fn finite_max(first: f32, second: f32) -> f32 {
+    match (first.is_finite(), second.is_finite()) {
+        (true, true) => first.max(second),
+        (true, false) => first,
+        (false, true) => second,
+        (false, false) => first,
     }
 }
 
@@ -294,5 +313,35 @@ mod tests {
                 "at {confidence}"
             );
         }
+    }
+
+    #[test]
+    fn merge_ignores_non_finite_input_in_either_order() {
+        for (first, second) in [(f32::NAN, 0.5), (0.5, f32::NAN)] {
+            let mut edge = EdgeData::with_confidence(EdgeKind::Reference, first);
+            edge.merge_repeated(second, None);
+            assert_eq!(
+                edge.confidence, 0.5,
+                "a non-finite input must not displace nor poison a finite value"
+            );
+        }
+    }
+
+    #[test]
+    fn merge_of_only_non_finite_input_keeps_the_value_for_the_output_counter() {
+        let mut edge = EdgeData::with_confidence(EdgeKind::Reference, f32::NAN);
+        edge.merge_repeated(f32::NAN, None);
+        assert!(
+            !edge.confidence.is_finite(),
+            "the output layer counts and normalizes such edges"
+        );
+    }
+
+    #[test]
+    fn finite_max_prefers_either_finite_side() {
+        assert_eq!(finite_max(0.5, 0.9), 0.9);
+        assert_eq!(finite_max(f32::NAN, 0.5), 0.5);
+        assert_eq!(finite_max(0.5, f32::NAN), 0.5);
+        assert!(finite_max(f32::NAN, f32::NAN).is_nan());
     }
 }

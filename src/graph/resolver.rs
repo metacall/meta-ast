@@ -11,7 +11,7 @@ use rayon::prelude::*;
 
 use crate::error::{Diagnostic, Severity};
 use crate::graph::edge::{
-    CONFIDENCE_CROSS_LANGUAGE, CONFIDENCE_OWN_OR_DIRECT, CONFIDENCE_TRANSITIVE,
+    CONFIDENCE_CROSS_LANGUAGE, CONFIDENCE_OWN_OR_DIRECT, CONFIDENCE_TRANSITIVE, finite_max,
 };
 use crate::language::LangId;
 use crate::model::{FileExtraction, FileId, SourceRange, SymbolId, Visibility};
@@ -461,7 +461,9 @@ pub fn reference_edges(resolved: &[ResolvedReference]) -> Vec<(SymbolId, SymbolI
     let mut seen: HashMap<(SymbolId, SymbolId), f32> = HashMap::with_capacity(resolved.len());
     for reference in resolved {
         seen.entry((reference.source, reference.target))
-            .and_modify(|confidence| *confidence = confidence.max(reference.confidence))
+            .and_modify(|confidence| {
+                *confidence = finite_max(*confidence, reference.confidence);
+            })
             .or_insert(reference.confidence);
     }
     let mut edges: Vec<_> = seen
@@ -680,6 +682,36 @@ mod tests {
             vec![(SymbolId::new(1).unwrap(), SymbolId::new(2).unwrap(), 1.0)],
             "the wrapper max-merges the two use sites into one edge"
         );
+    }
+
+    #[test]
+    fn reference_edge_fold_ignores_non_finite_input_in_either_order() {
+        use crate::model::{LineColumn, SourceRange};
+
+        fn record(source: u32, target: u32, confidence: f32) -> ResolvedReference {
+            ResolvedReference {
+                file_path: PathBuf::from("/proj/a.py"),
+                range: SourceRange {
+                    byte_start: 0,
+                    byte_end: 1,
+                    start: LineColumn { line: 0, column: 0 },
+                    end: LineColumn { line: 0, column: 1 },
+                },
+                source: SymbolId::new(source).unwrap(),
+                target: SymbolId::new(target).unwrap(),
+                confidence,
+            }
+        }
+
+        let forward = vec![record(1, 2, f32::NAN), record(1, 2, 0.5)];
+        let backward = vec![record(1, 2, 0.5), record(1, 2, f32::NAN)];
+        for resolved in [forward, backward] {
+            assert_eq!(
+                reference_edges(&resolved),
+                vec![(SymbolId::new(1).unwrap(), SymbolId::new(2).unwrap(), 0.5)],
+                "the fold result must not depend on arrival order"
+            );
+        }
     }
 
     #[test]
