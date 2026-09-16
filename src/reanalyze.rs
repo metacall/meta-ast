@@ -171,7 +171,9 @@ pub fn reanalyze_extractions(
 
     for (path, lang) in &targets {
         let Some(curr_fp) = current_fingerprints.get(path) else {
-            if failed_reads.contains(path) {
+            // A first-tick read failure has no cached entry to keep: the
+            // diagnostic reports it, and no counter claims otherwise.
+            if failed_reads.contains(path) && state.cache.get(path).is_some() {
                 change_set.files_unchanged += 1;
             }
             continue;
@@ -238,7 +240,6 @@ pub fn reanalyze_extractions(
         extracted_fingerprints = outcome.source_fingerprints;
     }
 
-    let mut overlay_diagnostics: Vec<Diagnostic> = Vec::new();
     for (path, overlay) in &changed_overlays {
         match extractor::extract_text_with_id_gen(
             InMemorySource {
@@ -255,13 +256,9 @@ pub fn reanalyze_extractions(
                 new_extractions.push(versioned.file);
             }
             Err(error) => {
+                // The failed record already carries this message: a second
+                // push would report one failure twice.
                 let message = error.to_string();
-                overlay_diagnostics.push(Diagnostic {
-                    path: path.clone(),
-                    severity: Severity::Error,
-                    message: message.clone(),
-                    source_range: None,
-                });
                 new_extractions.push(FileExtraction::failed(path.clone(), overlay.lang, message));
             }
         }
@@ -307,7 +304,6 @@ pub fn reanalyze_extractions(
     let mut read_diagnostics = read_diagnostics;
     read_diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
     diagnostics.extend(read_diagnostics);
-    diagnostics.extend(overlay_diagnostics);
     diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
 
     Ok((merged, change_set, diagnostics))
@@ -812,6 +808,59 @@ mod tests {
             "the cached hash must describe the extracted bytes"
         );
         assert!(symbol_names(&analysis.extractions).contains(&"two".to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_first_tick_counts_nothing() {
+        let root = temp_dir("unread_first");
+        let a = write_file(&root, "a.py", "def a(): pass\n");
+        if writes_as_root(&a) {
+            return;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&a).unwrap().permissions();
+            perms.set_mode(0o000);
+            std::fs::set_permissions(&a, perms).unwrap();
+        }
+
+        let mut state = WatchState::new();
+        let (_, cs, diags) = incremental_reanalyze(&root, None, &mut state).unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&a).unwrap().permissions();
+            perms.set_mode(0o644);
+            let _ = std::fs::set_permissions(&a, perms);
+        }
+
+        assert_eq!(cs.files_added, 0);
+        assert_eq!(cs.files_unchanged, 0, "no entry exists to keep");
+        assert_eq!(cs.files_removed, 0);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "the read failure is reported: {diags:?}");
+    }
+
+    #[test]
+    fn overlay_failure_reports_once() {
+        let root = temp_dir("overlay_fail");
+        write_file(&root, "a.py", "def disk(): pass\n");
+        let mut state = WatchState::new();
+        let mut bad = overlay(&root, "b.py", "def broken(): pass\n");
+        bad.uri = "untitled:b.py".to_string();
+
+        let (_, _, diags) = reanalyze_extractions(&root, None, &[bad], &mut state).unwrap();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "one failure, one diagnostic: {diags:?}");
     }
 
     #[test]
