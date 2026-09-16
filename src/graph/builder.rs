@@ -420,15 +420,20 @@ impl GraphBuilder {
         register_dataflow(&mut builder, extractions);
 
         let path_to_file_id = path_to_file_id(&builder, extractions);
-        resolve_imports(
+        let import_bindings = resolve_imports(
             &mut builder,
             extractions,
             root,
             &path_to_file_id,
             diagnostics,
         );
-        let (scope_cache, references) =
-            resolve_references(&mut builder, extractions, &path_to_file_id, diagnostics);
+        let (scope_cache, references) = resolve_references(
+            &mut builder,
+            extractions,
+            &path_to_file_id,
+            import_bindings,
+            diagnostics,
+        );
 
         let graph = builder.build();
         #[cfg(feature = "metacall-deploy")]
@@ -542,17 +547,24 @@ where
 ///
 /// A specifier no resolver resolves becomes an external node, unless it is
 /// relative: a relative import that does not resolve is a warning, because the
-/// file it names is missing from the tree.
+/// file it names is missing from the tree. Returns the resolved in-project
+/// bindings for the scope resolver.
 fn resolve_imports<F>(
     builder: &mut GraphBuilder,
     extractions: &[F],
     root: &std::path::Path,
     path_to_file_id: &HashMap<std::path::PathBuf, crate::model::FileId>,
     diagnostics: &mut Vec<crate::error::Diagnostic>,
-) where
+) -> Vec<(
+    crate::model::FileId,
+    crate::model::FileId,
+    crate::graph::resolver::ImportBinding,
+)>
+where
     F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
 {
     let mut resolvers = HashMap::new();
+    let mut bindings = Vec::new();
     for lang in crate::language::LangId::all() {
         resolvers.insert(lang, crate::language::import_resolver::make_resolver(lang));
     }
@@ -572,7 +584,16 @@ fn resolve_imports<F>(
         for import in &file.imports {
             let specifier = import_specifier_for(file.lang, import);
             match resolver.resolve(&specifier, source_dir, root) {
-                Some(target) => builder.add_import(source_id, target),
+                Some(target) => {
+                    builder.add_import(source_id, target.clone());
+                    if let Some(target_id) = builder.file_id_for_path(&target) {
+                        bindings.push((
+                            source_id,
+                            target_id,
+                            crate::graph::resolver::import_binding_for(file.lang, import),
+                        ));
+                    }
+                }
                 None if is_relative_specifier(&specifier) => {
                     diagnostics.push(crate::error::Diagnostic {
                         path: file.path.clone(),
@@ -588,6 +609,7 @@ fn resolve_imports<F>(
             }
         }
     }
+    bindings
 }
 
 /// Resolves cross-file references and returns the scope cache they were
@@ -596,6 +618,11 @@ fn resolve_references<F>(
     builder: &mut GraphBuilder,
     extractions: &[F],
     path_to_file_id: &HashMap<std::path::PathBuf, crate::model::FileId>,
+    import_bindings: Vec<(
+        crate::model::FileId,
+        crate::model::FileId,
+        crate::graph::resolver::ImportBinding,
+    )>,
     diagnostics: &mut Vec<crate::error::Diagnostic>,
 ) -> (
     crate::graph::resolver::FlattenedScopeCache,
@@ -609,6 +636,7 @@ where
         extractions,
         path_to_file_id,
         import_adjacency,
+        import_bindings,
     );
     let scope_cache = crate::graph::resolver::FlattenedScopeCache::build(&context, diagnostics);
     let references = crate::graph::resolver::resolve_references_detailed(
@@ -1076,7 +1104,7 @@ mod tests {
         register_files(&mut builder, &extractions);
         let file_ids = path_to_file_id(&builder, &extractions);
         let mut diagnostics = Vec::new();
-        resolve_imports(
+        let _bindings = resolve_imports(
             &mut builder,
             &extractions,
             root,
@@ -1118,15 +1146,20 @@ mod tests {
         register_symbols(&mut builder, &extractions, &mut Vec::new());
         let file_ids = path_to_file_id(&builder, &extractions);
         let mut diagnostics = Vec::new();
-        resolve_imports(
+        let bindings = resolve_imports(
             &mut builder,
             &extractions,
             root,
             &file_ids,
             &mut diagnostics,
         );
-        let (scope, _references) =
-            resolve_references(&mut builder, &extractions, &file_ids, &mut diagnostics);
+        let (scope, _references) = resolve_references(
+            &mut builder,
+            &extractions,
+            &file_ids,
+            bindings,
+            &mut diagnostics,
+        );
 
         assert_eq!(scope.iter_scopes().count(), 2);
         let graph = builder.build();
@@ -1135,6 +1168,83 @@ mod tests {
             1,
             "beta references alpha"
         );
+    }
+
+    /// Stage: aliases. A renamed import resolves under its local spelling.
+    ///
+    /// `import { foo as bar }` exposes `foo` as `bar` with one edge and no
+    /// diagnostics. The extractor also emits the statement's path record,
+    /// so the pair keeps file scope alongside the local spelling.
+    #[test]
+    fn alias_stage_resolves_the_local_spelling() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        std::fs::write(
+            root.join("utils.js"),
+            "export function foo() {}\nexport function other() {}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("app.js"),
+            "import { foo as bar } from './utils.js';\nfunction run() { return bar(); }\n",
+        )
+        .unwrap();
+
+        let files = crate::input::discover_files(root, None).unwrap();
+        let extractions = crate::extractor::extract(&files).files;
+
+        let app = extractions
+            .iter()
+            .find(|f| f.path.ends_with("app.js"))
+            .unwrap();
+        let renamed = app
+            .imports
+            .iter()
+            .find(|i| i.symbol.as_deref() == Some("foo"))
+            .unwrap();
+        assert_eq!(renamed.alias.as_deref(), Some("bar"));
+
+        let mut builder = GraphBuilder::new(SnapshotId::new(1).unwrap());
+        register_files(&mut builder, &extractions);
+        let mut diagnostics = Vec::new();
+        register_symbols(&mut builder, &extractions, &mut diagnostics);
+        let file_ids = path_to_file_id(&builder, &extractions);
+        let bindings = resolve_imports(
+            &mut builder,
+            &extractions,
+            root,
+            &file_ids,
+            &mut diagnostics,
+        );
+        assert!(diagnostics.is_empty(), "the alias import resolves");
+        let (scope, references) = resolve_references(
+            &mut builder,
+            &extractions,
+            &file_ids,
+            bindings,
+            &mut diagnostics,
+        );
+        assert!(diagnostics.is_empty(), "bar() resolves: {diagnostics:?}");
+
+        let app_id = file_ids[&app.path];
+        let foo_id = extractions
+            .iter()
+            .find(|f| f.path.ends_with("utils.js"))
+            .unwrap()
+            .symbols
+            .iter()
+            .find(|s| s.name == "foo")
+            .unwrap()
+            .id;
+        let bar = scope.resolve(app_id, "bar").unwrap();
+        assert_eq!(bar.len(), 1);
+        assert_eq!(bar[0].0, foo_id);
+        assert!(scope.resolve(app_id, "foo").is_some());
+        assert!(scope.resolve(app_id, "other").is_some());
+        assert_eq!(references.len(), 1);
+        assert_eq!(references[0].target, foo_id);
+        let graph = builder.build();
+        assert_eq!(graph.edges_of_kind(EdgeKind::Reference).count(), 1);
     }
 
     /// Stage: client calls. Resolution runs after the graph exists, and the

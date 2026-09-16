@@ -44,8 +44,8 @@ pub use graph::{
     edge::{ConfidenceTier, EdgeData, EdgeKind, confidence_tier},
     node::{ExternalNode, FileNode, NodeData, SymbolNode},
     resolver::{
-        FlattenedScopeCache, ResolvedReference, ScopeMap, reference_edges,
-        resolve_references_detailed,
+        FlattenedScopeCache, ImportBinding, ResolvedReference, ScopeMap, import_binding_for,
+        reference_edges, resolve_references_detailed,
     },
     scc::{DeployabilityHint, Scc, SccAnalysis},
 };

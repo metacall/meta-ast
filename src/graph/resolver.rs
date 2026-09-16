@@ -29,12 +29,58 @@ struct Candidate {
     name: String,
 }
 
+/// How one resolved import exposes the target file's names.
+///
+/// Built from the extracted alias, symbol, and star fields at the single
+/// place imports resolve. Bindings refine direct imports only; deeper
+/// levels stay file-level because re-export analysis is out of scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportBinding {
+    /// `from x import *`: every public name is visible.
+    Star,
+    /// `from x import helper`, `import {helper as h}`: one original name
+    /// under one local spelling.
+    Named { original: String, local: String },
+    /// Anything else (plain and namespace imports, side effects): names
+    /// stay file-level, as before. Attribute uses such as `ns.func`
+    /// resolve through the bare name today; suppressing them needs
+    /// base-aware references, which extraction does not produce yet.
+    Unfiltered,
+}
+
+/// Classify one extracted import into its binding.
+///
+/// A star import opens the whole target. A captured symbol names the
+/// original; the alias, when present, renames it locally. Python
+/// from-imports always capture the name, so a missing alias means the
+/// local spelling equals the original. Every other shape keeps the
+/// file-level behavior.
+pub fn import_binding_for(lang: LangId, import: &crate::model::UnresolvedImport) -> ImportBinding {
+    if import.star {
+        return ImportBinding::Star;
+    }
+    match (&import.symbol, &import.alias) {
+        (Some(original), Some(alias)) => ImportBinding::Named {
+            original: original.clone(),
+            local: alias.clone(),
+        },
+        (Some(original), None) if lang == LangId::Python => ImportBinding::Named {
+            original: original.clone(),
+            local: original.clone(),
+        },
+        _ => ImportBinding::Unfiltered,
+    }
+}
+
 /// Bundles the data needed for scope resolution across files.
 pub struct ResolutionContext {
     pub symbol_index: SymbolIndex,
     pub import_adjacency: HashMap<FileId, Vec<FileId>>,
     pub file_languages: HashMap<FileId, LangId>,
     pub file_paths: HashMap<FileId, PathBuf>,
+    /// Resolved direct imports with their bindings, grouped by importer.
+    /// Absent entries behave as `Unfiltered`.
+    pub import_bindings: HashMap<FileId, Vec<(FileId, ImportBinding)>>,
 }
 
 impl ResolutionContext {
@@ -43,6 +89,7 @@ impl ResolutionContext {
         extractions: &[F],
         path_to_file_id: &HashMap<PathBuf, FileId>,
         import_adjacency: HashMap<FileId, Vec<FileId>>,
+        import_bindings: Vec<(FileId, FileId, ImportBinding)>,
     ) -> Self
     where
         F: std::borrow::Borrow<FileExtraction>,
@@ -65,8 +112,23 @@ impl ResolutionContext {
             import_adjacency,
             file_languages,
             file_paths,
+            import_bindings: group_bindings(import_bindings),
         }
     }
+}
+
+/// Group resolved bindings by importer, dropping exact duplicates.
+fn group_bindings(
+    bindings: Vec<(FileId, FileId, ImportBinding)>,
+) -> HashMap<FileId, Vec<(FileId, ImportBinding)>> {
+    let mut grouped: HashMap<FileId, Vec<(FileId, ImportBinding)>> = HashMap::new();
+    for (source, target, binding) in bindings {
+        let entry = grouped.entry(source).or_default();
+        if !entry.iter().any(|(t, b)| *t == target && *b == binding) {
+            entry.push((target, binding));
+        }
+    }
+    grouped
 }
 
 /// Pre-computed visible scope for each file.
@@ -82,7 +144,8 @@ impl FlattenedScopeCache {
     /// Build the scope cache from the file->symbols index and import adjacency.
     ///
     /// For each file, BFS over import edges, collecting public symbols from
-    /// reachable files. Confidence decays with distance:
+    /// reachable files. Direct imports expose names through their binding;
+    /// deeper levels stay file-level. Confidence decays with distance:
     /// - 1.0: own file or direct import, same language
     /// - 0.8: transitive import, same language
     /// - 0.6: cross-language imports
@@ -118,6 +181,18 @@ impl FlattenedScopeCache {
         let mut queue: VecDeque<(FileId, usize)> = VecDeque::new();
 
         queue.push_back((file_id, 0));
+
+        // This file's direct import bindings, grouped by target. An unknown
+        // direct edge behaves as unfiltered.
+        let mut direct: HashMap<FileId, Vec<ImportBinding>> = HashMap::new();
+        if let Some(edges) = ctx.import_bindings.get(&file_id) {
+            for (target, binding) in edges {
+                let entry: &mut Vec<ImportBinding> = direct.entry(*target).or_default();
+                if !entry.contains(binding) {
+                    entry.push(binding.clone());
+                }
+            }
+        }
 
         while let Some((current, distance)) = queue.pop_front() {
             if !visited.insert(current) {
@@ -171,13 +246,15 @@ impl FlattenedScopeCache {
                         3
                     };
 
-                    candidates.push(Candidate {
-                        symbol: *sym_id,
-                        name: name.clone(),
-                        confidence,
-                        rank,
-                        path: ctx.file_paths.get(&current).cloned().unwrap_or_default(),
-                    });
+                    for exposed in exposed_names(distance, name, direct.get(&current)) {
+                        candidates.push(Candidate {
+                            symbol: *sym_id,
+                            name: exposed,
+                            confidence,
+                            rank,
+                            path: ctx.file_paths.get(&current).cloned().unwrap_or_default(),
+                        });
+                    }
                 }
             }
 
@@ -442,6 +519,44 @@ where
     index
 }
 
+/// Names under which one target symbol enters the importer's scope.
+///
+/// A direct pair whose records are all precise (named or star) exposes
+/// exactly its declared names. Any unfiltered record keeps file scope and
+/// each named record additionally exposes its local spelling, so a rename
+/// resolves without narrowing the rest. Deeper levels always keep file
+/// scope: bindings describe direct imports.
+fn exposed_names(
+    distance: usize,
+    name: &str,
+    bindings: Option<&Vec<ImportBinding>>,
+) -> Vec<String> {
+    let direct = bindings.is_some() && distance == 1;
+    let list = bindings.filter(|_| direct);
+    let precise = list.is_some_and(|list| {
+        !list.is_empty()
+            && list
+                .iter()
+                .all(|b| matches!(b, ImportBinding::Star | ImportBinding::Named { .. }))
+    });
+    let open =
+        !precise || list.is_some_and(|list| list.iter().any(|b| matches!(b, ImportBinding::Star)));
+
+    let mut out = Vec::new();
+    if open {
+        out.push(name.to_owned());
+    }
+    if let Some(list) = list {
+        out.extend(list.iter().filter_map(|binding| match binding {
+            ImportBinding::Named { original, local } if original == name && local != name => {
+                Some(local.clone())
+            }
+            _ => None,
+        }));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,6 +647,7 @@ mod tests {
             import_adjacency: HashMap::new(),
             file_languages: HashMap::from([(file_id, LangId::Python)]),
             file_paths: HashMap::from([(file_id, path.clone())]),
+            import_bindings: HashMap::new(),
         };
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
         let extractions = vec![file];
@@ -584,6 +700,7 @@ mod tests {
             import_adjacency: HashMap::new(),
             file_languages: HashMap::from([(FileId::new(1).unwrap(), LangId::Python)]),
             file_paths: HashMap::new(),
+            import_bindings: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
@@ -620,6 +737,7 @@ mod tests {
                 (FileId::new(2).unwrap(), LangId::Python),
             ]),
             file_paths: HashMap::new(),
+            import_bindings: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
@@ -649,6 +767,7 @@ mod tests {
             import_adjacency: HashMap::new(),
             file_languages: HashMap::from([(FileId::new(1).unwrap(), LangId::Python)]),
             file_paths: HashMap::new(),
+            import_bindings: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
@@ -689,6 +808,7 @@ mod tests {
                 (FileId::new(2).unwrap(), LangId::Python),
             ]),
             file_paths: HashMap::new(),
+            import_bindings: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
@@ -722,6 +842,7 @@ mod tests {
                 (FileId::new(2).unwrap(), LangId::Rust),
             ]),
             file_paths: HashMap::new(),
+            import_bindings: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
@@ -902,6 +1023,7 @@ mod tests {
                 (FileId::new(1).unwrap(), PathBuf::from("/proj/main.py")),
                 (FileId::new(2).unwrap(), PathBuf::from("/proj/lib.py")),
             ]),
+            import_bindings: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
@@ -955,6 +1077,7 @@ mod tests {
                 (FileId::new(2).unwrap(), PathBuf::from("/proj/a_util.py")),
                 (FileId::new(3).unwrap(), PathBuf::from("/proj/z_util.py")),
             ]),
+            import_bindings: HashMap::new(),
         };
 
         let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
@@ -968,6 +1091,190 @@ mod tests {
             matches[0].0,
             SymbolId::new(30).unwrap(),
             "candidate order must follow the file path, not the raw symbol id"
+        );
+    }
+
+    fn binding_ctx(
+        bindings: Vec<(FileId, FileId, ImportBinding)>,
+    ) -> (ResolutionContext, FileId, SymbolId) {
+        let app = FileId::new(1).unwrap();
+        let lib = FileId::new(2).unwrap();
+        let foo = SymbolId::new(20).unwrap();
+        let mut symbol_index: SymbolIndex = HashMap::new();
+        symbol_index.insert(app, vec![]);
+        symbol_index.insert(
+            lib,
+            vec![
+                (
+                    foo,
+                    "foo".into(),
+                    LangId::JavaScript,
+                    Some(Visibility::Public),
+                ),
+                (
+                    SymbolId::new(21).unwrap(),
+                    "other".into(),
+                    LangId::JavaScript,
+                    Some(Visibility::Public),
+                ),
+            ],
+        );
+        let mut grouped: HashMap<FileId, Vec<(FileId, ImportBinding)>> = HashMap::new();
+        for (source, target, binding) in bindings {
+            grouped.entry(source).or_default().push((target, binding));
+        }
+        let ctx = ResolutionContext {
+            symbol_index,
+            import_adjacency: HashMap::from([(app, vec![lib])]),
+            file_languages: HashMap::from([(app, LangId::JavaScript), (lib, LangId::JavaScript)]),
+            file_paths: HashMap::from([
+                (app, PathBuf::from("/proj/app.js")),
+                (lib, PathBuf::from("/proj/utils.js")),
+            ]),
+            import_bindings: grouped,
+        };
+        (ctx, app, foo)
+    }
+
+    #[test]
+    fn named_binding_exposes_the_local_spelling_only() {
+        let (ctx, app, foo) = binding_ctx(vec![(
+            FileId::new(1).unwrap(),
+            FileId::new(2).unwrap(),
+            ImportBinding::Named {
+                original: "foo".into(),
+                local: "bar".into(),
+            },
+        )]);
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
+
+        let bar = cache.resolve(app, "bar").unwrap();
+        assert_eq!(bar.len(), 1);
+        assert_eq!(bar[0].0, foo);
+        assert_eq!(bar[0].1, 1.0);
+        assert!(
+            cache.resolve(app, "foo").is_none(),
+            "the original spelling is not in scope under a rename"
+        );
+        assert!(
+            cache.resolve(app, "other").is_none(),
+            "names outside the import stay out of scope"
+        );
+    }
+
+    #[test]
+    fn star_binding_exposes_everything() {
+        let (ctx, app, foo) = binding_ctx(vec![(
+            FileId::new(1).unwrap(),
+            FileId::new(2).unwrap(),
+            ImportBinding::Star,
+        )]);
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
+
+        assert_eq!(cache.resolve(app, "foo").unwrap()[0].0, foo);
+        assert!(
+            cache.resolve(app, "other").is_some(),
+            "a star import opens the whole target"
+        );
+    }
+
+    #[test]
+    fn unfiltered_binding_keeps_file_scope() {
+        let (ctx, app, foo) = binding_ctx(vec![(
+            FileId::new(1).unwrap(),
+            FileId::new(2).unwrap(),
+            ImportBinding::Unfiltered,
+        )]);
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
+
+        assert_eq!(cache.resolve(app, "foo").unwrap()[0].0, foo);
+        assert!(
+            cache.resolve(app, "other").is_some(),
+            "plain imports keep the file-level behavior"
+        );
+    }
+
+    #[test]
+    fn mixed_pair_adds_the_local_spelling_without_narrowing() {
+        let (ctx, app, foo) = binding_ctx(vec![
+            (
+                FileId::new(1).unwrap(),
+                FileId::new(2).unwrap(),
+                ImportBinding::Unfiltered,
+            ),
+            (
+                FileId::new(1).unwrap(),
+                FileId::new(2).unwrap(),
+                ImportBinding::Named {
+                    original: "foo".into(),
+                    local: "bar".into(),
+                },
+            ),
+        ]);
+        let cache = FlattenedScopeCache::build(&ctx, &mut Vec::new());
+
+        let bar = cache.resolve(app, "bar").unwrap();
+        assert_eq!(bar.len(), 1);
+        assert_eq!(bar[0].0, foo);
+        assert!(
+            cache.resolve(app, "foo").is_some(),
+            "the unfiltered record keeps the own spelling"
+        );
+        assert!(
+            cache.resolve(app, "other").is_some(),
+            "the unfiltered record keeps the rest of the file"
+        );
+    }
+
+    #[test]
+    fn import_binding_for_classifies_extraction_shapes() {
+        use crate::model::UnresolvedImport;
+
+        fn import(symbol: Option<&str>, alias: Option<&str>, star: bool) -> UnresolvedImport {
+            UnresolvedImport {
+                import_specifier: "target".into(),
+                alias: alias.map(str::to_owned),
+                symbol: symbol.map(str::to_owned),
+                star,
+                range: crate::model::SourceRange {
+                    byte_start: 0,
+                    byte_end: 6,
+                    start: crate::model::LineColumn { line: 0, column: 0 },
+                    end: crate::model::LineColumn { line: 0, column: 6 },
+                },
+            }
+        }
+
+        assert_eq!(
+            import_binding_for(LangId::Python, &import(None, None, true)),
+            ImportBinding::Star
+        );
+        assert_eq!(
+            import_binding_for(LangId::JavaScript, &import(Some("foo"), Some("bar"), false)),
+            ImportBinding::Named {
+                original: "foo".into(),
+                local: "bar".into()
+            }
+        );
+        assert_eq!(
+            import_binding_for(LangId::Python, &import(Some("helper"), None, false)),
+            ImportBinding::Named {
+                original: "helper".into(),
+                local: "helper".into()
+            }
+        );
+        assert_eq!(
+            import_binding_for(LangId::JavaScript, &import(Some("ns"), None, false)),
+            ImportBinding::Unfiltered,
+            "a bare captured name without alias keeps file scope"
+        );
+        assert_eq!(
+            import_binding_for(LangId::Python, &import(None, None, false)),
+            ImportBinding::Unfiltered
+        );
+        assert_eq!(
+            import_binding_for(LangId::Go, &import(None, Some("alias"), false)),
+            ImportBinding::Unfiltered
         );
     }
 }
