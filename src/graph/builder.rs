@@ -48,8 +48,8 @@ pub struct GraphBuilder {
     /// O(1) dedup index mirroring `CodeGraph::edge_index`.
     edge_index: HashMap<(NodeIndex, NodeIndex, EdgeKind), EdgeIndex>,
 
-    /// Map from external raw path to graph node index
-    external_index: HashMap<String, NodeIndex>,
+    /// Map from external (raw path, language) to graph node index
+    external_index: HashMap<(String, LangId), NodeIndex>,
 
     /// Map from DataNodeId to graph node index
     #[cfg(feature = "dataflow")]
@@ -217,18 +217,20 @@ impl GraphBuilder {
             return;
         }
 
-        // External dependency: create or reuse external node
+        // External dependency: create or reuse the external node for this
+        // specifier and language pair.
         let raw_path = to.to_string_lossy().to_string();
-        let to_idx = if let Some(&idx) = self.external_index.get(&raw_path) {
+        let key = (raw_path.clone(), source_language);
+        let to_idx = if let Some(&idx) = self.external_index.get(&key) {
             idx
         } else {
             let node = ExternalNode {
-                raw_path: raw_path.clone(),
+                raw_path,
                 language: source_language,
                 classification: None,
             };
             let idx = self.graph.add_node(NodeData::External(node));
-            self.external_index.insert(raw_path, idx);
+            self.external_index.insert(key, idx);
             idx
         };
 

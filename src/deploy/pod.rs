@@ -73,7 +73,7 @@ pub fn partition_into_pods(graph: &CodeGraph) -> PodPartition {
     // Build file->language mapping and contiguous index assignment.
     // Sort by path: HashMap iteration order is process-random, and pod
     // construction (and thus deployment IDs) must be stable across runs.
-    let mut file_ids: Vec<FileId> = graph.file_to_index.keys().copied().collect();
+    let mut file_ids: Vec<FileId> = graph.files().map(|(fid, _)| fid).collect();
     file_ids.sort_by_key(|&fid| {
         graph
             .file_node(fid)
@@ -326,19 +326,18 @@ mod tests {
             (a_js, "a.js", LangId::JavaScript),
             (b_py, "b.py", LangId::Python),
         ] {
-            let idx = graph.add_node(NodeData::File(FileNode::new(
+            graph.add_node(NodeData::File(FileNode::new(
                 fid,
                 PathBuf::from(path),
                 lang,
                 SnapshotId::new(1).unwrap(),
             )));
-            graph.file_to_index.insert(fid, idx);
         }
 
         // Cross-language import edge: c.py -> a.js becomes an inter-pod edge.
         graph.add_edge_normalized(
-            graph.file_to_index[&c_py],
-            graph.file_to_index[&a_js],
+            graph.file_node_index(c_py).unwrap(),
+            graph.file_node_index(a_js).unwrap(),
             EdgeKind::Import,
             1.0,
         );
@@ -375,13 +374,12 @@ mod tests {
             (py, "a.py", LangId::Python),
             (js, "b.js", LangId::JavaScript),
         ] {
-            let idx = graph.add_node(NodeData::File(FileNode::new(
+            graph.add_node(NodeData::File(FileNode::new(
                 fid,
                 PathBuf::from(path),
                 lang,
                 SnapshotId::new(1).unwrap(),
             )));
-            graph.file_to_index.insert(fid, idx);
         }
         let sym_py = graph.add_node(NodeData::Symbol(SymbolNode {
             id: SymbolId::new(101).unwrap(),
@@ -400,8 +398,8 @@ mod tests {
             source_range: test_range(),
         }));
         graph.add_edge_normalized(
-            graph.file_to_index[&py],
-            graph.file_to_index[&js],
+            graph.file_node_index(py).unwrap(),
+            graph.file_node_index(js).unwrap(),
             EdgeKind::Import,
             1.0,
         );
@@ -417,13 +415,12 @@ mod tests {
     fn partition_skips_symbols_with_a_missing_file_node() {
         let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
         let real = FileId::new(1).unwrap();
-        let real_idx = graph.add_node(NodeData::File(FileNode::new(
+        graph.add_node(NodeData::File(FileNode::new(
             real,
             PathBuf::from("a.py"),
             LangId::Python,
             SnapshotId::new(1).unwrap(),
         )));
-        graph.file_to_index.insert(real, real_idx);
 
         // A symbol from a file that the partition does not know about.
         let stale_file = FileId::new(99).unwrap();

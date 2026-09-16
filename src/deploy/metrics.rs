@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::deploy::pod::PodPartition;
-use crate::graph::{CodeGraph, NodeData};
+use crate::graph::CodeGraph;
 use crate::model::{FileExtraction, FileId};
 
 /// Per-file deployment metrics, derived from extraction results.
@@ -59,10 +59,8 @@ pub fn compute_pod_metrics(
 ) -> Vec<PodMetrics> {
     // Build a reverse mapping from FileId -> Path using the graph's file nodes.
     let mut fid_to_path: HashMap<FileId, PathBuf> = HashMap::new();
-    for (&fid, &idx) in &graph.file_to_index {
-        if let Some(NodeData::File(f)) = graph.graph().node_weight(idx) {
-            fid_to_path.insert(fid, f.path.clone());
-        }
+    for (fid, file) in graph.files() {
+        fid_to_path.insert(fid, file.path.clone());
     }
 
     let mut pod_metrics = Vec::with_capacity(partition.pods.len());
@@ -111,13 +109,12 @@ mod tests {
         let a = FileId::new(1).unwrap();
         let b = FileId::new(2).unwrap();
         for (fid, path) in [(a, "a.py"), (b, "b.py")] {
-            let idx = graph.add_node(NodeData::File(FileNode::new(
+            graph.add_node(NodeData::File(FileNode::new(
                 fid,
                 PathBuf::from(path),
                 LangId::Python,
                 SnapshotId::new(1).unwrap(),
             )));
-            graph.file_to_index.insert(fid, idx);
         }
 
         let partition = PodPartition {

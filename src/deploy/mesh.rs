@@ -79,15 +79,7 @@ pub fn generate_mesh_annotation(
             match node_data {
                 NodeData::Symbol(sym) => {
                     has_real_node = true;
-                    let file_node =
-                        analysis
-                            .graph
-                            .file_to_index
-                            .get(&sym.file_id)
-                            .and_then(|&f_idx| match &g[f_idx] {
-                                NodeData::File(f) => Some(f),
-                                _ => None,
-                            });
+                    let file_node = analysis.graph.file_node(sym.file_id);
 
                     let lang_tag = file_node
                         .map(|f| crate::deploy::tags::metacall_tag(f.language))
@@ -337,9 +329,7 @@ pub fn generate_mesh_annotation(
 fn get_node_language<'a>(node: &'a NodeData, graph: &'a crate::graph::CodeGraph) -> &'a str {
     match node {
         NodeData::Symbol(s) => {
-            if let Some(&f_idx) = graph.file_to_index.get(&s.file_id)
-                && let NodeData::File(f) = &graph.graph()[f_idx]
-            {
+            if let Some(f) = graph.file_node(s.file_id) {
                 return crate::deploy::tags::metacall_tag(f.language);
             }
             "unknown"
