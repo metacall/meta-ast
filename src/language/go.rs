@@ -21,7 +21,8 @@ fn resolve_go_import(raw: &str, _source_dir: &Path, project_root: &Path) -> Opti
         // A package is a directory. One file cannot represent it.
         return None;
     }
-    Some(dir.join(relative).with_extension("go"))
+    let candidate = dir.join(relative).with_extension("go");
+    candidate.is_file().then_some(candidate)
 }
 
 const GO_IMPORT_QUERY_STR: &str = r#"
