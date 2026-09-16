@@ -279,37 +279,29 @@ fn write_documents(
     pod_manifest: &manifest::PodManifest,
     mesh: &mesh::MeshAnnotation,
 ) -> anyhow::Result<()> {
+    let extension = config.format.extension();
+    let manifest_name = format!("metacall.pods.{extension}");
+    let mesh_name = format!("metacall.mesh.{extension}");
+    let manifest_text = config.format.serialize(pod_manifest)?;
+    let mesh_text = config.format.serialize(mesh)?;
+
     if config.check {
-        let diagnostics = check::check_cut_fairness(pod_manifest, cuts);
-        if diagnostics.is_empty() {
-            println!("Check passed: no fairness issues in cut edges.");
-        } else {
-            println!("Check failed: found {} fairness issues.", diagnostics.len());
-            for diagnostic in &diagnostics {
-                println!("  - {diagnostic}");
-            }
-            anyhow::bail!(
-                "MetaCall deployment cut fairness check failed with {} issues",
-                diagnostics.len()
-            );
-        }
-        return Ok(());
+        return check_documents(
+            config,
+            cuts,
+            pod_manifest,
+            &manifest_name,
+            &manifest_text,
+            &mesh_name,
+            &mesh_text,
+        );
     }
 
     std::fs::create_dir_all(&config.out)?;
 
-    let extension = config.format.extension();
-    let manifest_text = config.format.serialize(pod_manifest)?;
-    crate::output::write_atomic(
-        &config.out.join(format!("metacall.pods.{extension}")),
-        manifest_text.as_bytes(),
-    )?;
+    crate::output::write_atomic(&config.out.join(&manifest_name), manifest_text.as_bytes())?;
 
-    let mesh_text = config.format.serialize(mesh)?;
-    crate::output::write_atomic(
-        &config.out.join(format!("metacall.mesh.{extension}")),
-        mesh_text.as_bytes(),
-    )?;
+    crate::output::write_atomic(&config.out.join(&mesh_name), mesh_text.as_bytes())?;
 
     tracing::info!(
         "Generated pod manifest with {} deployments and {} inter-pod edges.",
@@ -317,6 +309,44 @@ fn write_documents(
         partition.inter_pod_edges.len()
     );
 
+    Ok(())
+}
+
+/// Check committed manifests without writing.
+///
+/// Cut fairness always applies. When a committed document exists beside the
+/// output directory, its bytes must match the freshly generated ones; a
+/// missing document skips the diff, so a fresh tree still checks clean.
+fn check_documents(
+    config: &DeployConfig,
+    cuts: &[cut::CutEdge],
+    pod_manifest: &manifest::PodManifest,
+    manifest_name: &str,
+    manifest_text: &str,
+    mesh_name: &str,
+    mesh_text: &str,
+) -> anyhow::Result<()> {
+    let mut issues = check::check_cut_fairness(pod_manifest, cuts);
+    for (name, text) in [(manifest_name, manifest_text), (mesh_name, mesh_text)] {
+        match std::fs::read_to_string(config.out.join(name)) {
+            Ok(existing) if existing == text => {}
+            Ok(_) => issues.push(format!("{name} differs from the committed manifest")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => issues.push(format!("cannot read committed {name}: {error}")),
+        }
+    }
+    if issues.is_empty() {
+        println!("Check passed: no fairness issues in cut edges.");
+    } else {
+        println!("Check failed: found {} fairness issues.", issues.len());
+        for diagnostic in &issues {
+            println!("  - {diagnostic}");
+        }
+        anyhow::bail!(
+            "MetaCall deployment check failed with {} issues",
+            issues.len()
+        );
+    }
     Ok(())
 }
 
@@ -343,7 +373,12 @@ pub fn run_deploy(config: DeployConfig) -> anyhow::Result<Vec<Diagnostic>> {
 
     diagnostics.extend(orphaned_config_diagnostics(&config.root, &call_sites));
     diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
-    diagnostics.dedup_by(|a, b| a.path == b.path && a.message == b.message);
+    diagnostics.dedup_by(|a, b| {
+        a.path == b.path
+            && a.message == b.message
+            && a.source_range == b.source_range
+            && a.severity == b.severity
+    });
 
     let partition = partition_graph(&analysis);
     let cuts = detect_cuts(&analysis, &partition, &config, &mut diagnostics);

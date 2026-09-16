@@ -385,4 +385,85 @@ metacall_load_from_file('py', ['other.py'])
             "both escapes are reported: {diagnostics:?}"
         );
     }
+
+    #[test]
+    fn test_stale_manifest_fails_check() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        fs::write(root.join("main.py"), "def main(): pass\n").unwrap();
+
+        let out_dir = tempdir().unwrap();
+        let plain = DeployConfig {
+            root: root.to_path_buf(),
+            out: out_dir.path().to_path_buf(),
+            format: OutputFormat::Json,
+            check: false,
+            max_pod_size: 20,
+        };
+        run_deploy(plain).expect("Deploy failed");
+
+        let manifest = out_dir.path().join("metacall.pods.json");
+        fs::write(&manifest, "stale").unwrap();
+
+        let (_check_dir, check) = setup_config(root);
+        let check = DeployConfig {
+            out: out_dir.path().to_path_buf(),
+            check: true,
+            ..check
+        };
+        let error = run_deploy(check).unwrap_err().to_string();
+        assert!(
+            error.contains("deployment check failed") && !error.contains("fairness"),
+            "a stale manifest must fail the diff, not fairness: {error}"
+        );
+    }
+
+    #[test]
+    fn test_fresh_manifests_pass_check() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        fs::write(root.join("main.py"), "def main(): pass\n").unwrap();
+
+        let out_dir = tempdir().unwrap();
+        let plain = DeployConfig {
+            root: root.to_path_buf(),
+            out: out_dir.path().to_path_buf(),
+            format: OutputFormat::Json,
+            check: false,
+            max_pod_size: 20,
+        };
+        run_deploy(plain).expect("Deploy failed");
+
+        let (_check_dir, check) = setup_config(root);
+        let check = DeployConfig {
+            out: out_dir.path().to_path_buf(),
+            check: true,
+            ..check
+        };
+        run_deploy(check).expect("current manifests must pass check");
+    }
+
+    #[test]
+    fn test_identical_imports_at_distinct_ranges_both_report() {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        fs::write(
+            root.join("a.py"),
+            "from . import missing\nfrom . import missing\n",
+        )
+        .unwrap();
+
+        let (_out_dir, config) = setup_config(root);
+        let diagnostics = run_deploy(config).expect("Deploy failed");
+
+        let unresolved: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.message.contains("unresolved relative import"))
+            .collect();
+        assert_eq!(
+            unresolved.len(),
+            2,
+            "each use site reports: {diagnostics:?}"
+        );
+    }
 }
