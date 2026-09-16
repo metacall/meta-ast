@@ -120,8 +120,10 @@ pub fn reanalyze_extractions(
         .collect();
 
     let mut targets: BTreeMap<PathBuf, LangId> = files.into_iter().collect();
+    // An active overlay overrides the disk language: extraction parses the
+    // buffer text with the buffer language, so the target must agree.
     for (path, overlay) in &overlay_by_path {
-        targets.entry(path.clone()).or_insert(overlay.lang);
+        targets.insert(path.clone(), overlay.lang);
     }
 
     let (current_fingerprints, read_diagnostics): (HashMap<PathBuf, Fingerprint>, Vec<Diagnostic>) =
@@ -178,8 +180,15 @@ pub fn reanalyze_extractions(
             }
             continue;
         };
+        // The fingerprint alone cannot prove reuse: identical bytes under a
+        // different language extract differently, so the cached language
+        // must match the target language too.
+        let cached_lang_matches = state
+            .cache
+            .get(path)
+            .is_some_and(|extraction| extraction.lang == *lang);
         let changed = match state.cache.fingerprint_of(path) {
-            Some(cached) if cached == *curr_fp => {
+            Some(cached) if cached == *curr_fp && cached_lang_matches => {
                 change_set.files_unchanged += 1;
                 false
             }
@@ -272,6 +281,9 @@ pub fn reanalyze_extractions(
         };
         if state.cache.fingerprint_of(path) == Some(*fp)
             && let Some(extraction) = state.cache.get(path)
+            && targets
+                .get(path)
+                .is_some_and(|lang| *lang == extraction.lang)
         {
             merged.push(Arc::clone(extraction));
         }
@@ -861,6 +873,32 @@ mod tests {
             .filter(|d| d.severity == Severity::Error)
             .collect();
         assert_eq!(errors.len(), 1, "one failure, one diagnostic: {diags:?}");
+    }
+
+    #[test]
+    fn overlay_language_change_forces_reextract() {
+        let root = temp_dir("overlay_lang");
+        write_file(&root, "a.py", "def shared(): pass\n");
+        let mut state = WatchState::new();
+
+        // Identical bytes, different buffer language: the overlay wins.
+        let mut ts = overlay(&root, "a.py", "def shared(): pass\n");
+        ts.lang = LangId::TypeScript;
+        let (extractions, cs, _) =
+            reanalyze_extractions(&root, None, &[ts.clone()], &mut state).unwrap();
+        assert_eq!(cs.files_added, 1);
+        assert_eq!(extractions[0].lang, LangId::TypeScript);
+
+        let (extractions2, cs2, _) = reanalyze_extractions(&root, None, &[ts], &mut state).unwrap();
+        assert_eq!(cs2.files_unchanged, 1);
+        assert_eq!(extractions2[0].lang, LangId::TypeScript);
+
+        // Overlay gone: the disk language differs from the cached entry.
+        let (extractions3, cs3, _) = reanalyze_extractions(&root, None, &[], &mut state).unwrap();
+        assert_eq!(cs3.files_modified, 1);
+        assert_eq!(cs3.files_unchanged, 0);
+        assert_eq!(extractions3.len(), 1, "no stale duplicate survives");
+        assert_eq!(extractions3[0].lang, LangId::Python);
     }
 
     #[test]
