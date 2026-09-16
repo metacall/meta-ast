@@ -51,11 +51,34 @@ pub fn portable_path(path: &Path) -> String {
     }
 }
 
+/// Discovered source files with the walk diagnostics collected alongside.
+///
+/// A file the walk cannot read is skipped with one Warning per path, so a
+/// partial scan never looks complete.
+pub type DiscoveryOutput = (
+    Vec<(std::path::PathBuf, LangId)>,
+    Vec<crate::error::Diagnostic>,
+);
+
 pub fn discover_files(
     root: &Path,
     languages: Option<&[LangId]>,
 ) -> Result<Vec<(std::path::PathBuf, LangId)>, std::io::Error> {
+    discover_files_with_diagnostics(root, languages).map(|(files, _)| files)
+}
+
+/// Walk a directory tree like [`discover_files`], keeping walk errors.
+///
+/// A file the walk cannot read is skipped, and one Warning per skipped path
+/// travels with the result, so a partial scan never looks complete.
+/// Callers that report diagnostics take this variant; `discover_files` is
+/// the best-effort listing for callers that cannot.
+pub fn discover_files_with_diagnostics(
+    root: &Path,
+    languages: Option<&[LangId]>,
+) -> Result<DiscoveryOutput, std::io::Error> {
     let mut results = Vec::new();
+    let mut diagnostics = Vec::new();
 
     if root.is_file() {
         if let Some(lang_id) = detect_language(root)
@@ -65,7 +88,7 @@ pub fn discover_files(
             // branch must hand out the same key form.
             results.push((simplified_path(root), lang_id));
         }
-        return Ok(results);
+        return Ok((results, diagnostics));
     }
 
     if !root.exists() {
@@ -75,10 +98,25 @@ pub fn discover_files(
         ));
     }
 
-    for entry in ignore::WalkBuilder::new(root)
-        .build()
-        .filter_map(|e| e.ok())
-    {
+    for entry in ignore::WalkBuilder::new(root).build() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                // WithPath carries the unreadable path; anything else
+                // belongs to the walk root itself.
+                let path = match &error {
+                    ignore::Error::WithPath { path, .. } => simplified_path(path),
+                    _ => root.to_path_buf(),
+                };
+                diagnostics.push(crate::error::Diagnostic {
+                    path,
+                    severity: crate::error::Severity::Warning,
+                    message: format!("skipped during discovery: {error}"),
+                    source_range: None,
+                });
+                continue;
+            }
+        };
         // Strip the verbatim `\\?\` prefix on Windows so downstream std::fs
         // reads and tree-sitter paths resolve consistently.
         let path = simplified_path(&entry.into_path());
@@ -95,7 +133,8 @@ pub fn discover_files(
     }
 
     results.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(results)
+    diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+    Ok((results, diagnostics))
 }
 
 #[cfg(test)]
@@ -311,5 +350,54 @@ mod tests {
             detect_language(&PathBuf::from("foo.hpp")),
             Some(LangId::Cpp)
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_directory_reports_a_warning() {
+        let root = std::env::temp_dir().join("meta_ast_discovery_unreadable");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.py"), "def a(): pass\n").unwrap();
+        let sub = root.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("b.py"), "def b(): pass\n").unwrap();
+
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&sub).unwrap().permissions();
+        perms.set_mode(0o000);
+        std::fs::set_permissions(&sub, perms).unwrap();
+
+        // Root reads through permissions: nothing to provoke here.
+        if std::fs::read_dir(&sub).is_ok() {
+            let mut perms = std::fs::metadata(&sub).unwrap().permissions();
+            perms.set_mode(0o755);
+            let _ = std::fs::set_permissions(&sub, perms);
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+
+        let (files, diagnostics) = discover_files_with_diagnostics(&root, None).unwrap();
+
+        let mut perms = std::fs::metadata(&sub).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&sub, perms).unwrap();
+
+        assert!(
+            files.iter().any(|(path, _)| path.ends_with("a.py")),
+            "the readable file is still listed"
+        );
+        assert!(
+            files.iter().all(|(path, _)| !path.ends_with("b.py")),
+            "the unreadable file is skipped"
+        );
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "one skip, one warning: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, crate::error::Severity::Warning);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

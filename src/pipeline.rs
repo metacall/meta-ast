@@ -65,13 +65,15 @@ pub fn analyze_graph(
     snapshot_id: SnapshotId,
     languages: Option<&[LangId]>,
 ) -> anyhow::Result<(GraphAnalysis, Vec<Diagnostic>)> {
-    let files = input::discover_files(root, languages)?;
+    let (files, mut discovery_diagnostics) =
+        input::discover_files_with_diagnostics(root, languages)?;
     let extraction = crate::extractor::extract(&files);
     let mut diagnostics: Vec<Diagnostic> = extraction
         .files
         .iter()
         .flat_map(|f| f.diagnostics.iter().cloned())
         .collect();
+    diagnostics.append(&mut discovery_diagnostics);
 
     let arc_extractions: Vec<_> = extraction.files.into_iter().map(Arc::new).collect();
 

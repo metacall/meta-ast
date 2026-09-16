@@ -109,7 +109,7 @@ pub fn reanalyze_extractions(
     overlays: &[Overlay],
     state: &mut WatchState,
 ) -> Result<ReanalysisOutput, crate::Error> {
-    let files = input::discover_files(root, languages)?;
+    let (files, discovery_diagnostics) = input::discover_files_with_diagnostics(root, languages)?;
 
     // Key every overlay by the same path form the walk produces, so one file
     // never enters the target set under two keys.
@@ -126,39 +126,48 @@ pub fn reanalyze_extractions(
         targets.insert(path.clone(), overlay.lang);
     }
 
-    let (current_fingerprints, read_diagnostics): (HashMap<PathBuf, Fingerprint>, Vec<Diagnostic>) =
-        targets
-            .par_iter()
-            .fold(
-                || (HashMap::new(), Vec::new()),
-                |(mut map, mut diags), (path, _)| {
-                    match overlay_by_path.get(path) {
-                        Some(overlay) => {
-                            map.insert(path.clone(), Fingerprint::of(overlay.text.as_bytes()));
-                        }
-                        None => match std::fs::read(path) {
-                            Ok(bytes) => {
-                                map.insert(path.clone(), Fingerprint::of(&bytes));
-                            }
-                            Err(err) => diags.push(Diagnostic {
-                                path: path.clone(),
-                                severity: Severity::Error,
-                                message: format!("Failed to read file: {err}"),
-                                source_range: None,
-                            }),
-                        },
+    let (current_fingerprints, read_diagnostics, oversized): (
+        HashMap<PathBuf, Fingerprint>,
+        Vec<Diagnostic>,
+        HashSet<PathBuf>,
+    ) = targets
+        .par_iter()
+        .fold(
+            || (HashMap::new(), Vec::new(), HashSet::new()),
+            |(mut map, mut diags, mut oversized), (path, _)| {
+                match overlay_by_path.get(path) {
+                    Some(overlay) => {
+                        map.insert(path.clone(), Fingerprint::of(overlay.text.as_bytes()));
                     }
-                    (map, diags)
-                },
-            )
-            .reduce(
-                || (HashMap::new(), Vec::new()),
-                |(mut m1, mut d1), (m2, d2)| {
-                    m1.extend(m2);
-                    d1.extend(d2);
-                    (m1, d1)
-                },
-            );
+                    None => match extractor::read_source_bytes(path) {
+                        Ok(bytes) => {
+                            map.insert(path.clone(), Fingerprint::of(&bytes));
+                        }
+                        // Oversized files carry no hash and no diagnostic
+                        // here: extraction reports the single canonical one.
+                        Err(extractor::SourceReadError::TooLarge) => {
+                            oversized.insert(path.clone());
+                        }
+                        Err(extractor::SourceReadError::Io(err)) => diags.push(Diagnostic {
+                            path: path.clone(),
+                            severity: Severity::Error,
+                            message: format!("Failed to read file: {err}"),
+                            source_range: None,
+                        }),
+                    },
+                }
+                (map, diags, oversized)
+            },
+        )
+        .reduce(
+            || (HashMap::new(), Vec::new(), HashSet::new()),
+            |(mut m1, mut d1, mut o1), (m2, d2, o2)| {
+                m1.extend(m2);
+                d1.extend(d2);
+                o1.extend(o2);
+                (m1, d1, o1)
+            },
+        );
 
     let mut change_set = ChangeSet::default();
     let mut changed_disk: Vec<(PathBuf, LangId)> = Vec::new();
@@ -172,6 +181,19 @@ pub fn reanalyze_extractions(
         .collect();
 
     for (path, lang) in &targets {
+        // Oversized files skip hashing; extraction reports them once.
+        if oversized.contains(path) {
+            if state.cache.fingerprint_of(path).is_some() {
+                change_set.files_modified += 1;
+            } else {
+                change_set.files_added += 1;
+            }
+            match overlay_by_path.get(path) {
+                Some(overlay) => changed_overlays.push((path.clone(), overlay)),
+                None => changed_disk.push((path.clone(), *lang)),
+            }
+            continue;
+        }
         let Some(curr_fp) = current_fingerprints.get(path) else {
             // A first-tick read failure has no cached entry to keep: the
             // diagnostic reports it, and no counter claims otherwise.
@@ -213,7 +235,11 @@ pub fn reanalyze_extractions(
     let stale: Vec<PathBuf> = state
         .cache
         .paths()
-        .filter(|path| !current_fingerprints.contains_key(*path) && !failed_reads.contains(*path))
+        .filter(|path| {
+            !current_fingerprints.contains_key(*path)
+                && !oversized.contains(*path)
+                && !failed_reads.contains(*path)
+        })
         .cloned()
         .collect();
     if !stale.is_empty() {
@@ -314,6 +340,7 @@ pub fn reanalyze_extractions(
         .flat_map(|file| file.diagnostics.iter().cloned())
         .collect();
     let mut read_diagnostics = read_diagnostics;
+    read_diagnostics.extend(discovery_diagnostics);
     read_diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
     diagnostics.extend(read_diagnostics);
     diagnostics.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
@@ -820,6 +847,42 @@ mod tests {
             "the cached hash must describe the extracted bytes"
         );
         assert!(symbol_names(&analysis.extractions).contains(&"two".to_string()));
+    }
+
+    #[test]
+    fn oversized_file_reports_once_and_never_counts_as_removed() {
+        use std::io::Write;
+
+        let root = temp_dir("oversized_tick");
+        let path = root.join("huge.py");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let line = b"# filler line\n";
+        let cap = crate::extractor::MAX_SOURCE_BYTES as usize;
+        let mut written = 0usize;
+        while written <= cap {
+            file.write_all(line).unwrap();
+            written += line.len();
+        }
+        drop(file);
+
+        let mut state = WatchState::new();
+        let (_, cs, diags) = incremental_reanalyze(&root, None, &mut state).unwrap();
+        assert_eq!(cs.files_added, 1);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "one skip, one diagnostic: {diags:?}");
+
+        let (_, cs2, diags2) = incremental_reanalyze(&root, None, &mut state).unwrap();
+        assert_eq!(cs2.files_removed, 0);
+        assert_eq!(cs2.files_modified, 0);
+        assert_eq!(cs2.files_added, 1, "nothing was cached, so it retries");
+        let errors2: Vec<_> = diags2
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors2.len(), 1, "still exactly one diagnostic: {diags2:?}");
     }
 
     #[cfg(unix)]
