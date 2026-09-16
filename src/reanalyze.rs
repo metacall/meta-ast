@@ -230,11 +230,13 @@ pub fn reanalyze_extractions(
         keep_text: false,
     };
 
-    let mut new_extractions: Vec<FileExtraction> = if changed_disk.is_empty() {
-        Vec::new()
-    } else {
-        extractor::extract_with_id_gen(&changed_disk, &options, &id_generators).files
-    };
+    let mut new_extractions: Vec<FileExtraction> = Vec::new();
+    let mut extracted_fingerprints: HashMap<PathBuf, Fingerprint> = HashMap::new();
+    if !changed_disk.is_empty() {
+        let outcome = extractor::extract_with_id_gen(&changed_disk, &options, &id_generators);
+        new_extractions = outcome.files;
+        extracted_fingerprints = outcome.source_fingerprints;
+    }
 
     let mut overlay_diagnostics: Vec<Diagnostic> = Vec::new();
     for (path, overlay) in &changed_overlays {
@@ -279,8 +281,20 @@ pub fn reanalyze_extractions(
     }
     for extraction in new_extractions {
         let arc = Arc::new(extraction);
-        if let Some(fp) = current_fingerprints.get(&arc.path) {
-            state.cache.update(arc.path.clone(), *fp, Arc::clone(&arc));
+        // Disk extractions carry the hash of the bytes they were built
+        // from, never the hash of an earlier read: a file that changed
+        // between the fingerprint pass and extraction re-extracts next tick
+        // instead of pinning a stale hash to new symbols. A disk file with
+        // no backing bytes leaves any older entry alone. Overlay text is
+        // immutable in memory, so the fingerprint pass hashed the exact
+        // bytes extraction consumed and that hash still applies.
+        let fp = if overlay_by_path.contains_key(&arc.path) {
+            current_fingerprints.get(&arc.path).copied()
+        } else {
+            extracted_fingerprints.get(&arc.path).copied()
+        };
+        if let Some(fp) = fp {
+            state.cache.update(arc.path.clone(), fp, Arc::clone(&arc));
         }
         merged.push(arc);
     }
@@ -778,6 +792,26 @@ mod tests {
         let (_, cs2, _) = reanalyze_extractions(&root, None, &[verbatim], &mut state).unwrap();
         assert_eq!(cs2.files_unchanged, 1);
         assert_eq!(cs2.files_added + cs2.files_modified, 0);
+    }
+
+    #[test]
+    fn cache_fingerprint_matches_extracted_bytes_after_change() {
+        let root = temp_dir("fp_match");
+        let a = write_file(&root, "a.py", "def one(): pass\n");
+        let mut state = WatchState::new();
+        let _ = incremental_reanalyze(&root, None, &mut state).unwrap();
+
+        std::fs::write(&a, "def two(): pass\n").unwrap();
+        let (analysis, cs, _) = incremental_reanalyze(&root, None, &mut state).unwrap();
+        assert_eq!(cs.files_modified, 1);
+
+        let disk = std::fs::read(&a).unwrap();
+        assert_eq!(
+            state.cache.fingerprint_of(&a),
+            Some(Fingerprint::of(&disk)),
+            "the cached hash must describe the extracted bytes"
+        );
+        assert!(symbol_names(&analysis.extractions).contains(&"two".to_string()));
     }
 
     #[test]

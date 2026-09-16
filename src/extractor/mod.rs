@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
+use crate::cache::Fingerprint;
 use crate::error::{Diagnostic, Severity};
 use crate::language::LangId;
 use crate::model::{IdGenerator, Symbol, SymbolId};
@@ -48,6 +49,11 @@ pub struct ExtractOptions {
 
 pub struct ExtractionResult {
     pub files: Vec<FileExtraction>,
+    /// Fingerprint of the source bytes each file was extracted from.
+    ///
+    /// Absent when the file could not be read: the extraction is a failure
+    /// record with no backing bytes, so no hash describes it.
+    pub source_fingerprints: HashMap<PathBuf, Fingerprint>,
 }
 
 /// ID allocation state shared by disk and in-memory extraction.
@@ -125,13 +131,23 @@ pub fn extract_with_id_gen(
 ) -> ExtractionResult {
     // Phase one parses in parallel with file-local numbering, so no atomic
     // ordering reaches the output. Phase two numbers the files in path order.
-    let mut file_extractions: Vec<FileExtraction> = files
+    let parsed: Vec<(FileExtraction, Option<Fingerprint>)> = files
         .par_iter()
         .map(|(path, lang)| {
             let local = ExtractionIdGenerators::new();
             extract_single_file(path, lang, &local, opts)
         })
         .collect();
+
+    let mut file_extractions: Vec<FileExtraction> = Vec::with_capacity(parsed.len());
+    let mut source_fingerprints: HashMap<PathBuf, Fingerprint> =
+        HashMap::with_capacity(parsed.len());
+    for (extraction, fingerprint) in parsed {
+        if let Some(fingerprint) = fingerprint {
+            source_fingerprints.insert(extraction.path.clone(), fingerprint);
+        }
+        file_extractions.push(extraction);
+    }
 
     file_extractions.sort_by(|a, b| a.path.cmp(&b.path));
 
@@ -141,6 +157,7 @@ pub fn extract_with_id_gen(
 
     ExtractionResult {
         files: file_extractions,
+        source_fingerprints,
     }
 }
 
@@ -222,32 +239,45 @@ fn extract_single_file(
     lang: &LangId,
     id_generators: &ExtractionIdGenerators,
     opts: &ExtractOptions,
-) -> FileExtraction {
+) -> (FileExtraction, Option<Fingerprint>) {
     match std::fs::metadata(path) {
         Ok(metadata) if metadata.len() > MAX_SOURCE_BYTES => {
-            return failed_extraction(
-                path,
-                *lang,
-                format!(
-                    "file is {} bytes, over the {MAX_SOURCE_BYTES} byte limit for a single source",
-                    metadata.len()
+            return (
+                failed_extraction(
+                    path,
+                    *lang,
+                    format!(
+                        "file is {} bytes, over the {MAX_SOURCE_BYTES} byte limit for a single source",
+                        metadata.len()
+                    ),
                 ),
+                None,
             );
         }
         Ok(_) => {}
         Err(error) => {
-            return failed_extraction(path, *lang, format!("failed to read file: {error}"));
+            return (
+                failed_extraction(path, *lang, format!("failed to read file: {error}")),
+                None,
+            );
         }
     }
 
     let source = match std::fs::read(path) {
         Ok(source) => source,
         Err(error) => {
-            return failed_extraction(path, *lang, format!("failed to read file: {error}"));
+            return (
+                failed_extraction(path, *lang, format!("failed to read file: {error}")),
+                None,
+            );
         }
     };
 
-    extract_source(path, *lang, &source, id_generators, opts)
+    let fingerprint = Fingerprint::of(&source);
+    (
+        extract_source(path, *lang, &source, id_generators, opts),
+        Some(fingerprint),
+    )
 }
 
 /// Extract an open editor buffer without reading its backing file.
@@ -680,6 +710,30 @@ mod tests {
                 crate::model::DataNodeId::new(300).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn source_fingerprint_describes_extracted_bytes() {
+        let path = write_temp("fingerprinted.py", b"def fp(): pass\n");
+        let bytes = std::fs::read(&path).unwrap();
+        let result = extract(&[(path.clone(), LangId::Python)]);
+        assert_eq!(
+            result.source_fingerprints.get(&path).copied(),
+            Some(crate::cache::Fingerprint::of(&bytes)),
+            "the cached hash must describe the extracted bytes"
+        );
+    }
+
+    #[test]
+    fn missing_file_has_no_source_fingerprint() {
+        let path = test_dir().join("nonexistent_fp.py");
+        let _ = std::fs::remove_file(&path);
+        let result = extract(&[(path.clone(), LangId::Python)]);
+        assert!(!result.files[0].diagnostics.is_empty());
+        assert!(
+            !result.source_fingerprints.contains_key(&path),
+            "a failure record has no backing bytes to hash"
+        );
     }
 
     #[test]
