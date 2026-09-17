@@ -1,12 +1,11 @@
 //! The Go package import contract.
 //!
 //! A Go import names a package, which is a directory. The graph model has file
-//! targets and string targets only, so today a package import lands in one of
-//! two shapes: an external node named after the package path, or an external
-//! node named after a file path that the resolver built from the package
-//! directory. These tests pin both shapes so a change to the resolution rule is
-//! a deliberate change, and they pin the invariants that must hold either way:
-//! no file node without a file on disk, and no absolute path in a target name.
+//! targets and string targets only. A package path resolves to a file only
+//! when that file exists on disk; otherwise the import becomes an external
+//! node named after the package path itself. These tests pin that rule and
+//! the invariants that must hold either way: no file node without a file on
+//! disk, and no absolute path in a target name.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -96,28 +95,18 @@ fn module_root_import_becomes_a_package_named_external_node() {
 }
 
 #[test]
-fn subpackage_import_names_a_file_that_does_not_exist() {
+fn subpackage_import_without_its_file_becomes_a_specifier_named_external_node() {
     let root = go_module("subpackage");
     let graph = analyze(&root);
 
-    let fabricated = external_names(&graph)
-        .into_iter()
-        .find(|name| portable_path(Path::new(name)).ends_with("internal/util.go"));
-    let fabricated = fabricated.unwrap_or_else(|| {
-        panic!("a package import must not become an external node without the package path")
-    });
-
+    let names = external_names(&graph);
     assert!(
-        Path::new(&fabricated).is_absolute(),
-        "the resolver derives the target from the module directory: {fabricated}"
+        names.contains("myproject/internal/util"),
+        "a package path without its file keeps the specifier as its name: {names:?}"
     );
     assert!(
-        !Path::new(&fabricated).exists(),
-        "the package directory has no file with that name, so the target names a file that does not exist"
-    );
-    assert!(
-        portable_path(Path::new(&fabricated)).ends_with("internal/util.go"),
-        "the fabricated target keeps the package directory and adds the language extension: {fabricated}"
+        names.iter().all(|name| !Path::new(name).is_absolute()),
+        "no external node names a phantom absolute file path: {names:?}"
     );
 }
 
@@ -128,7 +117,7 @@ fn a_package_import_reaches_no_member_file() {
 
     assert!(
         !import_edge_exists(&graph, "main.go", "internal/util/helper.go"),
-        "today the import stops at the fabricated target, so the member file stays unconnected"
+        "the import stops at the specifier-named external node, so the member file stays unconnected"
     );
 }
 

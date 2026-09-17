@@ -30,6 +30,20 @@ pub(crate) fn strip_c_family_quotes(raw: &str) -> &str {
     raw.trim_matches(|c| c == '<' || c == '>' || c == '"' || c == '\'')
 }
 
+/// Join an extension onto a base path without replacing a dotted basename.
+///
+/// `Path::with_extension` replaces text after the last dot, so probing
+/// `./util.test` for `.js` would try `util.js` and never `util.test.js`.
+/// Appending keeps `util.test.js` reachable.
+pub(crate) fn append_extension(base: &Path, ext: &str) -> PathBuf {
+    if ext.is_empty() {
+        return base.to_path_buf();
+    }
+    let mut owned = base.as_os_str().to_owned();
+    owned.push(ext);
+    PathBuf::from(owned)
+}
+
 /// Probe `base.join(raw)` with each extension in order.
 pub(crate) fn probe_relative(
     raw: &str,
@@ -45,11 +59,7 @@ pub(crate) fn probe_relative(
     };
     let path = base.join(raw);
     for ext in extensions {
-        let candidate = if ext.is_empty() {
-            path.clone()
-        } else {
-            path.with_extension(ext.trim_start_matches('.'))
-        };
+        let candidate = append_extension(&path, ext);
         if is_file(&candidate) {
             return Some(candidate);
         }
@@ -219,10 +229,9 @@ impl ImportResolver for PythonResolver {
         };
 
         if let Some((init_path, _)) = python_candidate_paths(raw, source_dir, project_root) {
-            let stripped = strip_import_quotes(raw);
-            if stripped.trim_start_matches('.').is_empty() && stripped.starts_with('.') {
-                return Some(init_path);
-            }
+            // A dots-only import names the package itself; like any other
+            // candidate it resolves only when the file exists, so a missing
+            // `__init__.py` reports a miss instead of a phantom path.
             if check_exists(&init_path) {
                 return Some(init_path);
             }
@@ -300,7 +309,12 @@ impl ImportResolver for GoModResolver {
                 // A package is a directory. One file cannot represent it.
                 return None;
             }
-            return Some(dir.join(relative).with_extension("go"));
+            // Never fabricate the target: a package path without its file
+            // is a miss, not an external node named by a phantom path.
+            let candidate = dir.join(relative).with_extension("go");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
 
         (self.f)(raw, source_dir, project_root)
@@ -381,17 +395,16 @@ impl ImportResolver for NodeResolver {
         };
 
         for ext in self.extensions {
-            let candidate = if ext.is_empty() {
-                path.clone()
-            } else {
-                path.with_extension(ext.trim_start_matches('.'))
-            };
+            let candidate = append_extension(&path, ext);
             if check_is_file(&candidate) {
                 return Some(candidate);
             }
         }
 
-        (self.f)(raw, source_dir, project_root)
+        // A relative miss is a miss: fabricating the joined path would turn
+        // a missing file into an external node instead of the warning the
+        // builder emits for unresolved relative imports.
+        None
     }
 
     fn clear_cache(&self) {
@@ -504,7 +517,8 @@ mod tests {
         let ts = NodeResolver::new(fallback, TS_EXTS);
         assert_eq!(
             ts.resolve("./mod", &temp, &temp),
-            Some(PathBuf::from("./mod"))
+            None,
+            "a relative miss is a miss even when the fallback would fabricate it"
         );
 
         let _ = std::fs::remove_dir_all(&temp);
@@ -602,6 +616,7 @@ mod tests {
     fn go_module_import_of_a_subpackage_resolves() {
         let root = scratch("go_subpackage");
         std::fs::write(root.join("go.mod"), "module myproject\n").unwrap();
+        touch(&root.join("internal/util.go"));
 
         let out = resolved(
             crate::language::LangId::Go,
@@ -686,6 +701,8 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let go_mod_path = temp_dir.join("go.mod");
         std::fs::write(&go_mod_path, "module myproject\n").unwrap();
+        std::fs::write(temp_dir.join("sub.go"), "").unwrap();
+        std::fs::write(temp_dir.join("other.go"), "").unwrap();
 
         let resolver = make_resolver(crate::language::LangId::Go);
 
@@ -788,6 +805,7 @@ mod tests {
         // 2. Go resolver cache invalidation
         let go_mod_path = temp_dir.join("go.mod");
         std::fs::write(&go_mod_path, "module oldmod\n").unwrap();
+        touch(&temp_dir.join("sub.go"));
         let go_resolver = make_resolver(crate::language::LangId::Go);
         assert_eq!(
             go_resolver.resolve("oldmod/sub", &temp_dir, &temp_dir),
@@ -828,7 +846,8 @@ mod tests {
         ts_resolver.clear_cache();
         assert_eq!(
             ts_resolver.resolve("./ts_file", &temp_dir, &temp_dir),
-            Some(temp_dir.join("./ts_file"))
+            None,
+            "a deleted file stays a miss after invalidation"
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -881,6 +900,7 @@ mod tests {
         );
 
         std::fs::write(root.join("go.mod"), "module example.com/mod\n\ngo 1.22\n").unwrap();
+        std::fs::write(root.join("util.go"), "").unwrap();
 
         assert_eq!(
             resolver.resolve("example.com/mod/util", &root, &root),
@@ -917,5 +937,89 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn node_resolver_relative_miss_is_none() {
+        let root = scratch("node_relative_miss");
+        for lang in [
+            crate::language::LangId::JavaScript,
+            crate::language::LangId::TypeScript,
+        ] {
+            assert_eq!(
+                resolved(lang, "./does-not-exist", &root, &root),
+                None,
+                "{lang:?} relative miss must not fabricate a path"
+            );
+        }
+    }
+
+    #[test]
+    fn probe_keeps_dotted_basenames() {
+        let root = scratch("dotted_basename");
+        touch(&root.join("util.test.js"));
+        touch(&root.join("util.js"));
+
+        assert_eq!(
+            resolved(
+                crate::language::LangId::JavaScript,
+                "./util.test",
+                &root,
+                &root
+            ),
+            Some(root.join("util.test.js")),
+            "the dotted basename wins over the extension swap"
+        );
+        assert_eq!(
+            resolved(crate::language::LangId::JavaScript, "./util", &root, &root),
+            Some(root.join("util.js"))
+        );
+    }
+
+    #[test]
+    fn go_module_target_must_exist() {
+        let root = scratch("go_target_exists");
+        std::fs::write(root.join("go.mod"), "module example.com/m\n").unwrap();
+
+        assert_eq!(
+            resolved(
+                crate::language::LangId::Go,
+                "\"example.com/m/sub\"",
+                &root,
+                &root
+            ),
+            None,
+            "a package path without its file is a miss"
+        );
+
+        touch(&root.join("sub.go"));
+        assert_eq!(
+            resolved(
+                crate::language::LangId::Go,
+                "\"example.com/m/sub\"",
+                &root,
+                &root
+            ),
+            Some(root.join("sub.go"))
+        );
+    }
+
+    #[test]
+    fn python_dots_only_needs_its_init() {
+        let root = scratch("py_dots_only");
+        let pkg = root.join("pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+
+        assert_eq!(
+            resolved(crate::language::LangId::Python, ".", &pkg, &root),
+            None,
+            "a namespace package without __init__.py is a miss"
+        );
+
+        touch(&pkg.join("__init__.py"));
+        assert_eq!(
+            resolved(crate::language::LangId::Python, ".", &pkg, &root),
+            Some(pkg.join("__init__.py"))
+        );
     }
 }
