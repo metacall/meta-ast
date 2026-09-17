@@ -34,6 +34,45 @@ pub use crate::model::FileExtraction;
 /// skip visible instead of silently dropping the file.
 pub const MAX_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
 
+/// Why a source file could not be read.
+#[derive(Debug)]
+pub(crate) enum SourceReadError {
+    /// The file could not be opened or read.
+    Io(std::io::Error),
+    /// The file exceeds `MAX_SOURCE_BYTES`.
+    TooLarge,
+}
+
+impl std::fmt::Display for SourceReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SourceReadError::Io(error) => write!(f, "failed to read file: {error}"),
+            SourceReadError::TooLarge => write!(
+                f,
+                "file is over the {MAX_SOURCE_BYTES} byte limit for a single source"
+            ),
+        }
+    }
+}
+
+/// Read one source file with the size cap enforced during the read.
+///
+/// The cap is enforced by `take`, not by a metadata pre-check, so a file
+/// that grows between stat and read cannot blow the heap.
+pub(crate) fn read_source_bytes(path: &Path) -> Result<Vec<u8>, SourceReadError> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).map_err(SourceReadError::Io)?;
+    let mut bounded = file.take(MAX_SOURCE_BYTES + 1);
+    let mut bytes = Vec::new();
+    bounded
+        .read_to_end(&mut bytes)
+        .map_err(SourceReadError::Io)?;
+    if bytes.len() as u64 > MAX_SOURCE_BYTES {
+        return Err(SourceReadError::TooLarge);
+    }
+    Ok(bytes)
+}
+
 /// Controls what the extraction pass produces.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ExtractOptions {
@@ -240,36 +279,10 @@ fn extract_single_file(
     id_generators: &ExtractionIdGenerators,
     opts: &ExtractOptions,
 ) -> (FileExtraction, Option<Fingerprint>) {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.len() > MAX_SOURCE_BYTES => {
-            return (
-                failed_extraction(
-                    path,
-                    *lang,
-                    format!(
-                        "file is {} bytes, over the {MAX_SOURCE_BYTES} byte limit for a single source",
-                        metadata.len()
-                    ),
-                ),
-                None,
-            );
-        }
-        Ok(_) => {}
-        Err(error) => {
-            return (
-                failed_extraction(path, *lang, format!("failed to read file: {error}")),
-                None,
-            );
-        }
-    }
-
-    let source = match std::fs::read(path) {
+    let source = match read_source_bytes(path) {
         Ok(source) => source,
         Err(error) => {
-            return (
-                failed_extraction(path, *lang, format!("failed to read file: {error}")),
-                None,
-            );
+            return (failed_extraction(path, *lang, error.to_string()), None);
         }
     };
 
@@ -298,6 +311,19 @@ pub fn extract_text_with_id_gen(
             message: "URI must use the file scheme and contain an absolute path".to_string(),
         })?;
     let path = crate::input::simplified_path(&path).to_path_buf();
+    // The disk entry point enforces the cap while reading; an editor buffer
+    // arrives whole, so the same cap applies here before parsing.
+    if source.text.len() as u64 > MAX_SOURCE_BYTES {
+        return Ok(VersionedExtraction {
+            uri: source.uri.to_string(),
+            version: source.version,
+            file: FileExtraction::failed(
+                path,
+                source.language,
+                SourceReadError::TooLarge.to_string(),
+            ),
+        });
+    }
     let file = extract_source(
         &path,
         source.language,
@@ -733,6 +759,37 @@ mod tests {
         assert!(
             !result.source_fingerprints.contains_key(&path),
             "a failure record has no backing bytes to hash"
+        );
+    }
+
+    #[test]
+    fn oversized_buffer_reports_without_parsing() {
+        let id_generators = ExtractionIdGenerators::new();
+        let big: String = "x".repeat(MAX_SOURCE_BYTES as usize + 1);
+        let result = extract_text_with_id_gen(
+            InMemorySource {
+                uri: "file:///tmp/oversized_buffer.py",
+                text: &big,
+                version: 1,
+                language: LangId::Python,
+            },
+            &ExtractOptions::default(),
+            &id_generators,
+        )
+        .unwrap();
+
+        assert!(result.file.symbols.is_empty());
+        let errors: Vec<_> = result
+            .file
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "one skip, one diagnostic");
+        assert!(
+            errors[0].message.contains(&MAX_SOURCE_BYTES.to_string()),
+            "the error names the cap: {}",
+            errors[0].message
         );
     }
 

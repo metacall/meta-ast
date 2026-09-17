@@ -17,7 +17,10 @@ use crate::output::emitter::{EmitConfig, emit_graph, emit_inspect};
 /// Extract symbols and print or write the inspection document.
 pub fn inspect(args: InspectArgs) -> anyhow::Result<ExitCode> {
     let languages = args.language.map(|language| [language]);
-    let files = crate::input::discover_files(&args.path, languages.as_ref().map(|a| a.as_slice()))?;
+    let (files, mut discovery_diagnostics) = crate::input::discover_files_with_diagnostics(
+        &args.path,
+        languages.as_ref().map(|a| a.as_slice()),
+    )?;
 
     let result = crate::extractor::extract_with_options(
         &files,
@@ -28,6 +31,7 @@ pub fn inspect(args: InspectArgs) -> anyhow::Result<ExitCode> {
     );
 
     let mut diagnostics = Vec::new();
+    diagnostics.append(&mut discovery_diagnostics);
     let mut symbols = Vec::new();
     for file in result.files {
         diagnostics.extend(file.diagnostics.iter().cloned());
