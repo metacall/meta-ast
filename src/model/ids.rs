@@ -53,8 +53,11 @@ define_id_type!(DataNodeId);
 ///
 /// The counter starts at 1 so every allocated ID is a valid `NonZeroU32`.
 /// Zero is never handed out: it is the niche value that makes `Option<Id>`
-/// free (4 bytes, not 8). Allocation panics only after exhausting the full
-/// `u32` space (>4 billion ids), which is treated as a programmer limit.
+/// free (4 bytes, not 8). Allocation advances the counter with
+/// `fetch_update`, which validates before storing: an exhausted counter
+/// panics without consuming a slot, so a caught panic cannot make two
+/// callers share an ID. Exhaustion needs more than `u32::MAX` allocations
+/// and is treated as a programmer limit.
 ///
 /// The counter uses `Relaxed` ordering: uniqueness needs the atomicity of the
 /// read-modify-write, not an ordering edge to any other memory location.
@@ -83,10 +86,14 @@ impl<T> IdGenerator<T> {
     where
         T: From<NonZeroU32>,
     {
-        let val = self.counter.fetch_add(1, Ordering::Relaxed);
-        let nz = NonZeroU32::new(val)
+        let start = self
+            .counter
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                NonZeroU32::new(current)?;
+                current.checked_add(1)
+            })
             .expect("IdGenerator exhausted u32 space (allocated > u32::MAX ids)");
-        T::from(nz)
+        T::from(NonZeroU32::new(start).expect("IdGenerator allocated id 0"))
     }
 
     /// Reserve `count` contiguous identifiers and return the first slot.
@@ -94,16 +101,19 @@ impl<T> IdGenerator<T> {
     /// A caller that numbers a whole unit of work reserves one block, so the
     /// block order follows the caller's order and never the thread timing.
     /// An empty reservation returns the next slot without consuming it.
+    /// A reservation past the limit panics without consuming a slot.
     pub fn reserve(&self, count: u32) -> u32 {
         if count == 0 {
             return self.counter.load(Ordering::Relaxed);
         }
-        let start = self.counter.fetch_add(count, Ordering::Relaxed);
-        assert!(
-            start != 0 && start.checked_add(count - 1).is_some(),
-            "IdGenerator exhausted u32 space (reserved > u32::MAX ids)"
-        );
-        start
+        self.counter
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                NonZeroU32::new(current)?;
+                // The stored value is the block end: validating it rules out
+                // both wrap and a zero counter in one check.
+                current.checked_add(count)
+            })
+            .expect("IdGenerator exhausted u32 space (reserved > u32::MAX ids)")
     }
 }
 
@@ -210,6 +220,40 @@ mod tests {
             1,
             "with_start(0) must sanitize to start ID 1"
         );
+    }
+
+    #[test]
+    fn failed_reservation_consumes_nothing() {
+        let idgen = IdGenerator::<SymbolId>::with_start(u32::MAX);
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| idgen.reserve(1)));
+        assert!(failed.is_err(), "reserving past the limit must fail");
+        assert_eq!(
+            idgen.reserve(0),
+            u32::MAX,
+            "the failed reservation must not consume the slot"
+        );
+    }
+
+    #[test]
+    fn failed_next_consumes_nothing() {
+        let idgen = IdGenerator::<SymbolId>::with_start(u32::MAX);
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| idgen.next()));
+        assert!(failed.is_err(), "allocating past the limit must fail");
+        assert_eq!(
+            idgen.reserve(0),
+            u32::MAX,
+            "the failed allocation must not consume the slot"
+        );
+    }
+
+    #[test]
+    fn boundary_block_stops_before_wrap() {
+        let idgen = IdGenerator::<SymbolId>::with_start(u32::MAX - 1);
+        assert_eq!(idgen.reserve(1), u32::MAX - 1);
+        assert_eq!(idgen.reserve(0), u32::MAX);
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| idgen.reserve(1)));
+        assert!(failed.is_err(), "the counter must never wrap to zero");
+        assert_eq!(idgen.reserve(0), u32::MAX);
     }
 
     #[test]
