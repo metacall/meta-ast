@@ -68,6 +68,14 @@ pub fn generate_pod_manifest(
     let mut deployments = Vec::with_capacity(partition.pods.len());
     let mut dropped_files = 0usize;
 
+    // Metrics arrive aligned with the partition from the single call site;
+    // a short slice degrades per pod below instead of misassigning rows.
+    debug_assert_eq!(
+        pod_metrics.len(),
+        partition.pods.len(),
+        "metrics must align with the partition"
+    );
+
     for (i, pod) in partition.pods.iter().enumerate() {
         let tag = crate::deploy::tags::metacall_tag(pod.language);
         let mut dropped = 0usize;
@@ -112,12 +120,20 @@ pub fn generate_pod_manifest(
         });
     }
 
-    // Build inter-pod edges, annotating cuts where applicable. A pod pair can
-    // carry more than one cut, so the annotations merge into a list.
-    let mut cut_lookup: HashMap<(usize, usize), Vec<CutAnnotation>> = HashMap::new();
+    // Build inter-pod edges, annotating the cut file edge only. A pod pair
+    // carries every cut in one list for the summary stub below, but each
+    // annotation lands on the edge between its own files: sharing them
+    // across the pair would overclaim which calls need RPC conversion.
+    let mut cut_lookup: HashMap<(usize, usize, String, String), Vec<CutAnnotation>> =
+        HashMap::new();
     for cut in cuts {
         cut_lookup
-            .entry((cut.from_pod, cut.to_pod))
+            .entry((
+                cut.from_pod,
+                cut.to_pod,
+                cut.annotation.from_file.as_str().to_owned(),
+                cut.annotation.to_file.as_str().to_owned(),
+            ))
             .or_default()
             .push(cut.annotation.clone());
     }
@@ -132,10 +148,18 @@ pub fn generate_pod_manifest(
                 crate::graph::EdgeKind::Ownership => "ownership".to_string(),
                 crate::graph::EdgeKind::Flow => "flow".to_string(),
             };
-            let annotations = cut_lookup
-                .get(&(ip.from_pod, ip.to_pod))
-                .cloned()
-                .unwrap_or_default();
+            let annotations = match (graph.file_node(ip.from_file), graph.file_node(ip.to_file)) {
+                (Some(from), Some(to)) => cut_lookup
+                    .get(&(
+                        ip.from_pod,
+                        ip.to_pod,
+                        crate::input::portable_path(&from.path),
+                        crate::input::portable_path(&to.path),
+                    ))
+                    .cloned()
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
             ManifestEdge {
                 from_pod: ip.from_pod,
                 to_pod: ip.to_pod,
@@ -149,9 +173,18 @@ pub fn generate_pod_manifest(
 
     // Mark cut edges that weren't already in inter_pod_edges as rpc_stub edges.
     // Every cut pair must surface as one `rpc_stub` edge (ADR 0003: a forced
-    // split is only safe if the call boundary is explicitly represented). The
-    // pair carries every annotation, and a repeated pair does not add a stub.
-    for (pair, annotations) in &cut_lookup {
+    // split is only safe if the call boundary is explicitly represented). One
+    // stub covers the pair no matter how many file cuts it holds. The stub
+    // confidence is the weakest finite link; with no finite link it is zero
+    // rather than a NaN JSON cannot encode.
+    let mut stub_lookup: HashMap<(usize, usize), Vec<CutAnnotation>> = HashMap::new();
+    for ((from_pod, to_pod, _, _), annotations) in &cut_lookup {
+        stub_lookup
+            .entry((*from_pod, *to_pod))
+            .or_default()
+            .extend(annotations.iter().cloned());
+    }
+    for (pair, annotations) in &stub_lookup {
         if edges
             .iter()
             .any(|edge| edge.kind == "rpc_stub" && edge.from_pod == pair.0 && edge.to_pod == pair.1)
@@ -161,7 +194,9 @@ pub fn generate_pod_manifest(
         let confidence = annotations
             .iter()
             .map(|annotation| annotation.original_confidence)
-            .fold(f32::INFINITY, f32::min);
+            .filter(|confidence| confidence.is_finite())
+            .reduce(f32::min)
+            .unwrap_or(0.0);
         edges.push(ManifestEdge {
             from_pod: pair.0,
             to_pod: pair.1,
@@ -355,6 +390,118 @@ mod tests {
         assert!(
             json.contains("OversizedPod"),
             "the oversized cut annotation must survive"
+        );
+    }
+
+    #[test]
+    fn cut_annotations_land_on_the_cut_file_edge_only() {
+        use crate::deploy::cut::CutEdge;
+        use std::path::Path;
+
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let py = FileId::new(1).unwrap();
+        let py2 = FileId::new(3).unwrap();
+        let js = FileId::new(2).unwrap();
+        for (fid, path, lang) in [
+            (py, "a.py", LangId::Python),
+            (py2, "c.py", LangId::Python),
+            (js, "b.js", LangId::JavaScript),
+        ] {
+            graph.add_node(NodeData::File(FileNode::new(
+                fid,
+                PathBuf::from(path),
+                lang,
+                SnapshotId::new(1).unwrap(),
+            )));
+        }
+        let partition = PodPartition {
+            pods: vec![
+                Pod {
+                    id: 0,
+                    files: vec![py, py2],
+                    language: LangId::Python,
+                },
+                Pod {
+                    id: 1,
+                    files: vec![js],
+                    language: LangId::JavaScript,
+                },
+            ],
+            inter_pod_edges: vec![
+                InterPodEdge {
+                    from_pod: 0,
+                    to_pod: 1,
+                    from_file: py,
+                    to_file: js,
+                    kind: EdgeKind::Import,
+                    confidence: 0.9,
+                    is_cross_language: true,
+                },
+                InterPodEdge {
+                    from_pod: 0,
+                    to_pod: 1,
+                    from_file: py2,
+                    to_file: js,
+                    kind: EdgeKind::Import,
+                    confidence: 0.7,
+                    is_cross_language: true,
+                },
+            ],
+            file_languages: HashMap::from([
+                (py, LangId::Python),
+                (py2, LangId::Python),
+                (js, LangId::JavaScript),
+            ]),
+        };
+        let annotation = |confidence: f32| CutAnnotation {
+            from_file: PortablePath::from_path(Path::new("a.py")),
+            to_file: PortablePath::from_path(Path::new("b.js")),
+            cut_reason: CutReason::CrossLanguageScc,
+            original_confidence: confidence,
+        };
+        let cuts = vec![
+            CutEdge {
+                from_pod: 0,
+                to_pod: 1,
+                annotation: annotation(f32::NAN),
+            },
+            CutEdge {
+                from_pod: 0,
+                to_pod: 1,
+                annotation: annotation(0.5),
+            },
+        ];
+        let metrics = vec![
+            PodMetrics {
+                total_ast_nodes: 0,
+                file_count: 0,
+                symbol_count: 0,
+            };
+            2
+        ];
+        let manifest = generate_pod_manifest(&partition, &metrics, &cuts, &HashMap::new(), &graph);
+
+        let annotated: Vec<_> = manifest
+            .edges
+            .iter()
+            .filter(|e| e.kind == "import" && !e.cut_annotations.is_empty())
+            .collect();
+        assert_eq!(
+            annotated.len(),
+            1,
+            "only the cut file edge carries annotations: {:?}",
+            manifest.edges
+        );
+        let stubs: Vec<_> = manifest
+            .edges
+            .iter()
+            .filter(|e| e.kind == "rpc_stub")
+            .collect();
+        assert_eq!(stubs.len(), 1, "one stub covers the pair");
+        assert_eq!(
+            stubs[0].confidence, 0.5,
+            "the stub takes the weakest finite link, got {}",
+            stubs[0].confidence
         );
     }
 }
