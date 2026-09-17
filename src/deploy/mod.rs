@@ -70,14 +70,21 @@ fn inject_load_edges(
         let Some(config_script) = site.scripts.first() else {
             continue;
         };
-        let config_file = config.root.join(config_script);
-        let bytes = match std::fs::read(&config_file) {
+        let Some(config_file) = config::join_contained(&config.root, config_script) else {
+            diagnostics.push(config::config_diagnostic(
+                &site.source_file,
+                site.source_range.as_ref(),
+                format!("MetaCall configuration escapes the project root: {config_script}"),
+            ));
+            continue;
+        };
+        let bytes = match config::read_config_file(&config_file) {
             Ok(bytes) => bytes,
-            Err(error) => {
+            Err(message) => {
                 diagnostics.push(config::config_diagnostic(
                     &config_file,
                     site.source_range.as_ref(),
-                    format!("unreadable MetaCall configuration: {error}"),
+                    message,
                 ));
                 continue;
             }
@@ -122,6 +129,14 @@ fn inject_load_edges(
         };
         let base = config::script_base(&config_file, &parsed, &config.root);
         for script in &parsed.scripts {
+            if config::escapes_base(&base, script) {
+                diagnostics.push(config::config_diagnostic(
+                    &site.source_file,
+                    site.source_range.as_ref(),
+                    format!("MetaCall script escapes its base directory: {script}"),
+                ));
+                continue;
+            }
             add_metacall_edge(
                 &base,
                 from_idx,
@@ -167,6 +182,14 @@ fn inject_load_edges(
             });
         }
         for script in &site.scripts {
+            if config::escapes_base(&config.root, script) {
+                diagnostics.push(config::config_diagnostic(
+                    &site.source_file,
+                    site.source_range.as_ref(),
+                    format!("MetaCall script escapes its base directory: {script}"),
+                ));
+                continue;
+            }
             add_metacall_edge(
                 &config.root,
                 from_idx,
