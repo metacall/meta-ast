@@ -4,11 +4,12 @@
 //! a `language_id`, an optional `path`, and a `scripts` array. Relative
 //! `path` values resolve against the configuration file directory.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::deploy::scanner::CallSite;
 use crate::error::{Diagnostic, Severity};
 
 #[derive(Debug, Clone)]
@@ -119,17 +120,71 @@ pub(crate) fn escapes_base(base: &Path, script: &str) -> bool {
 #[derive(Debug, Default)]
 pub(crate) struct ConfigCache {
     entries: HashMap<PathBuf, Result<LoadConfiguration, String>>,
+    reported: HashSet<PathBuf>,
+}
+
+/// Configuration behind one call site, with its project paths.
+#[derive(Debug)]
+pub(crate) struct ResolvedConfig<'a> {
+    /// Parsed file, borrowed from the cache so sharing sites never clones.
+    pub config: &'a LoadConfiguration,
+    /// Contained project path of the configuration file.
+    pub config_file: PathBuf,
+    /// Script resolution base: the configuration `path` or the root fallback.
+    pub base: PathBuf,
 }
 
 impl ConfigCache {
-    /// Read, parse, and memoize one configuration file.
-    pub(crate) fn get(&mut self, file: &Path) -> Result<LoadConfiguration, String> {
-        if let Some(entry) = self.entries.get(file) {
-            return entry.clone();
+    /// Resolve the configuration named by `site` under `root`.
+    ///
+    /// Containment, read, and parse live here: a missing script skips as
+    /// `Err(None)`, an escape reports per site, and a read/parse failure
+    /// reports once per file with the first site range while later sharers
+    /// get `Err(None)`. Success borrows the parsed file and carries the
+    /// config path plus the script base.
+    pub(crate) fn resolve(
+        &mut self,
+        site: &CallSite,
+        root: &Path,
+    ) -> Result<ResolvedConfig<'_>, Option<Diagnostic>> {
+        let Some(config_script) = site.scripts.first() else {
+            return Err(None);
+        };
+        let Some(config_file) = join_contained(root, config_script) else {
+            return Err(Some(config_diagnostic(
+                &site.source_file,
+                site.source_range.as_ref(),
+                format!("MetaCall configuration escapes the project root: {config_script}"),
+            )));
+        };
+        if !self.entries.contains_key(&config_file) {
+            let parsed =
+                read_config_file(&config_file).and_then(|bytes| parse_load_configuration(&bytes));
+            self.entries.insert(config_file.clone(), parsed);
         }
-        let parsed = read_config_file(file).and_then(|bytes| parse_load_configuration(&bytes));
-        self.entries.insert(file.to_path_buf(), parsed.clone());
-        parsed
+        match self.entries.get(&config_file) {
+            Some(Err(message)) => {
+                let message = message.clone();
+                if self.reported.insert(config_file.clone()) {
+                    Err(Some(config_diagnostic(
+                        &config_file,
+                        site.source_range.as_ref(),
+                        message,
+                    )))
+                } else {
+                    Err(None)
+                }
+            }
+            Some(Ok(config)) => {
+                let base = script_base(&config_file, config, root);
+                Ok(ResolvedConfig {
+                    config,
+                    config_file,
+                    base,
+                })
+            }
+            None => Err(None),
+        }
     }
 }
 
@@ -316,22 +371,143 @@ mod tests {
 
     #[test]
     fn config_cache_reads_once() {
-        let dir = std::env::temp_dir().join("meta_ast_config_cache");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("deploy.json");
-        std::fs::write(&path, r#"{"language_id":"node","scripts":["a.js"]}"#).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("deploy.json"),
+            r#"{"language_id":"node","scripts":["a.js"]}"#,
+        )
+        .unwrap();
+        let site = config_site(root.join("app.py"), "deploy.json");
 
         let mut cache = ConfigCache::default();
-        let first = cache.get(&path).unwrap();
-        assert_eq!(first.scripts, vec!["a.js"]);
+        let first = cache.resolve(&site, root).unwrap().config.scripts.clone();
+        assert_eq!(first, vec!["a.js"]);
 
-        std::fs::remove_file(&path).unwrap();
-        let second = cache.get(&path).unwrap();
+        std::fs::remove_file(root.join("deploy.json")).unwrap();
+        let second = cache.resolve(&site, root).unwrap().config.scripts.clone();
         assert_eq!(
-            second.scripts, first.scripts,
+            second, first,
             "the deleted file still resolves from the cache"
         );
-        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn config_site(source_file: PathBuf, script: &str) -> CallSite {
+        use crate::deploy::scanner::CallSiteVariant;
+        use crate::language::LangId;
+        CallSite {
+            source_file,
+            caller_lang: LangId::Python,
+            variant: CallSiteVariant::LoadFromConfiguration,
+            target_lang: None,
+            scripts: vec![script.to_string()],
+            function_name: None,
+            is_async: false,
+            source_range: None,
+            confidence: 1.0,
+        }
+    }
+
+    #[test]
+    fn shared_parse_failure_reports_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("broken.json"), "not json").unwrap();
+        let first_site = config_site(root.join("a.py"), "broken.json");
+        let second_site = config_site(root.join("b.py"), "broken.json");
+
+        let mut cache = ConfigCache::default();
+        let first = cache.resolve(&first_site, root).unwrap_err();
+        let diagnostic = first.as_ref().unwrap();
+        assert_eq!(diagnostic.path, root.join("broken.json"));
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert!(
+            diagnostic.message.contains("invalid"),
+            "unexpected message: {}",
+            diagnostic.message
+        );
+
+        let second = cache.resolve(&second_site, root).unwrap_err();
+        assert!(
+            second.is_none(),
+            "the second sharer reports nothing: {second:?}"
+        );
+    }
+
+    #[test]
+    fn shared_missing_file_reports_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let first_site = config_site(root.join("a.py"), "missing.json");
+        let second_site = config_site(root.join("b.py"), "missing.json");
+
+        let mut cache = ConfigCache::default();
+        let first = cache.resolve(&first_site, root).unwrap_err();
+        assert!(first.is_some(), "the first missing read reports");
+        let second = cache.resolve(&second_site, root).unwrap_err();
+        assert!(
+            second.is_none(),
+            "the second sharer reports nothing: {second:?}"
+        );
+    }
+
+    #[test]
+    fn escape_reports_per_site_with_source_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let first_site = config_site(root.join("a.py"), "../escape.json");
+        let second_site = config_site(root.join("a.py"), "../escape.json");
+
+        let mut cache = ConfigCache::default();
+        for site in [&first_site, &second_site] {
+            let error = cache.resolve(site, root).unwrap_err();
+            let diagnostic = error.as_ref().unwrap();
+            assert_eq!(diagnostic.path, root.join("a.py"));
+            assert!(
+                diagnostic.message.contains("escapes"),
+                "unexpected message: {}",
+                diagnostic.message
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_returns_config_path_and_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("cfg")).unwrap();
+        std::fs::write(
+            root.join("cfg/deploy.json"),
+            r#"{"language_id":"node","path":"../lib","scripts":["a.js"]}"#,
+        )
+        .unwrap();
+        let site = config_site(root.join("app.py"), "cfg/deploy.json");
+
+        let mut cache = ConfigCache::default();
+        let resolved = cache.resolve(&site, root).unwrap();
+        assert_eq!(resolved.config.language_id.as_deref(), Some("node"));
+        assert_eq!(resolved.config_file, root.join("cfg/deploy.json"));
+        assert_eq!(resolved.base, root.join("lib"));
+    }
+
+    #[test]
+    fn missing_script_skips_silently() {
+        use crate::deploy::scanner::CallSiteVariant;
+        use crate::language::LangId;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let site = CallSite {
+            source_file: root.join("a.py"),
+            caller_lang: LangId::Python,
+            variant: CallSiteVariant::LoadFromConfiguration,
+            target_lang: None,
+            scripts: Vec::new(),
+            function_name: None,
+            is_async: false,
+            source_range: None,
+            confidence: 1.0,
+        };
+        let mut cache = ConfigCache::default();
+        assert!(cache.resolve(&site, root).unwrap_err().is_none());
     }
 }

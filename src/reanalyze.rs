@@ -172,6 +172,8 @@ pub fn reanalyze_extractions(
     let mut change_set = ChangeSet::default();
     let mut changed_disk: Vec<(PathBuf, LangId)> = Vec::new();
     let mut changed_overlays: Vec<(PathBuf, &Overlay)> = Vec::new();
+    // Capture reuse decisions here so missing fingerprints cannot drop retained files.
+    let mut reused: Vec<Arc<FileExtraction>> = Vec::with_capacity(targets.len());
 
     // A file that cannot be read keeps its cached extraction. Its fingerprint is
     // missing, so the stale sweep must not treat it as deleted.
@@ -197,21 +199,25 @@ pub fn reanalyze_extractions(
         let Some(curr_fp) = current_fingerprints.get(path) else {
             // A first-tick read failure has no cached entry to keep: the
             // diagnostic reports it, and no counter claims otherwise.
-            if failed_reads.contains(path) && state.cache.get(path).is_some() {
+            if failed_reads.contains(path)
+                && let Some(cached) = state.cache.get(path)
+            {
                 change_set.files_unchanged += 1;
+                reused.push(Arc::clone(cached));
             }
             continue;
         };
         // The fingerprint alone cannot prove reuse: identical bytes under a
         // different language extract differently, so the cached language
         // must match the target language too.
-        let cached_lang_matches = state
-            .cache
-            .get(path)
-            .is_some_and(|extraction| extraction.lang == *lang);
+        let cached_entry = state.cache.get(path);
+        let cached_lang_matches = cached_entry.is_some_and(|extraction| extraction.lang == *lang);
         let changed = match state.cache.fingerprint_of(path) {
             Some(cached) if cached == *curr_fp && cached_lang_matches => {
                 change_set.files_unchanged += 1;
+                if let Some(extraction) = cached_entry {
+                    reused.push(Arc::clone(extraction));
+                }
                 false
             }
             Some(_) => {
@@ -299,21 +305,8 @@ pub fn reanalyze_extractions(
         }
     }
 
-    let mut merged: Vec<Arc<FileExtraction>> =
-        Vec::with_capacity(state.cache.len() + new_extractions.len());
-    for path in targets.keys() {
-        let Some(fp) = current_fingerprints.get(path) else {
-            continue;
-        };
-        if state.cache.fingerprint_of(path) == Some(*fp)
-            && let Some(extraction) = state.cache.get(path)
-            && targets
-                .get(path)
-                .is_some_and(|lang| *lang == extraction.lang)
-        {
-            merged.push(Arc::clone(extraction));
-        }
-    }
+    let mut merged: Vec<Arc<FileExtraction>> = reused;
+    merged.reserve(new_extractions.len());
     for extraction in new_extractions {
         let arc = Arc::new(extraction);
         // Disk extractions carry the hash of the bytes they were built
@@ -741,7 +734,7 @@ mod tests {
             std::fs::set_permissions(&a, perms).unwrap();
         }
 
-        let (_, cs2, diags2) = incremental_reanalyze(&root, None, &mut state).unwrap();
+        let (second, cs2, diags2) = incremental_reanalyze(&root, None, &mut state).unwrap();
         assert_eq!(cs2.files_removed, 0, "a read failure is not a removal");
         assert_eq!(
             cs2.files_unchanged, 1,
@@ -749,6 +742,29 @@ mod tests {
         );
         assert_eq!(state.cache.extractions.len(), 1);
         assert!(!diags2.is_empty(), "the read failure must be reported");
+        assert_eq!(
+            second.extractions.len(),
+            1,
+            "a retained file must stay in the merged output"
+        );
+        assert_eq!(
+            second.graph.file_count(),
+            1,
+            "a retained file must stay in the graph"
+        );
+        assert!(
+            second
+                .graph
+                .symbols()
+                .any(|(_, symbol)| symbol.name == "kept"),
+            "the cached symbol must survive the failed tick"
+        );
+        let cached =
+            std::sync::Arc::clone(state.cache.get(&crate::input::simplified_path(&a)).unwrap());
+        assert!(
+            std::sync::Arc::ptr_eq(&second.extractions[0], &cached),
+            "the merged output must reuse the cached Arc"
+        );
 
         #[cfg(unix)]
         {

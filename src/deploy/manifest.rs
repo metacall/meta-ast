@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::deploy::cut::{CutAnnotation, CutEdge};
+use crate::deploy::cut::{CutAnnotation, CutEdge, CutReason};
 use crate::deploy::dependency::DependencyEntry;
 use crate::deploy::metrics::PodMetrics;
 use crate::deploy::pod::PodPartition;
@@ -55,6 +55,39 @@ pub struct GlobalMetrics {
     /// Pod files the graph or the metrics pass could not resolve.
     #[serde(default)]
     pub dropped_files: usize,
+}
+
+/// Rank for a cut reason so annotation lists sort deterministically.
+///
+/// `CrossLanguageScc` sorts before `OversizedPod`; oversized ties break on
+/// the recorded sizes. The rank only orders output and never filters cuts.
+fn cut_reason_rank(reason: &CutReason) -> (u8, usize, usize) {
+    match *reason {
+        CutReason::CrossLanguageScc => (0, 0, 0),
+        CutReason::OversizedPod { pod_size, max_size } => (1, pod_size, max_size),
+    }
+}
+
+/// Total order over annotations: file pair, then reason, then confidence.
+///
+/// Confidence uses total order so NaN sorts deterministically instead of
+/// poisoning the comparison. Every field participates, so two distinct
+/// annotations never compare equal unless all visible fields match.
+fn compare_cut_annotations(left: &CutAnnotation, right: &CutAnnotation) -> std::cmp::Ordering {
+    left.from_file
+        .as_str()
+        .cmp(right.from_file.as_str())
+        .then_with(|| left.to_file.as_str().cmp(right.to_file.as_str()))
+        .then_with(|| cut_reason_rank(&left.cut_reason).cmp(&cut_reason_rank(&right.cut_reason)))
+        .then_with(|| {
+            left.original_confidence
+                .total_cmp(&right.original_confidence)
+        })
+}
+
+/// Sort an annotation list into canonical output order without dropping entries.
+fn sort_cut_annotations(annotations: &mut [CutAnnotation]) {
+    annotations.sort_by(compare_cut_annotations);
 }
 
 /// Generate a `PodManifest` from partition, metrics, cuts, and dependencies.
@@ -137,6 +170,9 @@ pub fn generate_pod_manifest(
             .or_default()
             .push(cut.annotation.clone());
     }
+    for annotations in cut_lookup.values_mut() {
+        sort_cut_annotations(annotations);
+    }
 
     let mut edges: Vec<ManifestEdge> = partition
         .inter_pod_edges
@@ -148,7 +184,8 @@ pub fn generate_pod_manifest(
                 crate::graph::EdgeKind::Ownership => "ownership".to_string(),
                 crate::graph::EdgeKind::Flow => "flow".to_string(),
             };
-            let annotations = match (graph.file_node(ip.from_file), graph.file_node(ip.to_file)) {
+            let mut annotations = match (graph.file_node(ip.from_file), graph.file_node(ip.to_file))
+            {
                 (Some(from), Some(to)) => cut_lookup
                     .get(&(
                         ip.from_pod,
@@ -160,6 +197,7 @@ pub fn generate_pod_manifest(
                     .unwrap_or_default(),
                 _ => Vec::new(),
             };
+            sort_cut_annotations(&mut annotations);
             ManifestEdge {
                 from_pod: ip.from_pod,
                 to_pod: ip.to_pod,
@@ -184,13 +222,10 @@ pub fn generate_pod_manifest(
             .or_default()
             .extend(annotations.iter().cloned());
     }
+    for annotations in stub_lookup.values_mut() {
+        sort_cut_annotations(annotations);
+    }
     for (pair, annotations) in &stub_lookup {
-        if edges
-            .iter()
-            .any(|edge| edge.kind == "rpc_stub" && edge.from_pod == pair.0 && edge.to_pod == pair.1)
-        {
-            continue;
-        }
         let confidence = annotations
             .iter()
             .map(|annotation| annotation.original_confidence)
@@ -202,12 +237,9 @@ pub fn generate_pod_manifest(
             to_pod: pair.1,
             kind: "rpc_stub".to_string(),
             confidence,
-            is_cross_language: annotations.iter().any(|annotation| {
-                matches!(
-                    annotation.cut_reason,
-                    crate::deploy::cut::CutReason::CrossLanguageScc
-                )
-            }),
+            is_cross_language: annotations
+                .iter()
+                .any(|annotation| matches!(annotation.cut_reason, CutReason::CrossLanguageScc)),
             cut_annotations: annotations.clone(),
         });
     }
@@ -502,6 +534,156 @@ mod tests {
             stubs[0].confidence, 0.5,
             "the stub takes the weakest finite link, got {}",
             stubs[0].confidence
+        );
+    }
+
+    #[test]
+    fn permuted_cuts_serialize_to_canonical_annotation_order() {
+        use crate::deploy::cut::CutEdge;
+        use std::path::Path;
+
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let py = FileId::new(1).unwrap();
+        let py2 = FileId::new(3).unwrap();
+        let js = FileId::new(2).unwrap();
+        for (fid, path, lang) in [
+            (py, "a.py", LangId::Python),
+            (py2, "c.py", LangId::Python),
+            (js, "b.js", LangId::JavaScript),
+        ] {
+            graph.add_node(NodeData::File(FileNode::new(
+                fid,
+                PathBuf::from(path),
+                lang,
+                SnapshotId::new(1).unwrap(),
+            )));
+        }
+        let partition = PodPartition {
+            pods: vec![
+                Pod {
+                    id: 0,
+                    files: vec![py, py2],
+                    language: LangId::Python,
+                },
+                Pod {
+                    id: 1,
+                    files: vec![js],
+                    language: LangId::JavaScript,
+                },
+            ],
+            inter_pod_edges: vec![
+                InterPodEdge {
+                    from_pod: 0,
+                    to_pod: 1,
+                    from_file: py,
+                    to_file: js,
+                    kind: EdgeKind::Import,
+                    confidence: 0.9,
+                    is_cross_language: true,
+                },
+                InterPodEdge {
+                    from_pod: 0,
+                    to_pod: 1,
+                    from_file: py2,
+                    to_file: js,
+                    kind: EdgeKind::Import,
+                    confidence: 0.7,
+                    is_cross_language: true,
+                },
+            ],
+            file_languages: HashMap::from([
+                (py, LangId::Python),
+                (py2, LangId::Python),
+                (js, LangId::JavaScript),
+            ]),
+        };
+        let metrics = vec![
+            PodMetrics {
+                total_ast_nodes: 0,
+                file_count: 0,
+                symbol_count: 0,
+            };
+            2
+        ];
+        let annotation = |from: &str, to: &str, reason: CutReason, confidence: f32| CutAnnotation {
+            from_file: PortablePath::from_path(Path::new(from)),
+            to_file: PortablePath::from_path(Path::new(to)),
+            cut_reason: reason,
+            original_confidence: confidence,
+        };
+        let cut_a_scc = CutEdge {
+            from_pod: 0,
+            to_pod: 1,
+            annotation: annotation("a.py", "b.js", CutReason::CrossLanguageScc, 0.6),
+        };
+        let cut_a_over = CutEdge {
+            from_pod: 0,
+            to_pod: 1,
+            annotation: annotation(
+                "a.py",
+                "b.js",
+                CutReason::OversizedPod {
+                    pod_size: 4,
+                    max_size: 3,
+                },
+                0.5,
+            ),
+        };
+        let cut_c_scc = CutEdge {
+            from_pod: 0,
+            to_pod: 1,
+            annotation: annotation("c.py", "b.js", CutReason::CrossLanguageScc, 0.3),
+        };
+        let forward = vec![cut_a_scc.clone(), cut_a_over.clone(), cut_c_scc.clone()];
+        let backward = vec![cut_c_scc.clone(), cut_a_over.clone(), cut_a_scc.clone()];
+
+        let manifest_forward =
+            generate_pod_manifest(&partition, &metrics, &forward, &HashMap::new(), &graph);
+        let manifest_backward =
+            generate_pod_manifest(&partition, &metrics, &backward, &HashMap::new(), &graph);
+        let json_forward = serde_json::to_string(&manifest_forward).unwrap();
+        let json_backward = serde_json::to_string(&manifest_backward).unwrap();
+        assert_eq!(
+            json_forward, json_backward,
+            "permuted cuts must serialize identically:\n{json_forward}\n{json_backward}"
+        );
+
+        let stub = manifest_forward
+            .edges
+            .iter()
+            .find(|e| e.kind == "rpc_stub")
+            .expect("one stub covers the pair");
+        assert_eq!(
+            stub.cut_annotations.len(),
+            3,
+            "no cut is dropped, got {:?}",
+            stub.cut_annotations
+        );
+        let order: Vec<(&str, &str)> = stub
+            .cut_annotations
+            .iter()
+            .map(|a| (a.from_file.as_str(), a.to_file.as_str()))
+            .collect();
+        assert_eq!(
+            order,
+            vec![("a.py", "b.js"), ("a.py", "b.js"), ("c.py", "b.js")],
+            "stub annotations sort by file pair, got {order:?}"
+        );
+        assert!(
+            matches!(
+                stub.cut_annotations[0].cut_reason,
+                CutReason::CrossLanguageScc
+            ),
+            "reason breaks the file-pair tie first, got {:?}",
+            stub.cut_annotations[0].cut_reason
+        );
+        assert!(
+            matches!(
+                stub.cut_annotations[1].cut_reason,
+                CutReason::OversizedPod { .. }
+            ),
+            "reason breaks the file-pair tie second, got {:?}",
+            stub.cut_annotations[1].cut_reason
         );
     }
 }

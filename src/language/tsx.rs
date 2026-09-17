@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 fn resolve_tsx_import(raw: &str, source_dir: &Path, _project_root: &Path) -> Option<PathBuf> {
     use crate::language::import_resolver::{TS_EXTS, resolve_js_family_import};
-    // Bare specifiers (react, @angular/core) resolve to external nodes,
-    // matching the JS/TS behavior.
+    // Bare specifiers miss, the builder names the external node.
+    // Relative paths resolve only when the file exists.
     resolve_js_family_import(raw, source_dir, TS_EXTS, &|p| p.is_file())
 }
 
@@ -81,7 +81,7 @@ define_language_pack!(
 
 
             #[test]
-            fn tsx_bare_import_resolves_to_external() {
+            fn tsx_bare_import_is_a_miss() {
                 use crate::language::LangId;
                 let spec = crate::language::spec_for(LangId::Tsx);
                 let out = (spec.import_path_resolver)(
@@ -89,7 +89,62 @@ define_language_pack!(
                     std::path::Path::new("/proj/src"),
                     std::path::Path::new("/proj"),
                 );
-                assert_eq!(out, Some(std::path::PathBuf::from("react")));
+                assert_eq!(
+                    out, None,
+                    "a bare specifier is a miss, the builder names the external node"
+                );
+                let resolver = crate::language::import_resolver::make_resolver(LangId::Tsx);
+                assert_eq!(
+                    resolver.resolve(
+                        "react",
+                        std::path::Path::new("/proj/src"),
+                        std::path::Path::new("/proj")
+                    ),
+                    None,
+                    "stateless and stateful resolvers agree on a bare miss"
+                );
+            }
+
+            #[test]
+            fn tsx_relative_miss_is_none_and_hit_resolves() {
+                use crate::language::LangId;
+                let project = tempfile::tempdir().unwrap();
+                let root = project.path();
+                let spec = crate::language::spec_for(LangId::Tsx);
+                let resolver = crate::language::import_resolver::make_resolver(LangId::Tsx);
+                assert_eq!(
+                    (spec.import_path_resolver)("./does-not-exist", root, root),
+                    None,
+                    "a missing relative file is a miss"
+                );
+                assert_eq!(
+                    resolver.resolve("./does-not-exist", root, root),
+                    None,
+                    "stateless and stateful resolvers agree on a relative miss"
+                );
+                std::fs::write(root.join("comp.tsx"), "export const x = 1;\n").unwrap();
+                assert_eq!(
+                    (spec.import_path_resolver)("./comp", root, root),
+                    Some(root.join("comp.tsx"))
+                );
+                assert_eq!(
+                    resolver.resolve("./comp", root, root),
+                    Some(root.join("comp.tsx"))
+                );
+            }
+
+            #[test]
+            fn tsx_dotted_basename_resolves() {
+                use crate::language::LangId;
+                let project = tempfile::tempdir().unwrap();
+                let root = project.path();
+                std::fs::write(root.join("comp.test.tsx"), "export const x = 1;\n").unwrap();
+                let spec = crate::language::spec_for(LangId::Tsx);
+                assert_eq!(
+                    (spec.import_path_resolver)("./comp.test", root, root),
+                    Some(root.join("comp.test.tsx")),
+                    "extension probing appends so the dotted basename wins"
+                );
             }
 
             #[cfg(feature = "dataflow")]

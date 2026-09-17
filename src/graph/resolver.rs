@@ -549,12 +549,20 @@ fn exposed_names(
         out.push(name.to_owned());
     }
     if let Some(list) = list {
-        out.extend(list.iter().filter_map(|binding| match binding {
-            ImportBinding::Named { original, local } if original == name && local != name => {
-                Some(local.clone())
-            }
-            _ => None,
-        }));
+        let mut locals: Vec<&str> = list
+            .iter()
+            .filter_map(|binding| match binding {
+                ImportBinding::Named { original, local }
+                    if original == name && (!open || local != name) =>
+                {
+                    Some(local.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        locals.sort_unstable();
+        locals.dedup();
+        out.extend(locals.into_iter().map(str::to_owned));
     }
     out
 }
@@ -1192,6 +1200,22 @@ mod tests {
             cache.resolve(app, "other").is_none(),
             "names outside the import stay out of scope"
         );
+    }
+
+    #[test]
+    fn identity_binding_exposes_the_declared_name_once() {
+        for extra in [
+            None,
+            Some(ImportBinding::Star),
+            Some(ImportBinding::Unfiltered),
+        ] {
+            let mut bindings = vec![ImportBinding::Named {
+                original: "helper".into(),
+                local: "helper".into(),
+            }];
+            bindings.extend(extra);
+            assert_eq!(exposed_names(1, "helper", Some(&bindings)), ["helper"]);
+        }
     }
 
     #[test]

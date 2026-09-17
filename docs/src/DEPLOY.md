@@ -266,7 +266,9 @@ Units with `is_mesh_candidate = true` and `is_cross_language = false` deploy ind
 
 Cut annotations land on the manifest edge between the cut's own files, with
 one `rpc_stub` summary per pod pair. The stub confidence is the weakest
-finite link, or zero when no link is finite.
+finite link, or zero when no link is finite. Each `cut_annotations` list is in
+canonical order by source file, target file, cut reason, then confidence
+(total order), so permuted cut inputs serialize identically with no cuts dropped.
 
 Check mode also diffs both generated documents against the committed
 `metacall.pods` and `metacall.mesh` files when they exist; a missing

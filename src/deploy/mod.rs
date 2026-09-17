@@ -52,36 +52,22 @@ fn inject_load_edges(
 ) {
     let index = index::DeployIndex::build(&analysis.graph);
     let mut configs = config::ConfigCache::default();
-    // One broken file reports once no matter how many sites name it.
-    let mut reported: HashSet<PathBuf> = HashSet::new();
 
     for site in call_sites {
         if site.variant != CallSiteVariant::LoadFromConfiguration {
             continue;
         }
-        let Some(config_script) = site.scripts.first() else {
-            continue;
-        };
-        let Some(config_file) = config::join_contained(&config.root, config_script) else {
-            diagnostics.push(config::config_diagnostic(
-                &site.source_file,
-                site.source_range.as_ref(),
-                format!("MetaCall configuration escapes the project root: {config_script}"),
-            ));
-            continue;
-        };
-        let parsed = match configs.get(&config_file) {
-            Ok(parsed) => parsed,
-            Err(message) => {
-                if reported.insert(config_file.clone()) {
-                    diagnostics.push(config::config_diagnostic(
-                        &config_file,
-                        site.source_range.as_ref(),
-                        message,
-                    ));
-                }
+        let config::ResolvedConfig {
+            config: parsed,
+            config_file,
+            base,
+        } = match configs.resolve(site, &config.root) {
+            Ok(resolved) => resolved,
+            Err(Some(diagnostic)) => {
+                diagnostics.push(diagnostic);
                 continue;
             }
+            Err(None) => continue,
         };
         let Some(language_id) = parsed.language_id.as_deref() else {
             diagnostics.push(config::config_diagnostic(
@@ -110,7 +96,6 @@ fn inject_load_edges(
         let Some(&from_idx) = index.path_to_idx.get(&site.source_file) else {
             continue;
         };
-        let base = config::script_base(&config_file, &parsed, &config.root);
         for script in &parsed.scripts {
             if config::escapes_base(&base, script) {
                 diagnostics.push(config::config_diagnostic(

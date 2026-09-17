@@ -278,6 +278,64 @@ define_language_pack!(
                 assert!(!symbols.iter().any(|s| s.name == "n"));
             }
 
+            #[test]
+            fn ts_bare_import_is_a_miss() {
+                let spec = crate::language::spec_for(LangId::TypeScript);
+                let dir = std::path::Path::new("/proj/src");
+                let root = std::path::Path::new("/proj");
+                assert_eq!(
+                    (spec.import_path_resolver)("react", dir, root),
+                    None,
+                    "a bare specifier is a miss, the builder names the external node"
+                );
+                let resolver = crate::language::import_resolver::make_resolver(LangId::TypeScript);
+                assert_eq!(
+                    resolver.resolve("react", dir, root),
+                    None,
+                    "stateless and stateful resolvers agree on a bare miss"
+                );
+            }
+
+            #[test]
+            fn ts_relative_miss_is_none_and_hit_resolves() {
+                let project = tempfile::tempdir().unwrap();
+                let root = project.path();
+                let spec = crate::language::spec_for(LangId::TypeScript);
+                let resolver = crate::language::import_resolver::make_resolver(LangId::TypeScript);
+                assert_eq!(
+                    (spec.import_path_resolver)("./does-not-exist", root, root),
+                    None,
+                    "a missing relative file is a miss"
+                );
+                assert_eq!(
+                    resolver.resolve("./does-not-exist", root, root),
+                    None,
+                    "stateless and stateful resolvers agree on a relative miss"
+                );
+                std::fs::write(root.join("util.ts"), "export const x = 1;\n").unwrap();
+                assert_eq!(
+                    (spec.import_path_resolver)("./util", root, root),
+                    Some(root.join("util.ts"))
+                );
+                assert_eq!(
+                    resolver.resolve("./util", root, root),
+                    Some(root.join("util.ts"))
+                );
+            }
+
+            #[test]
+            fn ts_dotted_basename_resolves() {
+                let project = tempfile::tempdir().unwrap();
+                let root = project.path();
+                std::fs::write(root.join("util.test.ts"), "export const x = 1;\n").unwrap();
+                let spec = crate::language::spec_for(LangId::TypeScript);
+                assert_eq!(
+                    (spec.import_path_resolver)("./util.test", root, root),
+                    Some(root.join("util.test.ts")),
+                    "extension probing appends so the dotted basename wins"
+                );
+            }
+
 
             #[cfg(feature = "dataflow")]
             mod dataflow_tests {

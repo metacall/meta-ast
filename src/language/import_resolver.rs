@@ -45,12 +45,13 @@ pub(crate) fn append_extension(base: &Path, ext: &str) -> PathBuf {
 }
 
 /// Probe `base.join(raw)` with each extension in order.
+///
+/// Returns the first candidate that exists as a file, else a miss.
 pub(crate) fn probe_relative(
     raw: &str,
     source_dir: &Path,
     extensions: &[&str],
     is_file: &dyn Fn(&Path) -> bool,
-    fallback: bool,
 ) -> Option<PathBuf> {
     let base = if raw.starts_with('/') {
         PathBuf::from("/")
@@ -64,13 +65,14 @@ pub(crate) fn probe_relative(
             return Some(candidate);
         }
     }
-    fallback.then(|| path.clone())
+    None
 }
 
 /// Shared stateless core for JS-family imports.
 ///
-/// Bare specifiers return as external paths. Relative paths probe
-/// `base.join(raw)` with each extension in order.
+/// Bare specifiers are a miss: the builder names the external node. Relative
+/// paths probe `base.join(raw)` with each extension in order and miss when no
+/// candidate exists.
 pub(crate) fn resolve_js_family_import(
     raw: &str,
     source_dir: &Path,
@@ -82,9 +84,9 @@ pub(crate) fn resolve_js_family_import(
         return None;
     }
     if !raw.starts_with('.') && !raw.starts_with('/') {
-        return Some(PathBuf::from(raw));
+        return None;
     }
-    probe_relative(raw, source_dir, extensions, is_file, true)
+    probe_relative(raw, source_dir, extensions, is_file)
 }
 
 /// Resolve a C or C++ include specifier to a project file.
@@ -1020,6 +1022,59 @@ mod tests {
         assert_eq!(
             resolved(crate::language::LangId::Python, ".", &pkg, &root),
             Some(pkg.join("__init__.py"))
+        );
+    }
+
+    #[test]
+    fn js_family_stateless_bare_specifier_is_a_miss() {
+        for exts in [JS_EXTS, TS_EXTS] {
+            assert_eq!(
+                resolve_js_family_import("react", Path::new("/proj/src"), exts, &|p| p.is_file()),
+                None,
+                "a bare specifier never fabricates a path"
+            );
+            assert_eq!(
+                resolve_js_family_import("@angular/core", Path::new("/proj/src"), exts, &|p| {
+                    p.is_file()
+                }),
+                None,
+                "a scoped bare specifier never fabricates a path"
+            );
+        }
+    }
+
+    #[test]
+    fn js_family_stateless_relative_miss_is_none() {
+        let root = scratch("js_stateless_relative_miss");
+        for exts in [JS_EXTS, TS_EXTS] {
+            assert_eq!(
+                resolve_js_family_import("./does-not-exist", &root, exts, &|p| p.is_file()),
+                None,
+                "a missing relative file is a miss, not a joined path"
+            );
+        }
+    }
+
+    #[test]
+    fn js_family_stateless_hit_still_resolves() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        touch(&root.join("util.js"));
+        assert_eq!(
+            resolve_js_family_import("./util", root, JS_EXTS, &|p| p.is_file()),
+            Some(root.join("util.js"))
+        );
+    }
+
+    #[test]
+    fn js_family_stateless_keeps_dotted_basename() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        touch(&root.join("util.test.js"));
+        assert_eq!(
+            resolve_js_family_import("./util.test", root, JS_EXTS, &|p| p.is_file()),
+            Some(root.join("util.test.js")),
+            "extension probing appends so the dotted basename wins"
         );
     }
 }
