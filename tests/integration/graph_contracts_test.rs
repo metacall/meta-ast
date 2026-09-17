@@ -63,14 +63,23 @@ fn the_edge_merge_rule_exists_once() {
         read_source("src/graph/mod.rs"),
         read_source("src/graph/builder.rs"),
         read_source("src/graph/edge.rs"),
+        read_source("src/graph/resolver.rs"),
     ];
-    let copies: usize = surfaces
+    let definitions: usize = surfaces
+        .iter()
+        .map(|source| occurrences(source, "fn finite_max("))
+        .sum();
+    assert_eq!(
+        definitions, 1,
+        "the finite merge rule must be defined once, found {definitions} definitions"
+    );
+    let raw: usize = surfaces
         .iter()
         .map(|source| occurrences(source, "confidence.max("))
         .sum();
     assert_eq!(
-        copies, 1,
-        "the duplicate-edge merge rule must live in one place, found {copies} copies"
+        raw, 0,
+        "merges must fold through finite_max, found {raw} raw max calls"
     );
 }
 
