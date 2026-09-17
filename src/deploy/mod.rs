@@ -10,6 +10,7 @@ pub mod client_call;
 pub mod config;
 pub mod cut;
 pub mod dependency;
+pub mod index;
 pub mod manifest;
 pub mod mesh;
 pub mod metrics;
@@ -37,18 +38,6 @@ fn scan_call_sites(analysis: &crate::pipeline::GraphAnalysis) -> Vec<CallSite> {
         .collect()
 }
 
-/// Path to graph node index for every file node.
-fn file_index(graph: &crate::graph::CodeGraph) -> HashMap<PathBuf, petgraph::graph::NodeIndex> {
-    let mut index = HashMap::new();
-    let raw = graph.graph();
-    for node in raw.node_indices() {
-        if let crate::graph::node::NodeData::File(file) = &raw[node] {
-            index.insert(file.path.clone(), node);
-        }
-    }
-    index
-}
-
 /// Inject the edges of every MetaCall load call site and recompute the SCC
 /// analysis over the injected graph.
 ///
@@ -61,7 +50,7 @@ fn inject_load_edges(
     config: &DeployConfig,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let path_to_idx = file_index(&analysis.graph);
+    let index = index::DeployIndex::build(&analysis.graph);
     let mut configs = config::ConfigCache::default();
     // One broken file reports once no matter how many sites name it.
     let mut reported: HashSet<PathBuf> = HashSet::new();
@@ -118,7 +107,7 @@ fn inject_load_edges(
             ));
             continue;
         }
-        let Some(&from_idx) = path_to_idx.get(&site.source_file) else {
+        let Some(&from_idx) = index.path_to_idx.get(&site.source_file) else {
             continue;
         };
         let base = config::script_base(&config_file, &parsed, &config.root);
@@ -138,7 +127,7 @@ fn inject_load_edges(
                 target_lang,
                 script,
                 site.confidence,
-                &path_to_idx,
+                &index,
                 analysis,
             );
         }
@@ -151,7 +140,7 @@ fn inject_load_edges(
         let Some(target_lang_tag) = &site.target_lang else {
             continue;
         };
-        let Some(&from_idx) = path_to_idx.get(&site.source_file) else {
+        let Some(&from_idx) = index.path_to_idx.get(&site.source_file) else {
             continue;
         };
         let Some(target_lang) = crate::deploy::tags::from_metacall_tag(target_lang_tag) else {
@@ -191,7 +180,7 @@ fn inject_load_edges(
                 target_lang,
                 script,
                 site.confidence,
-                &path_to_idx,
+                &index,
                 analysis,
             );
         }
@@ -488,7 +477,7 @@ fn add_metacall_edge(
     target_lang: crate::language::LangId,
     script: &str,
     confidence: f32,
-    path_to_idx: &HashMap<PathBuf, petgraph::graph::NodeIndex>,
+    index: &index::DeployIndex,
     analysis: &mut crate::pipeline::GraphAnalysis,
 ) {
     let graph = &mut analysis.graph;
@@ -502,7 +491,7 @@ fn add_metacall_edge(
     // name, so neither may resolve to a project file.
     let resolved = match variant {
         CallSiteVariant::LoadFromMemory | CallSiteVariant::LoadFromPackage => None,
-        _ => client_call::resolve_script_to_file(base, script, &source_file, path_to_idx),
+        _ => index.resolve_script(base, script, &source_file),
     };
     if let Some(to_idx) = resolved {
         graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Import, confidence);

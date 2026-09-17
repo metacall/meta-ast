@@ -14,76 +14,6 @@ use crate::language::LangId;
 use crate::model::{FileExtraction, FileId, SymbolId};
 use petgraph::graph::NodeIndex;
 
-/// Resolve a load script to a file node, trying the same strategies as
-/// add_metacall_edge (root-relative, source-file-relative, filename match,
-/// component-stripping). Returns None when no file node matches.
-pub(crate) fn resolve_script_to_file(
-    root: &Path,
-    script: &str,
-    source_file: &Path,
-    path_to_idx: &HashMap<PathBuf, NodeIndex>,
-) -> Option<NodeIndex> {
-    if let Some(idx) = resolve_script_candidate(root, script, source_file, path_to_idx) {
-        return Some(idx);
-    }
-    // A script written on Windows uses backslashes, which are not separators on
-    // Unix, so the normalized form is a second candidate.
-    let normalized = script.replace('\\', "/");
-    if normalized != script {
-        return resolve_script_candidate(root, &normalized, source_file, path_to_idx);
-    }
-    None
-}
-
-fn resolve_script_candidate(
-    root: &Path,
-    script: &str,
-    source_file: &Path,
-    path_to_idx: &HashMap<PathBuf, NodeIndex>,
-) -> Option<NodeIndex> {
-    // Strategy 1: root-relative.
-    let candidate = root.join(script);
-    if let Some(&idx) = path_to_idx.get(&candidate) {
-        return Some(idx);
-    }
-
-    // Strategy 2: source-file-relative.
-    let source_dir = source_file.parent().unwrap_or(Path::new("."));
-    let candidate = source_dir.join(script);
-    if let Some(&idx) = path_to_idx.get(&candidate) {
-        return Some(idx);
-    }
-
-    // Strategy 3: strip leading path components until the filename matches.
-    // Collect every match and pick the lexicographically smallest path so the
-    // result is deterministic even with duplicate basenames.
-    let script_path = Path::new(script);
-    let target_filename = script_path.file_name().unwrap_or(std::ffi::OsStr::new(""));
-    let mut filename_matches: Vec<(PathBuf, NodeIndex)> = path_to_idx
-        .iter()
-        .filter(|(path, _)| {
-            path.file_name() == Some(target_filename) || path.ends_with(script_path)
-        })
-        .map(|(path, &idx)| (path.clone(), idx))
-        .collect();
-    filename_matches.sort_by(|a, b| a.0.cmp(&b.0));
-    if let Some((_, idx)) = filename_matches.first() {
-        return Some(*idx);
-    }
-
-    // Strategy 4: pop path prefixes from the script until one matches.
-    let mut components: Vec<_> = script_path.components().collect();
-    while components.len() > 1 {
-        components.remove(0);
-        let stripped: PathBuf = components.iter().collect();
-        if let Some(&idx) = path_to_idx.get(&stripped) {
-            return Some(idx);
-        }
-    }
-
-    None
-}
-
 /// Resolve ClientCall sites to target symbol nodes.
 ///
 /// Phase A (load-aware): resolves against symbols loaded by the source file (unique = 1.0, multiple = 0.8).
@@ -94,20 +24,13 @@ fn resolve_sites<F>(
     extractions: &[F],
     call_sites: &[CallSite],
     root: &Path,
+    index: &super::index::DeployIndex,
 ) -> (Vec<ResolvedClientCall>, Vec<Diagnostic>)
 where
     F: std::borrow::Borrow<FileExtraction> + Sync,
 {
-    // Path -> node index for file nodes (paths are project-root relative).
-    let mut path_to_idx: HashMap<PathBuf, NodeIndex> = HashMap::new();
-    // Path -> FileId, used to filter Phase A candidates by loaded file.
-    let mut path_to_file_id: HashMap<PathBuf, FileId> = HashMap::new();
-    for (fid, idx) in graph.file_indices() {
-        if let NodeData::File(f) = &graph.graph()[idx] {
-            path_to_idx.insert(f.path.clone(), idx);
-            path_to_file_id.insert(f.path.clone(), fid);
-        }
-    }
+    let path_to_idx = &index.path_to_idx;
+    let path_to_file_id = &index.path_to_file_id;
 
     // Name -> (symbol id, extraction path), pushed in extraction order.
     let mut name_index: HashMap<String, Vec<(SymbolId, PathBuf)>> = HashMap::new();
@@ -177,9 +100,7 @@ where
             .entry(site.source_file.clone())
             .or_default();
         for script in scripts {
-            let Some(file_idx) =
-                resolve_script_to_file(&base, &script, &site.source_file, &path_to_idx)
-            else {
+            let Some(file_idx) = index.resolve_script(&base, &script, &site.source_file) else {
                 continue;
             };
             if let NodeData::File(f) = &graph.graph()[file_idx]
@@ -316,13 +237,9 @@ pub fn resolve_client_call_projections<F>(
 where
     F: std::borrow::Borrow<FileExtraction> + Sync,
 {
-    let (resolved, diagnostics) = resolve_sites(graph, extractions, call_sites, root);
-    let mut path_to_idx: HashMap<PathBuf, NodeIndex> = HashMap::new();
-    for (_, idx) in graph.file_indices() {
-        if let NodeData::File(file) = &graph.graph()[idx] {
-            path_to_idx.insert(file.path.clone(), idx);
-        }
-    }
+    let index = super::index::DeployIndex::build(graph);
+    let (resolved, diagnostics) = resolve_sites(graph, extractions, call_sites, root, &index);
+    let path_to_idx = &index.path_to_idx;
 
     // One extraction lookup per path, instead of a scan per resolved site.
     let path_to_extraction: HashMap<&Path, &FileExtraction> = extractions
@@ -645,23 +562,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_script_to_file_basename_collision_is_deterministic() {
-        // Two files share the basename; the lexicographically smallest path
-        // must win so the result is stable across runs.
-        let mut path_to_idx: HashMap<PathBuf, NodeIndex> = HashMap::new();
-        path_to_idx.insert(PathBuf::from("b/math.js"), NodeIndex::new(1));
-        path_to_idx.insert(PathBuf::from("a/math.js"), NodeIndex::new(0));
-
-        let resolved = resolve_script_to_file(
-            Path::new("."),
-            "math.js",
-            Path::new("orchestrator.py"),
-            &path_to_idx,
-        );
-        assert_eq!(resolved, Some(NodeIndex::new(0)));
-    }
-
-    #[test]
     fn config_parse_failure_emits_diagnostic() {
         let mut fx = Fixture::new();
         fx.add_file("orchestrator.py", LangId::Python);
@@ -868,44 +768,6 @@ mod tests {
         assert!(diag.source_range.is_none());
     }
 
-    #[test]
-    fn resolve_script_to_file_strategies() {
-        let mut path_to_idx: HashMap<PathBuf, NodeIndex> = HashMap::new();
-        let root_relative = NodeIndex::new(1);
-        let source_relative = NodeIndex::new(2);
-        let filename_fallback = NodeIndex::new(3);
-        path_to_idx.insert(PathBuf::from("proj/lib/math.js"), root_relative);
-        path_to_idx.insert(PathBuf::from("proj/src/util.js"), source_relative);
-        path_to_idx.insert(
-            PathBuf::from("vendor/third_party/legacy.js"),
-            filename_fallback,
-        );
-
-        let root = Path::new("proj");
-        let source_file = Path::new("proj/src/main.py");
-
-        // Strategy 1: script relative to the project root.
-        assert_eq!(
-            resolve_script_to_file(root, "lib/math.js", source_file, &path_to_idx),
-            Some(root_relative)
-        );
-        // Strategy 2: script relative to the source file's directory.
-        assert_eq!(
-            resolve_script_to_file(root, "util.js", source_file, &path_to_idx),
-            Some(source_relative)
-        );
-        // Strategy 3: filename match after stripping path components.
-        assert_eq!(
-            resolve_script_to_file(root, "deep/path/legacy.js", source_file, &path_to_idx),
-            Some(filename_fallback)
-        );
-        // No strategy matches.
-        assert_eq!(
-            resolve_script_to_file(root, "missing.js", source_file, &path_to_idx),
-            None
-        );
-    }
-
     /// Characterization: a file-to-symbol client-call edge can never be
     /// absorbed by a scope-resolved symbol-to-symbol reference (endpoint node
     /// types differ, so `(src, dst, kind)` triples never collide).
@@ -956,26 +818,5 @@ mod tests {
             1.0
         );
         assert!(resolution.diagnostics.is_empty());
-    }
-
-    /// A script path written with Windows separators must resolve on Unix.
-    #[test]
-    fn windows_script_separators_resolve_on_unix() {
-        let dir = std::env::temp_dir().join("meta_ast_script_separator");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("sub")).unwrap();
-        let util = dir.join("sub").join("util.js");
-        std::fs::write(&util, "export const x = 1;\n").unwrap();
-
-        let path_to_idx =
-            std::collections::HashMap::from([(util.clone(), petgraph::graph::NodeIndex::new(0))]);
-        let source = dir.join("app.py");
-
-        let resolved = resolve_script_to_file(&dir, "sub\\util.js", &source, &path_to_idx);
-        assert!(
-            resolved.is_some(),
-            "a Windows-authored script path must resolve on Unix"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
