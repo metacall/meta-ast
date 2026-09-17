@@ -133,7 +133,8 @@ pub struct DeployArgs {
     #[arg(short = 'f', long, default_value = "json", value_parser = parse_format)]
     pub format: crate::output::OutputFormat,
 
-    /// Check mode: diff generated manifests against existing metacall.json
+    /// Check mode: verify cut fairness and diff the generated manifests
+    /// against the committed metacall.pods and metacall.mesh documents
     #[arg(long)]
     pub check: bool,
 
