@@ -1,6 +1,6 @@
 //! Client-call resolution: map `metacall('fn', ...)` invocations to symbol nodes.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::deploy::scanner::{CallSite, CallSiteVariant};
@@ -47,8 +47,6 @@ where
     let mut resolved: Vec<ResolvedClientCall> = Vec::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let mut configs = super::config::ConfigCache::default();
-    // One broken file reports once no matter how many sites name it.
-    let mut reported: HashSet<PathBuf> = HashSet::new();
 
     // Files each source file loads, in load-site order (deduplicated). The
     // tag (when present) constrains Phase A candidates to that language.
@@ -63,36 +61,22 @@ where
                 root.to_path_buf(),
             ),
             CallSiteVariant::LoadFromConfiguration => {
-                let Some(config_script) = site.scripts.first() else {
-                    continue;
-                };
-                let Some(config_file) = super::config::join_contained(root, config_script) else {
-                    diagnostics.push(super::config::config_diagnostic(
-                        &site.source_file,
-                        site.source_range.as_ref(),
-                        format!("MetaCall configuration escapes the project root: {config_script}"),
-                    ));
-                    continue;
-                };
-                let parsed = match configs.get(&config_file) {
-                    Ok(parsed) => parsed,
-                    Err(message) => {
-                        if reported.insert(config_file.clone()) {
-                            diagnostics.push(super::config::config_diagnostic(
-                                &config_file,
-                                site.source_range.as_ref(),
-                                message,
-                            ));
-                        }
+                let resolved = match configs.resolve(site, root) {
+                    Ok(resolved) => resolved,
+                    Err(Some(diagnostic)) => {
+                        diagnostics.push(diagnostic);
                         continue;
                     }
+                    Err(None) => continue,
                 };
-                let tag = parsed
+                let tag = resolved
+                    .config
                     .language_id
                     .as_deref()
                     .and_then(crate::deploy::tags::from_metacall_tag);
-                let base = super::config::script_base(&config_file, &parsed, root);
-                (parsed.scripts.clone(), tag, base)
+                let scripts = resolved.config.scripts.clone();
+                let base = resolved.base;
+                (scripts, tag, base)
             }
             _ => continue,
         };

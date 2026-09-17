@@ -63,6 +63,47 @@ fn external_paths(graph: &CodeGraph) -> Vec<String> {
 }
 
 #[test]
+fn python_named_import_resolves_calls_without_exposing_other_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "utils.py",
+        "def helper(): pass\ndef unrelated(): pass\n",
+    );
+    write(
+        root,
+        "app.py",
+        "from utils import helper\ndef run():\n    helper()\n    unrelated()\n",
+    );
+
+    let (analysis, diagnostics) =
+        meta_ast::pipeline::analyze_graph(root, SnapshotId::new(1).unwrap(), None).unwrap();
+    let graph = &analysis.graph;
+    let app_id = graph
+        .files()
+        .find(|(_, file)| file.path == root.join("app.py"))
+        .map(|(id, _)| id)
+        .unwrap();
+    let resolved = analysis.scope.resolve(app_id, "helper");
+    assert!(resolved.is_some(), "{diagnostics:?}");
+    assert_eq!(resolved.unwrap().len(), 1);
+    assert!(analysis.scope.resolve(app_id, "unrelated").is_none());
+    assert!(
+        graph
+            .edges_of_kind(EdgeKind::Reference)
+            .any(|(source, target)| {
+                matches!(
+                    (&graph.graph()[source], &graph.graph()[target]),
+                    (NodeData::Symbol(from), NodeData::Symbol(to))
+                        if from.name == "run" && to.name == "helper"
+                )
+            }),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
 fn python_relative_import_creates_an_edge_to_the_submodule() {
     let root = project("py_relative_edge");
     write(&root, "pkg/__init__.py", "");

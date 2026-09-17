@@ -26,6 +26,9 @@ mod integration {
     mod pipeline_equivalence_test;
     mod pipeline_test;
     mod reanalyze_api_test;
+    // The committed golden document carries a dataflow-gated diagnostic, so a
+    // default-feature run cannot reproduce it.
+    #[cfg(feature = "dataflow")]
     mod shard_golden_test;
     mod shard_hygiene_test;
     mod shard_index_test;

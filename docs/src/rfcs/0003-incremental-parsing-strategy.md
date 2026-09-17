@@ -28,3 +28,11 @@ Correctness-first minimizes early defect risk; benchmark-driven optimization avo
 
 - Early versions may reparse more broadly.
 - Optimization milestones are explicitly measurable.
+
+## Incremental cache contract
+
+- A file that cannot be read keeps its cached extraction and counts as unchanged.
+- A retained file stays in the merged output with the same `Arc` handle.
+- The stale sweep never treats an unreadable file as removed.
+- A first-tick read failure has no entry to keep and claims no counter.
+- Oversized files and language changes re-extract and never duplicate a reused handle.
