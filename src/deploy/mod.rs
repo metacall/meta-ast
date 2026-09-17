@@ -62,6 +62,9 @@ fn inject_load_edges(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let path_to_idx = file_index(&analysis.graph);
+    let mut configs = config::ConfigCache::default();
+    // One broken file reports once no matter how many sites name it.
+    let mut reported: HashSet<PathBuf> = HashSet::new();
 
     for site in call_sites {
         if site.variant != CallSiteVariant::LoadFromConfiguration {
@@ -78,25 +81,16 @@ fn inject_load_edges(
             ));
             continue;
         };
-        let bytes = match config::read_config_file(&config_file) {
-            Ok(bytes) => bytes,
-            Err(message) => {
-                diagnostics.push(config::config_diagnostic(
-                    &config_file,
-                    site.source_range.as_ref(),
-                    message,
-                ));
-                continue;
-            }
-        };
-        let parsed = match config::parse_load_configuration(&bytes) {
+        let parsed = match configs.get(&config_file) {
             Ok(parsed) => parsed,
             Err(message) => {
-                diagnostics.push(config::config_diagnostic(
-                    &config_file,
-                    site.source_range.as_ref(),
-                    message,
-                ));
+                if reported.insert(config_file.clone()) {
+                    diagnostics.push(config::config_diagnostic(
+                        &config_file,
+                        site.source_range.as_ref(),
+                        message,
+                    ));
+                }
                 continue;
             }
         };

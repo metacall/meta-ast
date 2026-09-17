@@ -4,12 +4,14 @@
 //! a `language_id`, an optional `path`, and a `scripts` array. Relative
 //! `path` values resolve against the configuration file directory.
 
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 
 use crate::error::{Diagnostic, Severity};
 
+#[derive(Debug, Clone)]
 pub(crate) struct LoadConfiguration {
     pub language_id: Option<String>,
     pub context_path: Option<PathBuf>,
@@ -106,6 +108,29 @@ pub(crate) fn escapes_base(base: &Path, script: &str) -> bool {
         normalize(&base.join(script_path))
     };
     !joined.starts_with(&base)
+}
+
+/// One read and parse of each configuration file per phase.
+///
+/// Load-edge injection and client-call resolution read the same
+/// configurations in separate phases, so each phase keeps one cache: N
+/// sites sharing a file read and parse it once, and one failure reports
+/// once without relying on end-of-run dedup.
+#[derive(Debug, Default)]
+pub(crate) struct ConfigCache {
+    entries: HashMap<PathBuf, Result<LoadConfiguration, String>>,
+}
+
+impl ConfigCache {
+    /// Read, parse, and memoize one configuration file.
+    pub(crate) fn get(&mut self, file: &Path) -> Result<LoadConfiguration, String> {
+        if let Some(entry) = self.entries.get(file) {
+            return entry.clone();
+        }
+        let parsed = read_config_file(file).and_then(|bytes| parse_load_configuration(&bytes));
+        self.entries.insert(file.to_path_buf(), parsed.clone());
+        parsed
+    }
 }
 
 /// Base directory for script resolution.
@@ -285,6 +310,27 @@ mod tests {
         assert!(
             error.contains(&MAX_CONFIG_BYTES.to_string()),
             "the error names the cap: {error}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_cache_reads_once() {
+        let dir = std::env::temp_dir().join("meta_ast_config_cache");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("deploy.json");
+        std::fs::write(&path, r#"{"language_id":"node","scripts":["a.js"]}"#).unwrap();
+
+        let mut cache = ConfigCache::default();
+        let first = cache.get(&path).unwrap();
+        assert_eq!(first.scripts, vec!["a.js"]);
+
+        std::fs::remove_file(&path).unwrap();
+        let second = cache.get(&path).unwrap();
+        assert_eq!(
+            second.scripts, first.scripts,
+            "the deleted file still resolves from the cache"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

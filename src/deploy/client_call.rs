@@ -1,6 +1,6 @@
 //! Client-call resolution: map `metacall('fn', ...)` invocations to symbol nodes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::deploy::scanner::{CallSite, CallSiteVariant};
@@ -123,6 +123,9 @@ where
 
     let mut resolved: Vec<ResolvedClientCall> = Vec::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    let mut configs = super::config::ConfigCache::default();
+    // One broken file reports once no matter how many sites name it.
+    let mut reported: HashSet<PathBuf> = HashSet::new();
 
     // Files each source file loads, in load-site order (deduplicated). The
     // tag (when present) constrains Phase A candidates to that language.
@@ -148,25 +151,16 @@ where
                     ));
                     continue;
                 };
-                let bytes = match super::config::read_config_file(&config_file) {
-                    Ok(bytes) => bytes,
-                    Err(message) => {
-                        diagnostics.push(super::config::config_diagnostic(
-                            &config_file,
-                            site.source_range.as_ref(),
-                            message,
-                        ));
-                        continue;
-                    }
-                };
-                let parsed = match super::config::parse_load_configuration(&bytes) {
+                let parsed = match configs.get(&config_file) {
                     Ok(parsed) => parsed,
                     Err(message) => {
-                        diagnostics.push(super::config::config_diagnostic(
-                            &config_file,
-                            site.source_range.as_ref(),
-                            message,
-                        ));
+                        if reported.insert(config_file.clone()) {
+                            diagnostics.push(super::config::config_diagnostic(
+                                &config_file,
+                                site.source_range.as_ref(),
+                                message,
+                            ));
+                        }
                         continue;
                     }
                 };
@@ -694,6 +688,35 @@ mod tests {
         assert_eq!(
             resolution.diagnostics[0].path,
             PathBuf::from(".").join("missing.conf.json")
+        );
+    }
+
+    #[test]
+    fn shared_broken_config_reports_once() {
+        let mut fx = Fixture::new();
+        fx.add_file("orchestrator.py", LangId::Python);
+        let site = |source: &str| CallSite {
+            source_file: PathBuf::from(source),
+            caller_lang: LangId::Python,
+            variant: CallSiteVariant::LoadFromConfiguration,
+            target_lang: None,
+            scripts: vec!["missing.conf.json".to_string()],
+            function_name: None,
+            is_async: false,
+            source_range: None,
+            confidence: 1.0,
+        };
+        let resolution = resolve_client_call_projections(
+            &fx.graph,
+            &fx.extractions,
+            &[site("orchestrator.py"), site("other.py")],
+            Path::new("."),
+        );
+        assert_eq!(
+            resolution.diagnostics.len(),
+            1,
+            "one file, one failure, one diagnostic: {:?}",
+            resolution.diagnostics
         );
     }
 
