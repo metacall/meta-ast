@@ -262,6 +262,7 @@ fn cross_file_reference_rust_crate() {
         import_adjacency,
         file_languages,
         file_paths,
+        import_bindings: HashMap::new(),
     };
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
@@ -349,6 +350,7 @@ fn cross_file_reference_typescript() {
         import_adjacency,
         file_languages,
         file_paths,
+        import_bindings: HashMap::new(),
     };
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
@@ -471,6 +473,7 @@ fn edge_circular_does_not_infinite_loop() {
         import_adjacency,
         file_languages,
         file_paths,
+        import_bindings: HashMap::new(),
     };
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut diagnostics);
     assert!(!scope_cache.is_empty(), "scope cache should not be empty");
@@ -550,6 +553,7 @@ fn edge_transitive_resolution() {
         import_adjacency,
         file_languages,
         file_paths,
+        import_bindings: HashMap::new(),
     };
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
@@ -654,6 +658,7 @@ fn edge_unresolved_ref_creates_no_edges() {
         import_adjacency,
         file_languages,
         file_paths,
+        import_bindings: HashMap::new(),
     };
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
@@ -726,6 +731,7 @@ fn edge_selfref_creates_a_self_loop() {
         import_adjacency,
         file_languages,
         file_paths,
+        import_bindings: HashMap::new(),
     };
     let scope_cache = meta_ast::graph::resolver::FlattenedScopeCache::build(&ctx, &mut Vec::new());
     let ref_edges = meta_ast::graph::resolver::resolve_all_references(
