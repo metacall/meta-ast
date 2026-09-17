@@ -64,11 +64,15 @@ already carried by the import edge, and cursor resolution reads the scope cache.
 2. Ownership edges must form an acyclic containment structure.
 3. SCC computation applies to dependency/reference subgraph, not ownership edges. Self-loop detection and independence classification follow the same subgraph rule.
 4. Duplicate edges should be normalized by `(src, dst, edge_kind)` key. Strongest
-evidence wins within a triple, and the first flow kind wins. The two client-call
+evidence wins within a triple, and the first flow kind wins. Non-finite input
+carries no signal in a merge: it never displaces a finite value, so the result
+does not depend on arrival order. The two client-call
 projections never collide, because their source endpoints are different node kinds.
 5. A name resolves to the nearest definition only. The own file shadows a direct
 same-language import, a direct import shadows a transitive one, and a cross-language
-import ranks last. Equally ranked candidates stay visible and order by path.
+import ranks last. Equally ranked candidates stay visible and order by path. Direct
+imports further expose names through their bindings (ADR 0002): a precise pair
+shows exactly its declared names.
 
 `confidence_tier` classifies a confidence value by exact equality with the
 constants above (`ConfidenceTier::Unknown` for anything else), so a consumer groups
