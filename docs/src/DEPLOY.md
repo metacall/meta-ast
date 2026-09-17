@@ -34,7 +34,7 @@ meta-ast deploy <path> --check
 | --- | --- | --- |
 | `-o, --out <dir>` | `.` | Directory to write generated artifacts |
 | `-f, --format <json\|yaml>` | `json` | Serialization format |
-| `--check` | off | Fairness check mode: exits non-zero on missing RPC stubs |
+| `--check` | off | Check mode: cut fairness plus a diff of both manifests against the committed documents; exits non-zero on any issue |
 | `--max-pod-size <N>` | `20` | Files per pod before rebalancing triggers |
 
 ---
@@ -52,7 +52,7 @@ run_deploy()
   6. detect_cuts()                    - cross-language SCC cuts plus oversized pods
   7. build_documents()                - file and pod metrics, dependency resolution,
                                         pod manifest and mesh annotation
-  8. write_documents()                - atomic writes, or the cut fairness check in --check mode
+  8. write_documents()                - atomic writes, or fairness plus manifest diff in --check mode
 ```
 
 The run returns every diagnostic it collected to the caller, which applies the diagnostic policy
@@ -262,6 +262,15 @@ Units with `is_mesh_candidate = true` and `is_cross_language = false` deploy ind
 1. Every cut edge appears in `manifest.edges[]` with cut annotations.
 2. Cut edges have `kind: "rpc_stub"`.
 3. Non-cut edges carry no cut annotation.
+4. The stub matches the cut direction; a reverse-direction stub alone fails.
+
+Cut annotations land on the manifest edge between the cut's own files, with
+one `rpc_stub` summary per pod pair. The stub confidence is the weakest
+finite link, or zero when no link is finite.
+
+Check mode also diffs both generated documents against the committed
+`metacall.pods` and `metacall.mesh` files when they exist; a missing
+document skips the diff, so a fresh tree still checks clean.
 
 `run_deploy` exits non-zero if fairness checks fail.
 
