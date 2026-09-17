@@ -23,9 +23,21 @@ pub(crate) type ImportExtraction = (
     Vec<crate::error::Diagnostic>,
 );
 
+/// Scope that owns a def-use site.
+///
+/// A byte offset alone cannot name a scope: a function at the start of a
+/// file shares offset zero with the module.
+#[cfg(feature = "dataflow")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum DefUseScope {
+    Module,
+    Function { start: usize },
+}
+
 /// Definitions for one enclosing scope, grouped by name in source order.
+#[cfg(feature = "dataflow")]
 type DefinitionsByScope<'a> = std::collections::HashMap<
-    usize,
+    DefUseScope,
     std::collections::HashMap<&'a str, Vec<(usize, crate::model::DataNodeId)>>,
 >;
 
@@ -581,45 +593,19 @@ pub(crate) const JS_FAMILY_FUNCTION_KINDS: &[&str] = &[
     "method_definition",
 ];
 
-/// Return the start byte of the enclosing scope node for a syntax node.
-///
-/// Walks parents until a node kind in `function_kinds` matches.
-/// Returns 0 for top-level code outside any scope.
+/// Scope owning a syntax node: the nearest enclosing function, else the module.
 #[cfg(feature = "dataflow")]
-pub(crate) fn enclosing_scope_start(node: tree_sitter::Node, function_kinds: &[&str]) -> usize {
+pub(crate) fn enclosing_scope_key(node: tree_sitter::Node, function_kinds: &[&str]) -> DefUseScope {
     let mut current = node.parent();
     while let Some(parent) = current {
         if function_kinds.contains(&parent.kind()) {
-            return parent.start_byte();
+            return DefUseScope::Function {
+                start: parent.start_byte(),
+            };
         }
         current = parent.parent();
     }
-    0
-}
-
-/// Return the start byte of the innermost scope node containing `byte_pos`.
-///
-/// Recurses into children first so nested scopes win over outer scopes.
-#[cfg(feature = "dataflow")]
-pub(crate) fn find_enclosing_scope(
-    node: tree_sitter::Node,
-    byte_pos: usize,
-    function_kinds: &[&str],
-) -> usize {
-    if node.start_byte() <= byte_pos && byte_pos < node.end_byte() {
-        for i in 0..node.named_child_count() {
-            if let Some(child) = node.named_child(i as u32) {
-                let result = find_enclosing_scope(child, byte_pos, function_kinds);
-                if result != 0 {
-                    return result;
-                }
-            }
-        }
-        if function_kinds.contains(&node.kind()) {
-            return node.start_byte();
-        }
-    }
-    0
+    DefUseScope::Module
 }
 
 /// Shared def-use extraction engine.
@@ -643,7 +629,7 @@ pub(crate) fn extract_def_use_dataflow(
     // Names borrow the source: the text is only materialized for a node that
     // is actually emitted, so an unmatched use costs no allocation.
     let mut defs: Vec<(&str, usize, tree_sitter::Node, bool)> = Vec::new();
-    let mut uses: Vec<(&str, usize, tree_sitter::Node, usize)> = Vec::new();
+    let mut uses: Vec<(&str, usize, tree_sitter::Node, DefUseScope)> = Vec::new();
 
     let mut matches = cursor.matches(query, tree.root_node(), source);
     while let Some(m) = matches.next() {
@@ -659,8 +645,8 @@ pub(crate) fn extract_def_use_dataflow(
                 "def.var" => defs.push((name, byte_pos, node, false)),
                 "def.param" => defs.push((name, byte_pos, node, true)),
                 "use.var" => {
-                    let func_start = enclosing_scope_start(node, function_kinds);
-                    uses.push((name, byte_pos, node, func_start));
+                    let scope = enclosing_scope_key(node, function_kinds);
+                    uses.push((name, byte_pos, node, scope));
                 }
                 _ => {}
             }
@@ -687,7 +673,7 @@ pub(crate) fn extract_def_use_dataflow(
             type_hint: None,
             source_range: source_range_from_node(&node),
         };
-        let scope_start = find_enclosing_scope(tree.root_node(), byte_pos, function_kinds);
+        let scope_start = enclosing_scope_key(node, function_kinds);
         defs_by_scope
             .entry(scope_start)
             .or_default()
@@ -703,9 +689,9 @@ pub(crate) fn extract_def_use_dataflow(
     }
 
     let mut edges: Vec<FlowEdge> = Vec::with_capacity(uses.len());
-    for (use_name, use_pos, use_node, use_func_start) in uses {
+    for (use_name, use_pos, use_node, use_scope) in uses {
         let best_def = defs_by_scope
-            .get(&use_func_start)
+            .get(&use_scope)
             .and_then(|by_name| by_name.get(use_name))
             .and_then(|candidates| {
                 let preceding = candidates.partition_point(|(byte_pos, _)| *byte_pos < use_pos);
@@ -744,6 +730,8 @@ mod tests {
 
     use crate::language::LangId;
 
+    #[cfg(feature = "dataflow")]
+    use super::{DefUseScope, enclosing_scope_key};
     use super::{bare_span, clean_docstring, field_text, source_range_from_node};
 
     #[test]
@@ -895,5 +883,115 @@ mod tests {
     fn clean_docstring_mismatched_quotes() {
         let result = clean_docstring(r#""""hello'"#);
         assert_eq!(result, r#""""hello'"#);
+    }
+
+    #[cfg(feature = "dataflow")]
+    fn parse_python(source: &[u8]) -> tree_sitter::Tree {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&crate::language::grammar_for(LangId::Python))
+            .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    #[cfg(feature = "dataflow")]
+    fn find_identifier<'a>(
+        node: tree_sitter::Node<'a>,
+        source: &[u8],
+        target: &str,
+    ) -> Option<tree_sitter::Node<'a>> {
+        if node.kind() == "identifier" && node.utf8_text(source).ok() == Some(target) {
+            return Some(node);
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(found) = find_identifier(child, source, target) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Module scope stays distinct from a function that starts at byte zero.
+    #[cfg(feature = "dataflow")]
+    #[test]
+    fn module_scope_differs_from_function_at_byte_zero() {
+        use crate::language::python::PYTHON_FUNCTION_KINDS;
+
+        let source = b"def f():\n    x = 1\n";
+        let tree = parse_python(source);
+        let root = tree.root_node();
+        assert_eq!(root.start_byte(), 0);
+
+        let function = root.named_child(0).unwrap();
+        assert_eq!(function.kind(), "function_definition");
+        assert_eq!(function.start_byte(), 0);
+
+        let x = find_identifier(root, source, "x").unwrap();
+        assert_eq!(
+            enclosing_scope_key(x, PYTHON_FUNCTION_KINDS),
+            DefUseScope::Function { start: 0 }
+        );
+        assert_eq!(
+            enclosing_scope_key(root, PYTHON_FUNCTION_KINDS),
+            DefUseScope::Module
+        );
+        assert_ne!(
+            DefUseScope::Module,
+            DefUseScope::Function { start: 0 },
+            "module scope must not collide with a function at byte zero"
+        );
+    }
+
+    /// A module-level use must not link to a function-local def.
+    ///
+    /// `print(x)` at module level has no module def, so it emits no node
+    /// and no edge, even though `x = 1` inside `f` precedes it in the file.
+    #[cfg(feature = "dataflow")]
+    #[test]
+    fn function_local_def_does_not_leak_to_module_use() {
+        let source = b"def f():\n    x = 1\n    return x\nprint(x)\n";
+        let tree = parse_python(source);
+        let id_gen = crate::model::IdGenerator::new();
+        let (nodes, edges) =
+            crate::language::python::extract_python_dataflow(&tree, source, &id_gen);
+
+        assert_eq!(edges.len(), 1, "only the in-function use links: {edges:?}");
+        assert_eq!(nodes.len(), 2, "one def and one matched use: {nodes:?}");
+
+        let module_x = source
+            .iter()
+            .rposition(|&b| b == b'x')
+            .expect("module-level x");
+        assert!(
+            nodes.iter().all(|n| n.source_range.byte_start != module_x),
+            "module-level x must emit no data node: {nodes:?}"
+        );
+    }
+
+    /// Nested functions keep separate scopes under the same rule.
+    ///
+    /// `x = 1` belongs to `outer`, so the `print(x)` in `outer` links
+    /// while the one in `inner` stays unmatched.
+    #[cfg(feature = "dataflow")]
+    #[test]
+    fn nested_functions_keep_separate_scopes() {
+        let source = b"def outer():\n    x = 1\n    def inner():\n        print(x)\n    print(x)\n";
+        let tree = parse_python(source);
+        let id_gen = crate::model::IdGenerator::new();
+        let (nodes, edges) =
+            crate::language::python::extract_python_dataflow(&tree, source, &id_gen);
+
+        assert_eq!(edges.len(), 1, "only the outer use links: {edges:?}");
+        assert_eq!(nodes.len(), 2, "one def and one matched use: {nodes:?}");
+
+        let outer_x = source
+            .iter()
+            .rposition(|&b| b == b'x')
+            .expect("outer use of x");
+        assert!(
+            nodes.iter().any(|n| n.source_range.byte_start == outer_x),
+            "the matched use is the outer print(x): {nodes:?}"
+        );
     }
 }
