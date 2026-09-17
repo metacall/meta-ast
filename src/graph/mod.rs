@@ -62,13 +62,16 @@ pub struct CodeGraph {
     edge_index: HashMap<(NodeIndex, NodeIndex, EdgeKind), EdgeIndex>,
 
     /// Map from FileId to graph node index for O(1) lookup.
-    pub(crate) file_to_index: HashMap<FileId, NodeIndex>,
+    file_to_index: HashMap<FileId, NodeIndex>,
 
     /// Map from SymbolId to graph node index for O(1) lookup.
-    pub(crate) symbol_to_index: HashMap<SymbolId, NodeIndex>,
+    symbol_to_index: HashMap<SymbolId, NodeIndex>,
 
-    /// Map from external raw path to graph node index for O(1) lookup.
-    pub(crate) external_index: HashMap<String, NodeIndex>,
+    /// Map from external (raw path, language) to graph node index.
+    ///
+    /// Keyed by both so two languages importing one specifier never share
+    /// a node labeled with the wrong language.
+    external_index: HashMap<(String, LangId), NodeIndex>,
 
     /// Snapshot identifier for this graph as discussed before.
     pub snapshot_id: SnapshotId,
@@ -96,7 +99,7 @@ impl CodeGraph {
         edge_index: HashMap<(NodeIndex, NodeIndex, EdgeKind), EdgeIndex>,
         file_to_index: HashMap<FileId, NodeIndex>,
         symbol_to_index: HashMap<SymbolId, NodeIndex>,
-        external_index: HashMap<String, NodeIndex>,
+        external_index: HashMap<(String, LangId), NodeIndex>,
         snapshot_id: SnapshotId,
     ) -> Self {
         Self {
@@ -114,35 +117,58 @@ impl CodeGraph {
         &self.graph
     }
 
-    /// Adds a raw node to the graph. Node additions do not affect edge
-    /// normalization, so this is the only direct mutation needed by
-    /// deploy/test code that injects synthetic nodes post-build.
+    /// Adds a node through the one insertion rule: a repeated identifier
+    /// returns the existing index instead of orphaning a node.
     ///
-    /// The caller remains responsible for registering the node in the
-    /// index maps (`file_to_index`, `symbol_to_index`, `external_index`)
-    /// when it is a `File`/`Symbol`/`External` node. This method does not
-    /// sync those maps; a bare `Data` node needs no registration.
+    /// File and symbol nodes register by their id, external nodes by raw
+    /// path and language. Data nodes need no registration.
     pub fn add_node(&mut self, node: NodeData) -> NodeIndex {
-        self.graph.add_node(node)
-    }
-
-    /// Add a file node and register it in the file index.
-    pub fn add_file_node(&mut self, node: FileNode) -> NodeIndex {
-        let file_id = node.id;
-        let idx = self.graph.add_node(NodeData::File(node));
-        self.file_to_index.insert(file_id, idx);
-        idx
-    }
-
-    /// Add a symbol node and register it in the symbol index.
-    pub fn add_symbol_node(&mut self, node: SymbolNode) -> NodeIndex {
-        let symbol_id = node.id;
-        let idx = self.graph.add_node(NodeData::Symbol(node));
-        self.symbol_to_index.insert(symbol_id, idx);
+        match &node {
+            NodeData::File(file) => {
+                if let Some(&idx) = self.file_to_index.get(&file.id) {
+                    return idx;
+                }
+            }
+            NodeData::Symbol(symbol) => {
+                if let Some(&idx) = self.symbol_to_index.get(&symbol.id) {
+                    return idx;
+                }
+            }
+            NodeData::External(external) => {
+                if let Some(&idx) = self
+                    .external_index
+                    .get(&(external.raw_path.clone(), external.language))
+                {
+                    return idx;
+                }
+            }
+            NodeData::Data(_) => {}
+        }
+        let idx = self.graph.add_node(node);
+        match &self.graph[idx] {
+            NodeData::File(file) => {
+                self.file_to_index.insert(file.id, idx);
+            }
+            NodeData::Symbol(symbol) => {
+                self.symbol_to_index.insert(symbol.id, idx);
+            }
+            NodeData::External(external) => {
+                self.external_index
+                    .insert((external.raw_path.clone(), external.language), idx);
+            }
+            NodeData::Data(_) => {}
+        }
         idx
     }
     pub fn file_node_index(&self, file_id: FileId) -> Option<NodeIndex> {
         self.file_to_index.get(&file_id).copied()
+    }
+    /// File ids with their node indices, in index order.
+    ///
+    /// Every entry points at a `File` node by construction; callers that
+    /// need file data follow with [`CodeGraph::file_node`].
+    pub fn file_indices(&self) -> impl Iterator<Item = (FileId, NodeIndex)> + '_ {
+        self.file_to_index.iter().map(|(&id, &idx)| (id, idx))
     }
     pub fn symbol_node_index(&self, symbol_id: SymbolId) -> Option<NodeIndex> {
         self.symbol_to_index.get(&symbol_id).copied()
@@ -175,17 +201,38 @@ impl CodeGraph {
     /// Resolves or creates the `External` node for a raw unresolved path, keeping
     /// `external_index` consistent so repeated loads reuse a single node.
     pub fn get_or_create_external_node(&mut self, raw_path: String, language: LangId) -> NodeIndex {
-        if let Some(&idx) = self.external_index.get(&raw_path) {
-            return idx;
-        }
-        let node = NodeData::External(ExternalNode {
-            raw_path: raw_path.clone(),
+        self.add_node(NodeData::External(ExternalNode {
+            raw_path,
             language,
             classification: None,
-        });
-        let idx = self.graph.add_node(node);
-        self.external_index.insert(raw_path, idx);
-        idx
+        }))
+    }
+
+    /// Assert every index entry points at a node of the right kind with the
+    /// matching identifier. Insertion registers, so the maps cannot drift.
+    #[cfg(test)]
+    pub(crate) fn assert_index_invariants(&self) {
+        for (id, idx) in &self.file_to_index {
+            match self.graph.node_weight(*idx) {
+                Some(NodeData::File(node)) => assert_eq!(&node.id, id, "file index drifted"),
+                other => panic!("file index points at {other:?}"),
+            }
+        }
+        for (id, idx) in &self.symbol_to_index {
+            match self.graph.node_weight(*idx) {
+                Some(NodeData::Symbol(node)) => assert_eq!(&node.id, id, "symbol index drifted"),
+                other => panic!("symbol index points at {other:?}"),
+            }
+        }
+        for ((raw_path, language), idx) in &self.external_index {
+            match self.graph.node_weight(*idx) {
+                Some(NodeData::External(node)) => {
+                    assert_eq!(&node.raw_path, raw_path, "external index drifted");
+                    assert_eq!(&node.language, language, "external index drifted");
+                }
+                other => panic!("external index points at {other:?}"),
+            }
+        }
     }
     /// Adds an edge, normalizing duplicate `(src, dst, kind)` triples by max-merging
     /// confidence so injected edges obey the same invariant as builder-constructed ones.
@@ -596,5 +643,72 @@ mod tests {
         graph.add_edge_normalized(n1, n2, EdgeKind::Import, 0.9);
 
         assert_eq!(graph.edge_count(), 3);
+    }
+
+    #[test]
+    fn duplicate_file_id_returns_the_first_node() {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let first = graph.add_node(test_file_node(1, "a.rs"));
+        let second = graph.add_node(test_file_node(1, "b.rs"));
+
+        assert_eq!(first, second, "a repeated id must not orphan a node");
+        assert_eq!(graph.node_count(), 1);
+        assert_eq!(graph.file_count(), 1);
+        assert_eq!(
+            graph.file_node(FileId::new(1).unwrap()).unwrap().path,
+            PathBuf::from("a.rs"),
+            "the first registration wins"
+        );
+        graph.assert_index_invariants();
+    }
+
+    #[test]
+    fn duplicate_symbol_id_returns_the_first_node() {
+        use crate::graph::node::SymbolNode;
+        use crate::model::FileId;
+
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let node = |name: &str| {
+            NodeData::Symbol(SymbolNode {
+                id: SymbolId::new(7).unwrap(),
+                name: name.into(),
+                kind: SymbolKind::Function,
+                file_id: FileId::new(1).unwrap(),
+                visibility: None,
+                source_range: test_range(),
+            })
+        };
+        let first = graph.add_node(node("alpha"));
+        let second = graph.add_node(node("beta"));
+
+        assert_eq!(first, second, "a repeated id must not orphan a node");
+        assert_eq!(graph.node_count(), 1);
+        assert_eq!(graph.symbol_count(), 1);
+        graph.assert_index_invariants();
+    }
+
+    #[test]
+    fn external_nodes_split_by_language() {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let python = graph.get_or_create_external_node("react".into(), LangId::Python);
+        let again = graph.get_or_create_external_node("react".into(), LangId::Python);
+        let rust = graph.get_or_create_external_node("react".into(), LangId::Rust);
+
+        assert_eq!(python, again, "one specifier and language is one node");
+        assert_ne!(python, rust, "a second language is a second node");
+        assert_eq!(graph.external_count(), 2);
+        graph.assert_index_invariants();
+    }
+
+    #[test]
+    fn injected_nodes_keep_the_indexes_in_sync() {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        graph.add_node(test_file_node(1, "a.rs"));
+        graph.add_node(test_file_node(2, "b.rs"));
+
+        assert_eq!(graph.file_count(), 2);
+        assert!(graph.file_node_index(FileId::new(1).unwrap()).is_some());
+        assert!(graph.file_node_index(FileId::new(2).unwrap()).is_some());
+        graph.assert_index_invariants();
     }
 }

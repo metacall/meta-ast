@@ -741,8 +741,6 @@ mod tests {
             LangId::Python,
             SnapshotId::new(1).unwrap(),
         )));
-        graph.file_to_index.insert(a_id, a_idx);
-        graph.file_to_index.insert(b_id, b_idx);
         graph.add_edge_normalized(a_idx, b_idx, EdgeKind::Import, 1.0);
         graph.add_edge_normalized(b_idx, a_idx, EdgeKind::Import, 1.0);
 
@@ -851,8 +849,6 @@ mod tests {
             LangId::Python,
             SnapshotId::new(1).unwrap(),
         )));
-        graph.file_to_index.insert(a_id, a_idx);
-        graph.file_to_index.insert(b_id, b_idx);
         graph.add_edge_normalized(a_idx, b_idx, EdgeKind::Import, f32::NAN);
 
         let scc = SccAnalysis::analyze(graph.graph());

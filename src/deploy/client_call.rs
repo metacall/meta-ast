@@ -102,7 +102,7 @@ where
     let mut path_to_idx: HashMap<PathBuf, NodeIndex> = HashMap::new();
     // Path -> FileId, used to filter Phase A candidates by loaded file.
     let mut path_to_file_id: HashMap<PathBuf, FileId> = HashMap::new();
-    for (&fid, &idx) in &graph.file_to_index {
+    for (fid, idx) in graph.file_indices() {
         if let NodeData::File(f) = &graph.graph()[idx] {
             path_to_idx.insert(f.path.clone(), idx);
             path_to_file_id.insert(f.path.clone(), fid);
@@ -317,7 +317,7 @@ where
 {
     let (resolved, diagnostics) = resolve_sites(graph, extractions, call_sites, root);
     let mut path_to_idx: HashMap<PathBuf, NodeIndex> = HashMap::new();
-    for &idx in graph.file_to_index.values() {
+    for (_, idx) in graph.file_indices() {
         if let NodeData::File(file) = &graph.graph()[idx] {
             path_to_idx.insert(file.path.clone(), idx);
         }
@@ -470,14 +470,13 @@ mod tests {
         }
 
         fn add_file(&mut self, path: &str, lang: LangId) -> (FileId, NodeIndex) {
-            let id = FileId::new(self.graph.file_to_index.len() as u32 + 1).unwrap();
+            let id = FileId::new(self.graph.file_count() as u32 + 1).unwrap();
             let idx = self.graph.add_node(NodeData::File(FileNode::new(
                 id,
                 PathBuf::from(path),
                 lang,
                 SnapshotId::new(1).unwrap(),
             )));
-            self.graph.file_to_index.insert(id, idx);
             (id, idx)
         }
 
@@ -491,7 +490,6 @@ mod tests {
             let idx = self
                 .graph
                 .add_node(NodeData::Symbol(SymbolNode::from_symbol(sym, file_id)));
-            self.graph.symbol_to_index.insert(sym.id, idx);
             self.extractions
                 .push(extraction(path, lang, vec![sym.clone()]));
             idx
@@ -525,7 +523,7 @@ mod tests {
 
         assert_eq!(resolution.file_edges.len(), 1);
         let (from, to, confidence) = resolution.file_edges[0];
-        let py_idx = *fx.graph.file_to_index.get(&py_id).unwrap();
+        let py_idx = fx.graph.file_node_index(py_id).unwrap();
         assert_eq!(from, py_idx);
         assert_eq!(to, sym_idx);
         assert_eq!(confidence, 1.0);
@@ -715,7 +713,7 @@ mod tests {
         );
 
         assert_eq!(resolution.file_edges.len(), 2);
-        let py_idx = *fx.graph.file_to_index.get(&py_id).unwrap();
+        let py_idx = fx.graph.file_node_index(py_id).unwrap();
         let mut targets: Vec<NodeIndex> =
             resolution.file_edges.iter().map(|(_, to, _)| *to).collect();
         targets.sort();
@@ -747,7 +745,7 @@ mod tests {
 
         assert_eq!(resolution.file_edges.len(), 1);
         let (from, to, confidence) = resolution.file_edges[0];
-        let py_idx = *fx.graph.file_to_index.get(&py_id).unwrap();
+        let py_idx = fx.graph.file_node_index(py_id).unwrap();
         assert_eq!(from, py_idx);
         assert_eq!(to, sym_idx);
         assert_eq!(confidence, 0.6);
@@ -774,7 +772,7 @@ mod tests {
         );
 
         assert_eq!(resolution.file_edges.len(), 2);
-        let py_idx = *fx.graph.file_to_index.get(&py_id).unwrap();
+        let py_idx = fx.graph.file_node_index(py_id).unwrap();
         let mut targets: Vec<NodeIndex> =
             resolution.file_edges.iter().map(|(_, to, _)| *to).collect();
         targets.sort();
@@ -808,7 +806,7 @@ mod tests {
 
         assert_eq!(resolution.file_edges.len(), 1);
         let (from, to, confidence) = resolution.file_edges[0];
-        let py_idx = *fx.graph.file_to_index.get(&py_id).unwrap();
+        let py_idx = fx.graph.file_node_index(py_id).unwrap();
         assert_eq!(from, py_idx);
         assert_eq!(to, sym_idx);
         assert_eq!(confidence, 0.4);

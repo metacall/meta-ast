@@ -218,13 +218,12 @@ mod tests {
             (py, "a.py", LangId::Python),
             (js, "b.js", LangId::JavaScript),
         ] {
-            let idx = graph.add_node(NodeData::File(FileNode::new(
+            graph.add_node(NodeData::File(FileNode::new(
                 fid,
                 PathBuf::from(path),
                 lang,
                 SnapshotId::new(1).unwrap(),
             )));
-            graph.file_to_index.insert(fid, idx);
         }
 
         let partition = PodPartition {

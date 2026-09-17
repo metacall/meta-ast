@@ -486,13 +486,12 @@ mod tests {
         let mut files = Vec::new();
         for id in 1..=4 {
             let fid = FileId::new(id).unwrap();
-            let idx = graph.add_node(NodeData::File(FileNode::new(
+            graph.add_node(NodeData::File(FileNode::new(
                 fid,
                 std::path::PathBuf::from(format!("f{id}.py")),
                 LangId::Python,
                 SnapshotId::new(1).unwrap(),
             )));
-            graph.file_to_index.insert(fid, idx);
             files.push(fid);
         }
         // One pod over the limit, with no dependency edge inside it.
@@ -540,7 +539,6 @@ mod tests {
                 LangId::Python,
                 SnapshotId::new(1).unwrap(),
             )));
-            graph.file_to_index.insert(fid, idx);
             files.push(fid);
             indices.push(idx);
         }
@@ -658,13 +656,12 @@ mod tests {
         let mut files = Vec::new();
         for id in 1..=4 {
             let file_id = FileId::new(id).unwrap();
-            let index = graph.add_node(NodeData::File(FileNode::new(
+            graph.add_node(NodeData::File(FileNode::new(
                 file_id,
                 PathBuf::from(format!("f{id}.py")),
                 LangId::Python,
                 snapshot_id,
             )));
-            graph.file_to_index.insert(file_id, index);
             files.push(file_id);
         }
         // One pod over the limit, with no dependency edge inside it, so the

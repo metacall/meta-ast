@@ -272,17 +272,16 @@ mod tests {
         let mut fids = Vec::with_capacity(n);
         for i in 0..n {
             let id = FileId::new(i as u32 + 1).unwrap();
-            let idx = graph.add_node(NodeData::File(FileNode::new(
+            graph.add_node(NodeData::File(FileNode::new(
                 id,
                 PathBuf::from(format!("f{i}.py")),
                 LangId::Python,
                 SnapshotId::new(1).unwrap(),
             )));
-            graph.file_to_index.insert(id, idx);
             fids.push(id);
         }
 
-        let idx_of = |fid: FileId| -> NodeIndex { *graph.file_to_index.get(&fid).unwrap() };
+        let idx_of = |fid: FileId| -> NodeIndex { graph.file_node_index(fid).unwrap() };
         // Precompute edge endpoints first: idx_of borrows graph immutably
         // and cannot coexist with the &mut graph of add_edge_normalized.
         let weak_edge = if n >= 2 {
@@ -352,8 +351,6 @@ mod tests {
             LangId::Go,
             SnapshotId::new(1).unwrap(),
         )));
-        graph.file_to_index.insert(py_id, py_idx);
-        graph.file_to_index.insert(go_id, go_idx);
         graph.add_edge_normalized(py_idx, go_idx, EdgeKind::Import, 1.0);
         graph.add_edge_normalized(go_idx, py_idx, EdgeKind::Import, 1.0);
 
@@ -399,18 +396,13 @@ mod tests {
             LangId::Go,
             SnapshotId::new(1).unwrap(),
         )));
-        graph.file_to_index.insert(py_id, py_idx);
-        graph.file_to_index.insert(go_id, go_idx);
-
         graph.add_edge_normalized(py_idx, go_idx, EdgeKind::Import, 1.0);
         graph.add_edge_normalized(go_idx, py_idx, EdgeKind::Import, 1.0);
 
         let scc = SccAnalysis::analyze(graph.graph());
         let mut file_languages: HashMap<FileId, LangId> = HashMap::new();
-        for (&fid, &idx) in &graph.file_to_index {
-            if let NodeData::File(f) = &graph.graph()[idx] {
-                file_languages.insert(fid, f.language);
-            }
+        for (fid, file) in graph.files() {
+            file_languages.insert(fid, file.language);
         }
         let partition = partition_into_pods(&graph);
         let cuts = find_cross_language_cuts(&scc, &graph, &file_languages, &partition);
