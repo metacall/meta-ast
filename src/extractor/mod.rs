@@ -766,9 +766,12 @@ mod tests {
     fn oversized_buffer_reports_without_parsing() {
         let id_generators = ExtractionIdGenerators::new();
         let big: String = "x".repeat(MAX_SOURCE_BYTES as usize + 1);
+        let uri = url::Url::from_file_path(test_dir().join("oversized_buffer.py"))
+            .unwrap()
+            .to_string();
         let result = extract_text_with_id_gen(
             InMemorySource {
-                uri: "file:///tmp/oversized_buffer.py",
+                uri: &uri,
                 text: &big,
                 version: 1,
                 language: LangId::Python,
