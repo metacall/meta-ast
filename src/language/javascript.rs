@@ -26,9 +26,8 @@ const JS_IMPORT_QUERY_STR: &str = r#"
     (namespace_import
       (identifier) @import.symbol)))
 (call_expression
-  function: (identifier) @call.name
-  arguments: (arguments . (string) @import.path .)
-  (#eq? @call.name "require"))
+  function: (identifier) @import.call
+  arguments: (arguments . (string) @import.path .))
 "#;
 
 const JS_REFERENCE_QUERY_STR: &str = crate::language::typescript::TS_FAMILY_REFERENCE_QUERY;
@@ -217,6 +216,24 @@ define_language_pack!(
                 assert_eq!(imports.len(), 1);
                 assert_eq!(imports[0].import_specifier, "styles.css");
                 assert!(imports[0].symbol.is_none());
+            }
+
+            #[test]
+            fn only_require_is_an_import() {
+                use crate::language::extract_imports_and_references_for;
+                let src = b"load('utils');\nconst x = require('m');";
+                let tree = parse(src);
+                let (imports, _, _) = extract_imports_and_references_for(
+                    LangId::JavaScript,
+                    &tree,
+                    src,
+                    &std::path::PathBuf::from("test.js"),
+                );
+                let specifiers: Vec<&str> = imports
+                    .iter()
+                    .map(|import| import.import_specifier.as_str())
+                    .collect();
+                assert_eq!(specifiers, vec!["m"], "a computed call is not an import");
             }
 
             #[test]

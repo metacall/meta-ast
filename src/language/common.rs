@@ -452,6 +452,7 @@ fn undecodable(path: &std::path::Path, range: SourceRange, what: &str) -> crate:
 }
 
 pub(crate) fn extract_imports_and_references_with_spec<'a>(
+    id: super::LangId,
     tree: &'a tree_sitter::Tree,
     source: &'a [u8],
     spec: &LanguageSpec,
@@ -464,8 +465,12 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     let alias_idx = query.capture_index_for_name("import.alias");
     let symbol_idx = query.capture_index_for_name("import.symbol");
     let star_idx = query.capture_index_for_name("import.star");
+    let call_idx = query.capture_index_for_name("import.call");
     let Some(ref_idx) = query.capture_index_for_name("reference.name") else {
         return Ok((Vec::new(), Vec::new(), Vec::new()));
+    };
+    let name_at = |node: tree_sitter::Node| -> &'a str {
+        std::str::from_utf8(&source[node.byte_range()]).unwrap_or("")
     };
 
     let mut query_cursor = tree_sitter::QueryCursor::new();
@@ -486,6 +491,7 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
         let mut alias: Option<(usize, usize)> = None;
         let mut symbol: Option<(usize, usize)> = None;
         let mut star = false;
+        let mut rejected = false;
         let mut node: Option<tree_sitter::Node<'a>> = None;
 
         for capture in m.captures() {
@@ -511,11 +517,16 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
                 && idx == star_idx
             {
                 star = true;
-            } else if idx == ref_idx {
+            } else if Some(idx) == call_idx {
+                rejected = !import_call_accepted(id, name_at(capture.node));
+            } else if idx == ref_idx && reference_accepted(id, name_at(capture.node)) {
                 ref_ranges.push(source_range_from_node(&capture.node));
             }
         }
 
+        if rejected {
+            continue;
+        }
         if let Some(ns) = namespace {
             let range = source_range_from_node(&node.unwrap_or_else(|| tree.root_node()));
             raw_imports.push(RawImport {
@@ -578,6 +589,23 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     references.sort_by_key(|r| r.range.byte_start);
 
     Ok((imports, references, diagnostics))
+}
+
+fn import_call_accepted(id: super::LangId, name: &str) -> bool {
+    match id {
+        super::LangId::Ruby => matches!(name, "require" | "require_relative"),
+        super::LangId::JavaScript | super::LangId::TypeScript | super::LangId::Tsx => {
+            name == "require"
+        }
+        _ => true,
+    }
+}
+
+fn reference_accepted(id: super::LangId, name: &str) -> bool {
+    match id {
+        super::LangId::Ruby => !matches!(name, "require" | "require_relative"),
+        _ => true,
+    }
 }
 
 /// JS-family AST node kinds that introduce a new intra-procedural scope.

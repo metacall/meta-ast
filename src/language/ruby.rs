@@ -58,15 +58,13 @@ fn resolve_ruby_import(raw: &str, source_dir: &Path, project_root: &Path) -> Opt
 
 const RUBY_IMPORT_QUERY_STR: &str = r#"
 (call
-  method: (identifier) @import.method
-  arguments: (argument_list . (string) @import.path .)
-  (#match? @import.method "^(require|require_relative)$"))
+  method: (identifier) @import.call
+  arguments: (argument_list . (string) @import.path .))
 "#;
 
 const RUBY_REFERENCE_QUERY_STR: &str = r#"
 (call
-  method: (identifier) @reference.name
-  (#not-match? @reference.name "^(require|require_relative)$"))
+  method: (identifier) @reference.name)
 (call
   receiver: (constant) @reference.name)
 (call
@@ -157,6 +155,30 @@ define_language_pack!(
                 let symbols = extract_symbols_for(LangId::Ruby, &tree, src);
                 let square = symbols.iter().find(|s| s.name == "square").unwrap();
                 assert!(matches!(square.kind, SymbolKind::Method));
+            }
+
+            #[test]
+            fn require_is_the_only_import_and_never_a_reference() {
+                use crate::language::extract_imports_and_references_for;
+                let src = b"helper(\"x\")\nrequire \"y\"\nrequire_relative \"z\"\n";
+                let tree = parse(src);
+                let (imports, references, _) = extract_imports_and_references_for(
+                    LangId::Ruby,
+                    &tree,
+                    src,
+                    &std::path::PathBuf::from("test.rb"),
+                );
+                let specifiers: Vec<&str> = imports
+                    .iter()
+                    .map(|import| import.import_specifier.as_str())
+                    .collect();
+                assert_eq!(specifiers, vec!["y", "z"], "only the loaders are imports");
+                assert!(
+                    references
+                        .iter()
+                        .all(|reference| !reference.name.starts_with("require")),
+                    "the loader call is not a reference: {references:?}"
+                );
             }
 
             #[test]
