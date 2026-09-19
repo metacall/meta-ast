@@ -5,6 +5,7 @@ use crate::output::OutputFormat;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+mod bindings;
 pub mod check;
 pub mod client_call;
 pub mod config;

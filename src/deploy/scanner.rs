@@ -2,6 +2,7 @@
 //!
 //! Emits one `CallSite` per MetaCall load or client call detected by tree-sitter queries.
 
+use crate::deploy::bindings::{Decl, FileBindings};
 use crate::graph::edge::CONFIDENCE_COMPUTED;
 use crate::language::LangId;
 use std::path::{Path, PathBuf};
@@ -136,24 +137,6 @@ const CLIENT_NAMES: [&str; 20] = [
     "LoadFromPackage",
 ];
 
-/// The one alternation every query predicate and `from_str` share.
-static FUNCTION_NAME_PATTERN: LazyLock<String> = LazyLock::new(|| {
-    let mut alternatives: Vec<String> = CLIENT_NAMES
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect();
-    alternatives.push("metacall_load_from_.*".to_string());
-    alternatives.push("load_from_.*".to_string());
-    alternatives.push("from_(file|single_file|memory|package|configuration)".to_string());
-    alternatives.push("LoadFrom(File|Memory|Package|Configuration)".to_string());
-    format!("^({})$", alternatives.join("|"))
-});
-
-/// Fill the shared function name predicate into a query template.
-fn deploy_source(template: &str) -> String {
-    template.replace("@FN@", &FUNCTION_NAME_PATTERN)
-}
-
 fn load_variant(suffix: &str) -> Option<CallSiteVariant> {
     match suffix {
         "file" | "single_file" => Some(CallSiteVariant::LoadFromFile),
@@ -194,33 +177,51 @@ fn is_async_call(name: &str) -> bool {
     )
 }
 
-fn strip_quotes(s: &str) -> String {
-    // One pair only: trim_matches would eat repeated quotes into new text.
-    let s = s.strip_prefix(['"', '\'', '`']).unwrap_or(s);
-    s.strip_suffix(['"', '\'', '`']).unwrap_or(s).to_string()
-}
-
-/// True when the string node is static text; interpolations (f-strings,
-/// template substitutions) mean the runtime name is computed.
-fn is_plain_string(node: Node) -> bool {
-    let kind = node.kind();
-    if !(kind.contains("string") || kind == "string_literal") {
+/// True when a member call's receiver names the MetaCall module: the bare name,
+/// a file alias, or the inline `require("metacall")`, through any wrapping
+/// parentheses or TypeScript non-null assertion.
+fn receiver_is_module(source: &[u8], node: Node, bindings: &FileBindings) -> bool {
+    let node = crate::deploy::bindings::unwrap_value(node);
+    if crate::deploy::bindings::is_require_metacall(node, source) {
+        return true;
+    }
+    if !crate::deploy::bindings::is_name_node(node.kind()) {
         return false;
     }
-    let mut cursor = node.walk();
-    !node
-        .children(&mut cursor)
-        .any(|c| c.kind() == "interpolation" || c.kind() == "template_substitution")
+    let name = crate::deploy::bindings::text(node, source);
+    match bindings.resolve(node, name) {
+        Some(Decl::Module) => true,
+        Some(_) => false,
+        // No declaration anywhere: the bare module name still counts.
+        None => name == "metacall",
+    }
 }
 
-fn get_node_text<'a>(node: Node, source: &'a [u8]) -> &'a str {
-    std::str::from_utf8(&source[node.byte_range()]).unwrap_or("")
+/// The runtime entry point a bare call names, when any.
+///
+/// A renamed entry point resolves through its import; otherwise the callee
+/// text must name one directly.
+fn bare_target(callee: Node, name: &str, bindings: &FileBindings) -> Option<String> {
+    let callee = crate::deploy::bindings::unwrap_value(callee);
+    if crate::deploy::bindings::is_name_node(callee.kind()) {
+        match bindings.resolve(callee, name) {
+            Some(Decl::Member(member)) => {
+                return CallSiteVariant::from_str(&member).map(|_| member);
+            }
+            Some(_) => return None,
+            None => {}
+        }
+    }
+    CallSiteVariant::from_str(name).map(|_| name.to_string())
 }
 
 fn collect_strings_recursive(node: Node, source: &[u8], scripts: &mut Vec<String>) {
     let kind = node.kind();
     if kind.contains("string") || kind == "string_literal" {
-        scripts.push(strip_quotes(get_node_text(node, source)));
+        scripts.push(
+            crate::deploy::bindings::strip_quote_pair(crate::deploy::bindings::text(node, source))
+                .to_string(),
+        );
     } else {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -234,21 +235,16 @@ fn collect_strings_recursive(node: Node, source: &[u8], scripts: &mut Vec<String
 static PYTHON_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
     crate::language::common::compile_query_checked(
         &tree_sitter_python::LANGUAGE.into(),
-        &deploy_source(
-            r#"
+        r#"
 (call
-  function: (identifier) @fn_name
-  arguments: (argument_list) @args
-  (#match? @fn_name "@FN@"))
+  function: [(identifier) (parenthesized_expression)] @fn_name
+  arguments: (argument_list) @args)
 (call
   function: (attribute
-    object: (identifier) @obj_name
+    object: [(identifier) (parenthesized_expression)] @recv
     attribute: (identifier) @fn_name)
-  arguments: (argument_list) @args
-  (#match? @obj_name "^metacall$")
-  (#match? @fn_name "@FN@"))
+  arguments: (argument_list) @args)
 "#,
-        ),
         "Python deploy",
     )
 });
@@ -256,21 +252,16 @@ static PYTHON_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
 static JS_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
     crate::language::common::compile_query_checked(
         &tree_sitter_javascript::LANGUAGE.into(),
-        &deploy_source(
-            r#"
+        r#"
 (call_expression
-  function: (identifier) @fn_name
-  arguments: (arguments) @args
-  (#match? @fn_name "@FN@"))
+  function: [(identifier) (parenthesized_expression)] @fn_name
+  arguments: (arguments) @args)
 (call_expression
   function: (member_expression
-    object: (identifier) @obj_name
+    object: [(identifier) (call_expression) (parenthesized_expression)] @recv
     property: (property_identifier) @fn_name)
-  arguments: (arguments) @args
-  (#match? @obj_name "^metacall$")
-  (#match? @fn_name "@FN@"))
+  arguments: (arguments) @args)
 "#,
-        ),
         "JS deploy",
     )
 });
@@ -278,21 +269,18 @@ static JS_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
 static TS_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
     crate::language::common::compile_query_checked(
         &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        &deploy_source(
-            r#"
+        r#"
 (call_expression
-  function: (identifier) @fn_name
-  arguments: (arguments) @args
-  (#match? @fn_name "@FN@"))
+  function: [(identifier) (parenthesized_expression) (non_null_expression)
+               (as_expression) (satisfies_expression) (type_assertion)] @fn_name
+  arguments: (arguments) @args)
 (call_expression
   function: (member_expression
-    object: (identifier) @obj_name
+    object: [(identifier) (call_expression) (parenthesized_expression) (non_null_expression)
+             (as_expression) (satisfies_expression) (type_assertion)] @recv
     property: (property_identifier) @fn_name)
-  arguments: (arguments) @args
-  (#match? @obj_name "^metacall$")
-  (#match? @fn_name "@FN@"))
+  arguments: (arguments) @args)
 "#,
-        ),
         "TS deploy",
     )
 });
@@ -300,21 +288,18 @@ static TS_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
 static TSX_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
     crate::language::common::compile_query_checked(
         &tree_sitter_typescript::LANGUAGE_TSX.into(),
-        &deploy_source(
-            r#"
+        r#"
 (call_expression
-  function: (identifier) @fn_name
-  arguments: (arguments) @args
-  (#match? @fn_name "@FN@"))
+  function: [(identifier) (parenthesized_expression) (non_null_expression)
+               (as_expression) (satisfies_expression)] @fn_name
+  arguments: (arguments) @args)
 (call_expression
   function: (member_expression
-    object: (identifier) @obj_name
+    object: [(identifier) (call_expression) (parenthesized_expression) (non_null_expression)
+             (as_expression) (satisfies_expression)] @recv
     property: (property_identifier) @fn_name)
-  arguments: (arguments) @args
-  (#match? @obj_name "^metacall$")
-  (#match? @fn_name "@FN@"))
+  arguments: (arguments) @args)
 "#,
-        ),
         "TSX deploy",
     )
 });
@@ -322,14 +307,11 @@ static TSX_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
 static C_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
     crate::language::common::compile_query_checked(
         &tree_sitter_c::LANGUAGE.into(),
-        &deploy_source(
-            r#"
+        r#"
 (call_expression
-  function: (identifier) @fn_name
-  arguments: (argument_list) @args
-  (#match? @fn_name "@FN@"))
+  function: [(identifier) (parenthesized_expression)] @fn_name
+  arguments: (argument_list) @args)
 "#,
-        ),
         "C deploy",
     )
 });
@@ -337,21 +319,16 @@ static C_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
 static CPP_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
     crate::language::common::compile_query_checked(
         &tree_sitter_cpp::LANGUAGE.into(),
-        &deploy_source(
-            r#"
+        r#"
 (call_expression
-  function: (identifier) @fn_name
-  arguments: (argument_list) @args
-  (#match? @fn_name "@FN@"))
+  function: [(identifier) (parenthesized_expression)] @fn_name
+  arguments: (argument_list) @args)
 (call_expression
   function: (qualified_identifier
-    scope: (namespace_identifier) @scope_name
+    scope: (namespace_identifier) @recv
     name: (identifier) @fn_name)
-  arguments: (argument_list) @args
-  (#match? @scope_name "^metacall$")
-  (#match? @fn_name "@FN@"))
+  arguments: (argument_list) @args)
 "#,
-        ),
         "CPP deploy",
     )
 });
@@ -359,26 +336,21 @@ static CPP_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
 static RUST_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
     crate::language::common::compile_query_checked(
         &tree_sitter_rust::LANGUAGE.into(),
-        &deploy_source(
-            r#"
+        r#"
 (call_expression
   function: [
     (scoped_identifier
-        path: (identifier) @mod_name
+        path: (identifier) @recv
         name: (identifier) @fn_name)
     (scoped_identifier
-        path: (scoped_identifier path: (identifier) @mod_name name: (identifier) @sub_mod)
+        path: (scoped_identifier path: (identifier) @recv name: (identifier))
         name: (identifier) @fn_name)
   ]
-  arguments: (arguments) @args
-  (#match? @mod_name "^metacall$")
-  (#match? @fn_name "@FN@"))
+  arguments: (arguments) @args)
 (call_expression
-  function: (identifier) @fn_name
-  arguments: (arguments) @args
-  (#match? @fn_name "@FN@"))
+  function: [(identifier) (parenthesized_expression)] @fn_name
+  arguments: (arguments) @args)
 "#,
-        ),
         "Rust deploy",
     )
 });
@@ -386,26 +358,20 @@ static RUST_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
 static GO_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
     crate::language::common::compile_query_checked(
         &tree_sitter_go::LANGUAGE.into(),
-        &deploy_source(
-            r#"
+        r#"
 (call_expression
   function: (selector_expression
-    operand: (identifier) @pkg_name
+    operand: [(identifier) (parenthesized_expression)] @recv
     field: (field_identifier) @fn_name)
-  arguments: (argument_list) @args
-  (#match? @pkg_name "^metacall$")
-  (#match? @fn_name "@FN@"))
+  arguments: (argument_list) @args)
 
 ; A one argument call parses as a type conversion in this grammar.
 (type_conversion_expression
   (qualified_type
-    (package_identifier) @pkg_name
+    (package_identifier) @recv
     (type_identifier) @fn_name)
-  operand: (_) @args
-  (#match? @pkg_name "^metacall$")
-  (#match? @fn_name "@FN@"))
+  operand: (_) @args)
 "#,
-        ),
         "Go deploy",
     )
 });
@@ -413,14 +379,16 @@ static GO_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
 static RUBY_QUERY: LazyLock<Result<Query, String>> = LazyLock::new(|| {
     crate::language::common::compile_query_checked(
         &tree_sitter_ruby::LANGUAGE.into(),
-        &deploy_source(
-            r#"
+        r#"
 (call
+  !receiver
   method: (identifier) @fn_name
-  arguments: (argument_list) @args
-  (#match? @fn_name "@FN@"))
+  arguments: (argument_list) @args)
+(call
+  receiver: [(identifier) (parenthesized_statements)] @recv
+  method: (identifier) @fn_name
+  arguments: (argument_list) @args)
 "#,
-        ),
         "Ruby deploy",
     )
 });
@@ -456,27 +424,49 @@ pub fn scan_file(
     let Some(args_idx) = query.capture_index_for_name("args") else {
         return Ok(call_sites);
     };
+    let recv_idx = query.capture_index_for_name("recv");
+    let bindings = FileBindings::collect(id, tree, source);
 
     while let Some(mat) = matches.next() {
-        let mut variant = None;
         let mut target_lang = None;
         let mut scripts = Vec::new();
         let mut confidence = 1.0;
         let mut name = "";
 
         let mut args_node = None;
+        let mut receiver = None;
+        let mut callee = None;
 
         for capture in mat.captures() {
             if capture.index == fn_name_idx {
-                name = get_node_text(capture.node, source);
-                variant = CallSiteVariant::from_str(name);
+                callee = Some(capture.node);
+                name = crate::deploy::bindings::text(
+                    crate::deploy::bindings::unwrap_value(capture.node),
+                    source,
+                );
             } else if capture.index == args_idx {
                 args_node = Some(capture.node);
+            } else if recv_idx == Some(capture.index) {
+                receiver = Some(capture.node);
             }
         }
 
-        if let (Some(variant), Some(args)) = (variant, args_node) {
-            let is_async = is_async_call(name);
+        // A member call counts only on the MetaCall module; a bare call counts
+        // when it names an entry point, directly or through a rename.
+        let resolved = match receiver {
+            Some(node) => receiver_is_module(source, node, &bindings).then(|| name.to_string()),
+            None => callee.and_then(|node| bare_target(node, name, &bindings)),
+        };
+        let Some(resolved) = resolved else {
+            continue;
+        };
+        let resolved = resolved.as_str();
+        let Some(variant) = CallSiteVariant::from_str(resolved) else {
+            continue;
+        };
+
+        if let Some(args) = args_node {
+            let is_async = is_async_call(resolved);
             let call_range = args.range();
             let source_range = Some(crate::model::SourceRange {
                 byte_start: call_range.start_byte,
@@ -506,11 +496,11 @@ pub fn scan_file(
                 // First argument is the target function name; computed names
                 // keep the source text at computed confidence.
                 if let Some(fn_node) = named_children.first() {
-                    let text = get_node_text(*fn_node, source);
-                    if is_plain_string(*fn_node) {
-                        function_name = Some(strip_quotes(text));
+                    if let Some(literal) = crate::deploy::bindings::string_text(*fn_node, source) {
+                        function_name = Some(literal.to_string());
                     } else {
-                        function_name = Some(text.to_string());
+                        function_name =
+                            Some(crate::deploy::bindings::text(*fn_node, source).to_string());
                         confidence = CONFIDENCE_COMPUTED;
                     }
                 }
@@ -520,20 +510,20 @@ pub fn scan_file(
                 // the tag stays empty because the language comes from the
                 // configuration itself.
                 if let Some(path_node) = named_children.first()
-                    && is_plain_string(*path_node)
+                    && let Some(path_text) =
+                        crate::deploy::bindings::string_text(*path_node, source)
                 {
-                    scripts.push(strip_quotes(get_node_text(*path_node, source)));
+                    scripts.push(path_text.to_string());
                 }
             } else {
                 if let Some(lang_node) = named_children.first() {
-                    let text = get_node_text(*lang_node, source);
-                    let kind = lang_node.kind();
-                    if kind.contains("string") || kind == "string_literal" {
-                        target_lang = Some(strip_quotes(text));
+                    if let Some(tag) = crate::deploy::bindings::string_text(*lang_node, source) {
+                        target_lang = Some(tag.to_string());
                     } else {
                         // A Rust loader path spells `Tag::NodeJS`: the tag is
                         // the last segment. A known tag stays certain.
-                        let segment = text.rsplit("::").next().unwrap_or(text);
+                        let raw = crate::deploy::bindings::text(*lang_node, source);
+                        let segment = raw.rsplit("::").next().unwrap_or(raw);
                         target_lang = Some(segment.to_string());
                         if crate::deploy::tags::from_metacall_tag(segment).is_none() {
                             confidence = CONFIDENCE_COMPUTED;
@@ -550,8 +540,10 @@ pub fn scan_file(
                         || kind == "composite_literal"
                     {
                         collect_strings_recursive(*scripts_node, source, &mut scripts);
-                    } else if kind.contains("string") || kind == "string_literal" {
-                        scripts.push(strip_quotes(get_node_text(*scripts_node, source)));
+                    } else if let Some(script) =
+                        crate::deploy::bindings::string_text(*scripts_node, source)
+                    {
+                        scripts.push(script.to_string());
                     }
                     // Anything else names a variable holding the scripts, such
                     // as the C array pointer in (tag, paths, size, handle).
@@ -1150,10 +1142,377 @@ metacall_await_s("x", 1)
         assert_eq!(sites[0].target_lang.as_deref(), Some("node"));
     }
 
+    /// A renamed module receiver is accepted; a rename of anything else is not.
+    fn assert_one_client_call(id: LangId, source: &[u8], path: &str, expected: &str) {
+        let tree = parse(id, source);
+        let sites = scan_sites(id, &tree, source, path);
+        assert_eq!(sites.len(), 1, "one call site expected: {sites:?}");
+        assert_eq!(sites[0].variant, CallSiteVariant::ClientCall);
+        assert_eq!(sites[0].function_name.as_deref(), Some(expected));
+    }
+
+    #[test]
+    fn test_scan_javascript_require_alias_binds_the_module() {
+        assert_one_client_call(
+            LangId::JavaScript,
+            b"const mc = require(\"metacall\");\nmc.metacall(\"sum\", 1, 2);",
+            "test.js",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_javascript_require_destructuring_renames_a_member() {
+        assert_one_client_call(
+            LangId::JavaScript,
+            b"const { metacall: m } = require(\"metacall\");\nm(\"sum\", 1, 2);",
+            "test.js",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_javascript_require_alias_loads() {
+        let source =
+            b"const mc = require(\"metacall\");\nmc.metacall_load_from_file(\"py\", [\"x.py\"]);";
+        let tree = parse(LangId::JavaScript, source);
+        let sites = scan_sites(LangId::JavaScript, &tree, source, "test.js");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+        assert_eq!(sites[0].target_lang.as_deref(), Some("py"));
+        assert_eq!(sites[0].scripts, vec!["x.py"]);
+    }
+
+    #[test]
+    fn test_scan_javascript_import_forms_bind_names() {
+        assert_one_client_call(
+            LangId::JavaScript,
+            b"import * as mc from \"metacall\";\nmc.metacall(\"sum\", 1, 2);",
+            "test.mjs",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::JavaScript,
+            b"import mc from \"metacall\";\nmc.metacall(\"sum\", 1, 2);",
+            "test.mjs",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::JavaScript,
+            b"import { metacall as m } from \"metacall\";\nm(\"sum\", 1, 2);",
+            "test.mjs",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_javascript_inline_require_receiver() {
+        assert_one_client_call(
+            LangId::JavaScript,
+            b"require(\"metacall\").metacall(\"sum\", 1, 2);",
+            "test.js",
+            "sum",
+        );
+    }
+
+    /// Wrapping parentheses and the TypeScript non-null assertion keep the receiver.
+    #[test]
+    fn test_scan_typescript_wrapped_receivers() {
+        assert_one_client_call(
+            LangId::TypeScript,
+            b"import * as mc from \"metacall\";\nmc!.metacall(\"sum\", 1, 2);",
+            "test.ts",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::TypeScript,
+            b"import * as mc from \"metacall\";\n(mc).metacall(\"sum\", 1, 2);",
+            "test.ts",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::TypeScript,
+            b"import * as mc from \"metacall\";\n((mc!)).metacall(\"sum\", 1, 2);",
+            "test.ts",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::Tsx,
+            b"import * as mc from \"metacall\";\nmc!.metacall(\"sum\", 1, 2);",
+            "test.tsx",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_wrapped_load_and_inline_require_receivers() {
+        let source =
+            b"import * as mc from \"metacall\";\n(mc).metacall_load_from_file(\"py\", [\"x.py\"]);";
+        let tree = parse(LangId::TypeScript, source);
+        let sites = scan_sites(LangId::TypeScript, &tree, source, "test.ts");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+        assert_eq!(sites[0].scripts, vec!["x.py"]);
+
+        assert_one_client_call(
+            LangId::TypeScript,
+            b"(require(\"metacall\")).metacall(\"sum\", 1, 2);",
+            "test.ts",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::JavaScript,
+            b"const mc = require(\"metacall\");\n(mc).metacall(\"sum\", 1, 2);",
+            "test.js",
+            "sum",
+        );
+    }
+
+    /// Every supported language peels the wrappers its grammar can produce.
+    #[test]
+    fn test_scan_typescript_type_wrappers() {
+        for source in [
+            &b"import * as mc from \"metacall\";\n(mc as any).metacall(\"sum\", 1, 2);"[..],
+            &b"import * as mc from \"metacall\";\n(mc satisfies Shape).metacall(\"sum\", 1, 2);"[..],
+            &b"import * as mc from \"metacall\";\n(<any>mc).metacall(\"sum\", 1, 2);"[..],
+            &b"import * as mc from \"metacall\";\n((mc! as any)).metacall(\"sum\", 1, 2);"[..],
+        ] {
+            assert_one_client_call(LangId::TypeScript, source, "test.ts", "sum");
+        }
+        assert_one_client_call(
+            LangId::Tsx,
+            b"import * as mc from \"metacall\";\n(mc as any).metacall(\"sum\", 1, 2);",
+            "test.tsx",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_python_parenthesized_receiver() {
+        assert_one_client_call(
+            LangId::Python,
+            b"import metacall as mc\n(mc).metacall(\"sum\", 1, 2)",
+            "test.py",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::Python,
+            b"from metacall import metacall as m\n((m))(\"sum\", 1, 2)",
+            "test.py",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_go_parenthesized_receiver() {
+        assert_one_client_call(
+            LangId::Go,
+            b"import mc \"metacall\"\n\nfunc main() { (mc).Call(\"sum\", 1, 2) }",
+            "main.go",
+            "sum",
+        );
+    }
+
+    /// Ruby calls carry a receiver as a field; only the module may have one.
+    #[test]
+    fn test_scan_ruby_receivers() {
+        let bare = b"metacall(\"sum\", 1, 2)\n";
+        let tree = parse(LangId::Ruby, bare);
+        let sites = scan_sites(LangId::Ruby, &tree, bare, "test.rb");
+        assert_eq!(sites.len(), 1, "a bare call is a client call: {sites:?}");
+        assert_eq!(sites[0].function_name.as_deref(), Some("sum"));
+
+        assert_one_client_call(
+            LangId::Ruby,
+            b"metacall.metacall(\"sum\", 1, 2)\n",
+            "test.rb",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::Ruby,
+            b"(metacall).metacall(\"sum\", 1, 2)\n",
+            "test.rb",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_ruby_receiver_of_another_object_is_ignored() {
+        let source = b"db.metacall('x')\nlogger.metacall_load_from_file('py', ['x.py'])\n";
+        let tree = parse(LangId::Ruby, source);
+        let sites = scan_sites(LangId::Ruby, &tree, source, "test.rb");
+        assert!(
+            sites.is_empty(),
+            "a receiver must be the module itself: {sites:?}"
+        );
+    }
+
+    /// Two grammars cannot wrap a module receiver at all, and the parse shows it.
+    /// A wrapped callee is the same call: parentheses keep the value, and the
+    /// TypeScript type wrappers do too.
+    #[test]
+    fn test_scan_wrapped_callees() {
+        assert_one_client_call(
+            LangId::JavaScript,
+            b"(metacall)(\"sum\", 1, 2);",
+            "test.js",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::TypeScript,
+            b"(metacall as any)(\"sum\", 1, 2);",
+            "test.ts",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::C,
+            b"void f() { (metacall)(\"sum\", 1, 2); }",
+            "test.c",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::Cpp,
+            b"void f() { (metacall)(\"sum\", 1, 2); }",
+            "test.cpp",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::Rust,
+            b"fn main() { (metacall)(\"sum\", &[1, 2]); }",
+            "lib.rs",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_wrapped_callee_of_another_name_is_ignored() {
+        let source = b"(db)(\"x\");\n(log)(1);\n";
+        let tree = parse(LangId::JavaScript, source);
+        let sites = scan_sites(LangId::JavaScript, &tree, source, "test.js");
+        assert!(
+            sites.is_empty(),
+            "wrapping must not admit another callee: {sites:?}"
+        );
+    }
+
+    #[test]
+    fn test_scan_unwrappable_receivers_stay_undetected() {
+        let rust = b"use metacall as mc;\nfn main() { (mc)::metacall(\"sum\", &[1, 2]); }";
+        let tree = parse(LangId::Rust, rust);
+        assert!(
+            scan_sites(LangId::Rust, &tree, rust, "lib.rs").is_empty(),
+            "a parenthesized Rust path is a syntax error, not a receiver"
+        );
+
+        let cpp = b"namespace mc = metacall;\nvoid f() { (mc)::load_from_file(\"py\", \"x.py\"); }";
+        let tree = parse(LangId::Cpp, cpp);
+        assert!(
+            scan_sites(LangId::Cpp, &tree, cpp, "main.cpp").is_empty(),
+            "a parenthesized C++ namespace is a cast, not a receiver"
+        );
+    }
+
+    #[test]
+    fn test_scan_wrapped_receivers_of_another_module_are_ignored() {
+        let source = b"const db = require(\"db\");\n(db).Call('x');\n(require(\"metacall-client\")).metacall('x');\n(db!).Call('x');";
+        let tree = parse(LangId::TypeScript, source);
+        let sites = scan_sites(LangId::TypeScript, &tree, source, "test.ts");
+        assert!(
+            sites.is_empty(),
+            "wrapping must not admit another module: {sites:?}"
+        );
+    }
+
+    #[test]
+    fn test_scan_javascript_alias_of_another_module_is_ignored() {
+        let source = b"const db = require(\"db\");\ndb.Call('x');\nconst m = require(\"metacall-client\");\nm.metacall('x');";
+        let tree = parse(LangId::JavaScript, source);
+        let sites = scan_sites(LangId::JavaScript, &tree, source, "test.js");
+        assert!(
+            sites.is_empty(),
+            "only the metacall module aliases count: {sites:?}"
+        );
+    }
+
+    #[test]
+    fn test_scan_typescript_alias_forms() {
+        assert_one_client_call(
+            LangId::TypeScript,
+            b"import * as mc from \"metacall\";\nmc.metacall(\"sum\", 1, 2);",
+            "test.ts",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::Tsx,
+            b"const mc = require(\"metacall\");\nmc.metacall(\"sum\", 1, 2);",
+            "test.tsx",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_python_alias_forms() {
+        assert_one_client_call(
+            LangId::Python,
+            b"import metacall as mc\nmc.metacall(\"sum\", 1, 2)",
+            "test.py",
+            "sum",
+        );
+        assert_one_client_call(
+            LangId::Python,
+            b"from metacall import metacall as m\nm(\"sum\", 1, 2)",
+            "test.py",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_go_import_alias() {
+        assert_one_client_call(
+            LangId::Go,
+            b"import mc \"metacall\"\n\nfunc main() { mc.Call(\"sum\", 1, 2) }",
+            "main.go",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_rust_use_alias() {
+        assert_one_client_call(
+            LangId::Rust,
+            b"use metacall as mc;\n\nfn main() { mc::metacall(\"sum\", &[1, 2]); }",
+            "lib.rs",
+            "sum",
+        );
+    }
+
+    #[test]
+    fn test_scan_rust_use_alias_of_a_member_keeps_its_variant() {
+        let source =
+            b"use metacall::load_from_file as load;\n\nfn main() { load(\"py\", \"x.py\"); }";
+        let tree = parse(LangId::Rust, source);
+        let sites = scan_sites(LangId::Rust, &tree, source, "lib.rs");
+        assert_eq!(sites.len(), 1, "one load site expected: {sites:?}");
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+        assert_eq!(sites[0].target_lang.as_deref(), Some("py"));
+        assert_eq!(sites[0].scripts, vec!["x.py"]);
+    }
+
+    #[test]
+    fn test_scan_cpp_namespace_alias() {
+        let source = b"namespace mc = metacall;\nmc::load_from_file(\"py\", \"x.py\");";
+        let tree = parse(LangId::Cpp, source);
+        let sites = scan_sites(LangId::Cpp, &tree, source, "main.cpp");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].variant, CallSiteVariant::LoadFromFile);
+        assert_eq!(sites[0].scripts, vec!["x.py"]);
+    }
+
     #[test]
     fn strip_quotes_strips_one_pair() {
-        assert_eq!(strip_quotes("\"react\""), "react");
-        assert_eq!(strip_quotes("\"\"x\"\""), "\"x\"");
-        assert_eq!(strip_quotes("'a'"), "a");
+        let strip = crate::deploy::bindings::strip_quote_pair;
+        assert_eq!(strip("\"react\""), "react");
+        assert_eq!(strip("\"\"x\"\""), "\"x\"");
+        assert_eq!(strip("'a'"), "a");
     }
 }
