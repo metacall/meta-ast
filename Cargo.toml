@@ -21,6 +21,11 @@ name = "graph"
 harness = false
 name = "incremental"
 
+[[bench]]
+harness = false
+name = "deploy"
+required-features = ["metacall-deploy"]
+
 [dependencies]
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
