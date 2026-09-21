@@ -710,6 +710,8 @@ mod tests {
             extractions: Vec::new(),
             scope: crate::graph::resolver::FlattenedScopeCache::default(),
             references: Vec::new(),
+            #[cfg(feature = "metacall-deploy")]
+            client_calls: Vec::new(),
         };
         let out = std::env::temp_dir().join("meta_ast_deploy_stage_cuts");
         let mut config = fixture_config("mixed/python_calls_js", &out);

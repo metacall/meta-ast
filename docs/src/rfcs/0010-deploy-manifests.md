@@ -40,7 +40,7 @@ data into deploy manifest generation.
 | `DeployabilityHint` enum | Built | `src/graph/scc.rs:38-46` |
 | `DeployabilityStats` | Built | `src/output/graph.rs:31-36` |
 | `SerializedScc` | Built | `src/output/graph.rs:81-90` |
-| `GraphAnalysis` (graph + scc) | Built | `src/pipeline.rs:7-11` |
+| `GraphAnalysis` (graph, scc, scope, references, client-call records) | Built | `src/pipeline.rs` |
 | `GraphOutput::from_graph()` | Built | `src/output/graph.rs:113` |
 | `LangId` (8 variants) | Built | `src/language/mod.rs:67-80` |
 | `CodeGraph.external_index` | Built | `src/graph/mod.rs:15-22` |

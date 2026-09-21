@@ -24,6 +24,12 @@ pub struct GraphAnalysis {
     pub scope: crate::graph::resolver::FlattenedScopeCache,
     /// One record per resolved use site, in extraction and reference order.
     pub references: Vec<crate::graph::resolver::ResolvedReference>,
+    /// One record per resolved MetaCall client call, in call-site order.
+    ///
+    /// The builder already resolves these sites to inject their edges, so the
+    /// records ride along instead of forcing a second resolution pass.
+    #[cfg(feature = "metacall-deploy")]
+    pub client_calls: Vec<crate::deploy::client_call::ResolvedClientCall>,
 }
 
 /// Assemble the graph, the scope cache, the resolved references, the client
@@ -50,6 +56,8 @@ pub fn build_analysis(
             extractions,
             scope: parts.scope,
             references: parts.references,
+            #[cfg(feature = "metacall-deploy")]
+            client_calls: parts.client_calls,
         },
         diagnostics,
     )
