@@ -125,6 +125,7 @@ The end user installs one extension and sees none of this machinery:
 1. `serialize_symbol_node` emits `source_range` and `file_path` for symbol nodes (currently dropped, which makes the graph export unusable for navigation).
 2. Expose `extract_with_id_gen` over in-memory text.
 3. Shard writer/reader module behind no new feature flag (it is pure output).
+4. `GraphAnalysis::client_calls`: the builder already resolves MetaCall call sites to inject their edges, so the resolved records ride with the pass instead of forcing the server to resolve the same sites a second time.
 
 ### Phase 1: single-language correctness (not alive in this crate)
 

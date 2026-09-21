@@ -30,6 +30,8 @@ fn empty_analysis() -> GraphAnalysis {
         extractions: vec![],
         scope: FlattenedScopeCache::default(),
         references: Vec::new(),
+        #[cfg(feature = "metacall-deploy")]
+        client_calls: Vec::new(),
     }
 }
 

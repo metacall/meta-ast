@@ -30,7 +30,7 @@ src/
 ├── extractor/
 │   └── mod.rs                  Pipeline orchestration: parallel parse + extract per file (symbols, imports, references, call sites, dataflow)
 ├── graph/
-│   ├── builder.rs              GraphBuilder: named stages for files, symbols, dataflow, imports, references and client calls; AnalysisParts
+│   ├── builder.rs              GraphBuilder: named stages for files, symbols, dataflow, imports, references and client calls; AnalysisParts (graph, scc, scope, references, client-call records)
 │   ├── edge.rs                 EdgeKind enum (Ownership / Import / Reference / Flow) with confidence + flow_kind, one merge rule, confidence_tier
 │   ├── mod.rs                  CodeGraph (DiGraph), add_edge_normalized_with_flow, re-exports
 │   ├── naming.rs               Node display name and kind name; one authority for the graph output

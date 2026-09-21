@@ -198,6 +198,8 @@ mod tests {
             extractions: vec![],
             scope: crate::graph::resolver::FlattenedScopeCache::default(),
             references: Vec::new(),
+            #[cfg(feature = "metacall-deploy")]
+            client_calls: Vec::new(),
         };
 
         let config = EmitConfig {
@@ -232,6 +234,8 @@ mod tests {
             extractions: vec![],
             scope: crate::graph::resolver::FlattenedScopeCache::default(),
             references: Vec::new(),
+            #[cfg(feature = "metacall-deploy")]
+            client_calls: Vec::new(),
         };
 
         let config = EmitConfig {

@@ -441,16 +441,26 @@ impl GraphBuilder {
         #[cfg(feature = "metacall-deploy")]
         let mut graph = graph;
         #[cfg(feature = "metacall-deploy")]
-        inject_client_call_edges(&mut graph, extractions, root, diagnostics);
+        let client_calls = inject_client_call_edges(&mut graph, extractions, root, diagnostics);
 
         let scc = crate::graph::SccAnalysis::analyze(graph.graph());
 
-        AnalysisParts {
+        #[cfg(feature = "metacall-deploy")]
+        let parts = AnalysisParts {
             graph,
             scc,
             scope: scope_cache,
             references,
-        }
+            client_calls,
+        };
+        #[cfg(not(feature = "metacall-deploy"))]
+        let parts = AnalysisParts {
+            graph,
+            scc,
+            scope: scope_cache,
+            references,
+        };
+        parts
     }
 }
 
@@ -463,6 +473,9 @@ pub struct AnalysisParts {
     pub scope: crate::graph::resolver::FlattenedScopeCache,
     /// One record per resolved use site, in extraction and reference order.
     pub references: Vec<crate::graph::resolver::ResolvedReference>,
+    /// One record per resolved MetaCall client call, in call-site order.
+    #[cfg(feature = "metacall-deploy")]
+    pub client_calls: Vec<crate::deploy::client_call::ResolvedClientCall>,
 }
 /// Registers every file as a node.
 fn register_files<F>(builder: &mut GraphBuilder, extractions: &[F])
@@ -653,17 +666,21 @@ where
     (scope_cache, references)
 }
 
-/// Adds the client-call projections as ordinary reference edges.
+/// Adds the client-call projections as ordinary reference edges and returns
+/// the resolved records.
 ///
 /// Resolution needs the file and symbol nodes, so this runs after the graph is
-/// built. Navigation and SCC see these edges like any other reference.
+/// built. Navigation and SCC see these edges like any other reference. The
+/// records travel with the pass, so a consumer never resolves the same sites
+/// twice.
 #[cfg(feature = "metacall-deploy")]
 fn inject_client_call_edges<F>(
     graph: &mut CodeGraph,
     extractions: &[F],
     root: &std::path::Path,
     diagnostics: &mut Vec<crate::error::Diagnostic>,
-) where
+) -> Vec<crate::deploy::client_call::ResolvedClientCall>
+where
     F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
 {
     let call_sites: Vec<crate::deploy::scanner::CallSite> = extractions
@@ -671,7 +688,7 @@ fn inject_client_call_edges<F>(
         .flat_map(|file| file.borrow().call_sites.iter().cloned())
         .collect();
     if call_sites.is_empty() {
-        return;
+        return Vec::new();
     }
     let projections = crate::deploy::client_call::resolve_client_call_projections(
         graph,
@@ -690,6 +707,7 @@ fn inject_client_call_edges<F>(
             graph.add_edge_normalized(from_idx, to_idx, EdgeKind::Reference, confidence);
         }
     }
+    projections.resolved
 }
 
 /// The specifier the resolver sees.
@@ -1284,16 +1302,24 @@ mod tests {
         register_symbols(&mut builder, &extractions, &mut Vec::new());
         let mut graph = builder.build();
         let mut diagnostics = Vec::new();
-        inject_client_call_edges(
+        let resolved = inject_client_call_edges(
             &mut graph,
             &extractions,
             std::path::Path::new("/proj"),
             &mut diagnostics,
         );
 
-        assert!(
-            graph.reference_edges().count() >= 1,
-            "the invocation must project onto its symbol"
+        let edge = graph
+            .reference_edges()
+            .find(|(source, target, _)| {
+                *source == SymbolId::new(1).unwrap() && *target == SymbolId::new(2).unwrap()
+            })
+            .expect("the invocation must project onto its symbol");
+        assert_eq!(resolved.len(), 1, "the pass hands back its records");
+        assert_eq!(resolved[0].target, edge.1);
+        assert_eq!(
+            resolved[0].confidence, edge.2,
+            "the record carries the confidence of the edge it produced"
         );
     }
 
