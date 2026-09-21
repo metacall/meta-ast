@@ -5,6 +5,7 @@
 //! - SCC analysis on different graph topologies
 //! - Node/edge operations at scale
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
@@ -583,8 +584,90 @@ fn bench_dataflow_nodes_and_edges(c: &mut Criterion) {
     group.finish();
 }
 
+/// One synthetic project, ready for a scope cache build.
+struct ScopeFixture {
+    extractions: Vec<std::sync::Arc<meta_ast::FileExtraction>>,
+    path_to_file_id: HashMap<PathBuf, meta_ast::model::ids::FileId>,
+    adjacency: HashMap<meta_ast::model::ids::FileId, Vec<meta_ast::model::ids::FileId>>,
+}
+
+/// Extractions and import edges for a synthetic project.
+///
+/// Each file owns `symbols_per_file` public symbols and imports the next
+/// `fanout` files by index, so the reachable set grows with project size.
+fn scope_fixture(size: usize, fanout: usize, symbols_per_file: usize) -> ScopeFixture {
+    use meta_ast::model::ids::FileId;
+
+    let mut extractions = Vec::with_capacity(size);
+    let mut path_to_file_id = HashMap::with_capacity(size);
+    let mut adjacency: HashMap<FileId, Vec<FileId>> = HashMap::with_capacity(size);
+    let mut next_symbol = 1u32;
+
+    for index in 0..size {
+        let path_text = format!("src/module_{index:05}/file_{index:05}.rs");
+        let path = PathBuf::from(&path_text);
+        let file_id = FileId::new(index as u32 + 1).unwrap();
+        let mut extraction = meta_ast::FileExtraction::empty(path.clone(), LangId::Rust);
+        for symbol_index in 0..symbols_per_file {
+            let symbol =
+                create_test_symbol(next_symbol, &format!("fn_{symbol_index:03}"), &path_text);
+            extraction.symbols.push(symbol);
+            next_symbol += 1;
+        }
+        path_to_file_id.insert(path, file_id);
+
+        let mut imports = Vec::with_capacity(fanout);
+        for step in 1..=fanout {
+            let target = (index + step) % size.max(1);
+            if target != index {
+                imports.push(FileId::new(target as u32 + 1).unwrap());
+            }
+        }
+        adjacency.insert(file_id, imports);
+        extractions.push(std::sync::Arc::new(extraction));
+    }
+
+    ScopeFixture {
+        extractions,
+        path_to_file_id,
+        adjacency,
+    }
+}
+
+/// Benchmark the per-file scope BFS over a synthetic import graph.
+///
+/// The scope cache is the only part of graph construction that is quadratic
+/// in the number of transitively connected files, so it is measured alone.
+fn bench_scope_cache_build(c: &mut Criterion) {
+    use meta_ast::graph::resolver::{FlattenedScopeCache, ResolutionContext};
+
+    let mut group = c.benchmark_group("scope_cache_build");
+    group.sample_size(10);
+
+    for size in [64usize, 256, 1024].iter() {
+        let fixture = scope_fixture(*size, 2, 8);
+        let ctx = ResolutionContext::from_extractions(
+            &fixture.extractions,
+            &fixture.path_to_file_id,
+            fixture.adjacency,
+            Vec::new(),
+        );
+
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
+            b.iter(|| {
+                let mut diagnostics = Vec::new();
+                let cache = FlattenedScopeCache::build(&ctx, &mut diagnostics);
+                black_box(cache.len());
+            });
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     graph_benches,
+    bench_scope_cache_build,
     bench_graph_construction_linear,
     bench_scc_acyclic_chain,
     bench_scc_single_cycle,

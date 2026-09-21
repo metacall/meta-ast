@@ -1,6 +1,6 @@
 [package]
 name = "meta-ast"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 description = "Polyglot static-analysis engine: extract symbols and cross-language dependency graphs from 9 supported source languages, with optional MetaCall deployment manifest generation."
 readme = "README.md"
@@ -20,6 +20,11 @@ name = "graph"
 [[bench]]
 harness = false
 name = "incremental"
+
+[[bench]]
+harness = false
+name = "deploy"
+required-features = ["metacall-deploy"]
 
 [dependencies]
 # Serialization

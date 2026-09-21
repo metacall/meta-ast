@@ -242,7 +242,7 @@ pub fn extract_imports_and_references_for_checked<'a>(
     source: &'a [u8],
     file_path: &std::path::Path,
 ) -> Result<common::ImportExtraction, crate::error::Error> {
-    common::extract_imports_and_references_with_spec(tree, source, spec_for(id), file_path)
+    common::extract_imports_and_references_with_spec(id, tree, source, spec_for(id), file_path)
 }
 
 #[cfg(test)]

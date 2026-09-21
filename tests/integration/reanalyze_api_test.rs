@@ -2,7 +2,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use meta_ast::model::SnapshotId;
+use meta_ast::model::{SnapshotId, SymbolId};
 use meta_ast::{
     ExtractionCache, FileExtraction, GraphBuilder, LangId, Overlay, WatchState, fingerprint,
     reanalyze_extractions,
@@ -128,4 +128,62 @@ fn graph_includes_metacall_client_call_edges() {
             .any(|diagnostic| diagnostic.message.contains("no_such_function")),
         "expected an unresolved invocation diagnostic"
     );
+}
+
+/// A call through a file alias of the metacall module resolves like a bare call.
+#[cfg(feature = "metacall-deploy")]
+#[test]
+fn an_aliased_member_call_keeps_the_load_aware_confidence() {
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mixed/aliased_client_call");
+    let mut state = WatchState::new();
+    let (extractions, _, _) = reanalyze_extractions(&root, None, &[], &mut state).unwrap();
+
+    let sites: Vec<_> = extractions
+        .iter()
+        .flat_map(|extraction| extraction.call_sites.iter())
+        .collect();
+    assert_eq!(sites.len(), 3, "one load and two aliased calls: {sites:?}");
+    assert!(
+        sites
+            .iter()
+            .any(|site| site.variant == meta_ast::deploy::scanner::CallSiteVariant::LoadFromFile),
+        "the aliased load is found"
+    );
+
+    let mut diagnostics = Vec::new();
+    let (graph, _scc, _scope) = GraphBuilder::from_extractions_with_scope(
+        &extractions,
+        &root,
+        SnapshotId::new(1).unwrap(),
+        &mut diagnostics,
+    );
+
+    let caller = symbol_id(&extractions, "orchestrator.js", "compute_total");
+    let target = symbol_id(&extractions, "math.py", "multiply");
+    let edge = graph
+        .reference_edges()
+        .find(|(source, target_id, _)| *source == caller && *target_id == target);
+    assert_eq!(
+        edge.map(|(_, _, confidence)| confidence),
+        Some(meta_ast::graph::edge::CONFIDENCE_CLIENT_UNIQUE_LOAD),
+        "a unique load-aware target keeps the ladder value"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("no_such_function")),
+        "an unresolved aliased target still reports"
+    );
+}
+
+#[cfg(feature = "metacall-deploy")]
+fn symbol_id(extractions: &[std::sync::Arc<FileExtraction>], file: &str, name: &str) -> SymbolId {
+    extractions
+        .iter()
+        .filter(|extraction| extraction.path.ends_with(file))
+        .flat_map(|extraction| extraction.symbols.iter())
+        .find(|symbol| symbol.name == name)
+        .unwrap_or_else(|| panic!("{name} in {file}"))
+        .id
 }

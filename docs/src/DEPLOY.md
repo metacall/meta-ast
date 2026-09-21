@@ -94,6 +94,22 @@ src/deploy/
 | `LoadFromConfiguration` | `metacall_load_from_configuration`, `LoadFromConfiguration` |
 | `ClientCall` | `metacall`, `metacall_await`, `metacallfms` (all); `metacallv`, `metacallt`, `metacall_function` (C/C++); Go `metacall.Call` / `metacall.Await`; Rust `metacall::metacall`, `metacall_no_arg`, `metacall_untyped`. Note: `metacall_handle` is excluded because argument layout varies per port |
 
+### Receiver resolution
+
+A member call counts only when its receiver names the MetaCall runtime.
+`bindings::resolve` classifies the nearest declaration of the receiver name in
+the lexical scopes around the call, so all of these resolve:
+
+- `import metacall as mc`, `import * as mc from "metacall"`, `const mc = require("metacall")`
+- `import { metacall as m } from "metacall"`, `const { metacall: m } = require("metacall")`
+- `import mc "metacall"` (Go), `use metacall as mc;` (Rust), `namespace mc = metacall;` (C++)
+
+Exported and parenthesized declarations bind like plain ones. A local
+declaration of the same name shadows the binding, so a call through a local
+`mc` is not a MetaCall site. The specifier must be `metacall` or a
+`metacall/...` subpath; `metacall.js` is a file, not the runtime. C and Ruby
+carry no module binding: only the bare API names count there.
+
 ### Confidence scoring
 
 | Case | Score |

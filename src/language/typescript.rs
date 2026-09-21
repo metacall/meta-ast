@@ -105,9 +105,8 @@ pub(crate) const TS_FAMILY_IMPORT_QUERY: &str = r#"
     (namespace_import
       (identifier) @import.symbol)))
 (call_expression
-  function: (identifier) @call.name
-  arguments: (arguments . (string) @import.path .)
-  (#eq? @call.name "require"))
+  function: (identifier) @import.call
+  arguments: (arguments . (string) @import.path .))
 "#;
 
 pub(crate) const TS_FAMILY_REFERENCE_QUERY: &str = r#"
@@ -221,6 +220,24 @@ define_language_pack!(
                 assert_eq!(named.len(), 1);
                 assert_eq!(named[0].import_specifier, "react");
                 assert_eq!(named[0].symbol.as_deref(), Some("React"));
+            }
+
+            #[test]
+            fn only_require_is_an_import() {
+                use crate::language::extract_imports_and_references_for;
+                let src = b"load('utils');\nconst x = require('m');";
+                let tree = parse(src);
+                let (imports, _, _) = extract_imports_and_references_for(
+                    LangId::TypeScript,
+                    &tree,
+                    src,
+                    &std::path::PathBuf::from("test.ts"),
+                );
+                let specifiers: Vec<&str> = imports
+                    .iter()
+                    .map(|import| import.import_specifier.as_str())
+                    .collect();
+                assert_eq!(specifiers, vec!["m"], "a computed call is not an import");
             }
 
             #[test]

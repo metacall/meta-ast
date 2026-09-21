@@ -9,6 +9,7 @@ Accepted and Implemented.
 Implemented as designed with these notes:
 
 - `metacall_handle` is excluded because argument layout varies per port (tag first in C/Node, handle first in Rust).
+- Module receivers resolve through the enclosing lexical scopes. Import and require bindings (`import * as mc from "metacall"`, `const mc = require("metacall")`, `import metacall as mc`, `import mc "metacall"`, `use metacall as mc`, `namespace mc = metacall`) and member renames (`import { metacall as m }`) all count, including exported and parenthesized declarations. A local declaration of the same name shadows the alias, and the specifier must be `metacall` or a `metacall/...` subpath.
 - Phase A and Phase B index all extracted symbols regardless of visibility flag.
 - Rust `metacall_no_arg` and `metacall_untyped` map to `ClientCall`; `load::from_single_file` maps to `LoadFromFile`.
 - Client-call reference edges flow as distinct inter-pod reference edges without altering load confidence.

@@ -5,7 +5,7 @@
 //! per-reference graph traversals.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
@@ -20,13 +20,32 @@ pub type ScopeMap = HashMap<String, Vec<(SymbolId, f32)>>;
 pub(crate) type SymbolIndexEntry = (SymbolId, String, LangId, Option<Visibility>);
 pub(crate) type SymbolIndex = HashMap<FileId, Vec<SymbolIndexEntry>>;
 
-/// One visible symbol candidate before shadowing and ranking.
-struct Candidate {
+/// One symbol seen from one file, before shadowing and ranking.
+///
+/// The exposed name lives in the staging map key, and the path borrows from
+/// the context, so a candidate costs no allocation.
+struct Staged<'a> {
     symbol: SymbolId,
     confidence: f32,
     rank: u8,
-    path: PathBuf,
-    name: String,
+    path: &'a Path,
+}
+
+/// Stage one exposed name for the ranking pass.
+fn push_staged<'a>(
+    staged: &mut HashMap<&'a str, Vec<Staged<'a>>>,
+    name: &'a str,
+    symbol: SymbolId,
+    confidence: f32,
+    rank: u8,
+    path: &'a Path,
+) {
+    staged.entry(name).or_default().push(Staged {
+        symbol,
+        confidence,
+        rank,
+        path,
+    });
 }
 
 /// How one resolved import exposes the target file's names.
@@ -175,8 +194,6 @@ impl FlattenedScopeCache {
     fn compute_scope(file_id: FileId, ctx: &ResolutionContext) -> (ScopeMap, Vec<Diagnostic>) {
         let mut diagnostics = Vec::new();
         let source_lang = ctx.file_languages.get(&file_id).copied();
-        let mut scope: ScopeMap = HashMap::new();
-        let mut candidates: Vec<Candidate> = Vec::new();
         let mut visited: HashSet<FileId> = HashSet::new();
         let mut queue: VecDeque<(FileId, usize)> = VecDeque::new();
 
@@ -194,6 +211,11 @@ impl FlattenedScopeCache {
             }
         }
 
+        // Staged by the name a symbol is exposed under. Borrowed keys keep the
+        // candidate loop allocation-free; the map owns its names once, after
+        // shadowing picks the survivors.
+        let mut staged: HashMap<&str, Vec<Staged<'_>>> = HashMap::new();
+
         while let Some((current, distance)) = queue.pop_front() {
             if !visited.insert(current) {
                 continue;
@@ -205,6 +227,24 @@ impl FlattenedScopeCache {
                     .get(&current)
                     .map(|lang| lang.spec().default_visibility)
                     .unwrap_or(crate::language::DefaultVisibility::PublicByDefault);
+                let path: &Path = ctx
+                    .file_paths
+                    .get(&current)
+                    .map(PathBuf::as_path)
+                    .unwrap_or_else(|| Path::new(""));
+                // Bindings describe direct imports; deeper levels stay file-level.
+                let bindings = (distance == 1)
+                    .then(|| direct.get(&current).map(Vec::as_slice))
+                    .flatten();
+                let precise = bindings.is_some_and(|list| {
+                    !list.is_empty()
+                        && list
+                            .iter()
+                            .all(|b| matches!(b, ImportBinding::Star | ImportBinding::Named { .. }))
+                });
+                let open = !precise
+                    || bindings
+                        .is_some_and(|list| list.iter().any(|b| matches!(b, ImportBinding::Star)));
 
                 for (sym_id, name, sym_lang, visibility) in symbols {
                     let is_public = match visibility {
@@ -246,14 +286,13 @@ impl FlattenedScopeCache {
                         3
                     };
 
-                    for exposed in exposed_names(distance, name, direct.get(&current)) {
-                        candidates.push(Candidate {
-                            symbol: *sym_id,
-                            name: exposed,
-                            confidence,
-                            rank,
-                            path: ctx.file_paths.get(&current).cloned().unwrap_or_default(),
-                        });
+                    if open {
+                        push_staged(&mut staged, name, *sym_id, confidence, rank, path);
+                    }
+                    if let Some(bindings) = bindings {
+                        for local in local_spellings(name, open, bindings) {
+                            push_staged(&mut staged, local, *sym_id, confidence, rank, path);
+                        }
                     }
                 }
             }
@@ -291,14 +330,8 @@ impl FlattenedScopeCache {
         // Nearer definitions shadow farther ones. The remaining candidates keep
         // a total order: rank, confidence, path, then identifier. The raw
         // identifier comes last, because it is unique only inside a run.
-        let mut grouped: HashMap<String, Vec<Candidate>> = HashMap::new();
-        for candidate in candidates {
-            grouped
-                .entry(candidate.name.clone())
-                .or_default()
-                .push(candidate);
-        }
-        for (name, mut group) in grouped {
+        let mut scope: ScopeMap = HashMap::with_capacity(staged.len());
+        for (name, mut group) in staged {
             let best = group.iter().map(|candidate| candidate.rank).min();
             if let Some(best) = best {
                 group.retain(|candidate| candidate.rank == best);
@@ -307,11 +340,11 @@ impl FlattenedScopeCache {
                 a.rank
                     .cmp(&b.rank)
                     .then(b.confidence.total_cmp(&a.confidence))
-                    .then(a.path.cmp(&b.path))
+                    .then(a.path.cmp(b.path))
                     .then(a.symbol.to_raw().cmp(&b.symbol.to_raw()))
             });
             scope.insert(
-                name,
+                name.to_string(),
                 group
                     .into_iter()
                     .map(|candidate| (candidate.symbol, candidate.confidence))
@@ -521,50 +554,25 @@ where
     index
 }
 
-/// Names under which one target symbol enters the importer's scope.
+/// Local spellings a direct import adds for one declared name.
 ///
-/// A direct pair whose records are all precise (named or star) exposes
-/// exactly its declared names. Any unfiltered record keeps file scope and
-/// each named record additionally exposes its local spelling, so a rename
-/// resolves without narrowing the rest. Deeper levels always keep file
-/// scope: bindings describe direct imports.
-fn exposed_names(
-    distance: usize,
-    name: &str,
-    bindings: Option<&Vec<ImportBinding>>,
-) -> Vec<String> {
-    let direct = bindings.is_some() && distance == 1;
-    let list = bindings.filter(|_| direct);
-    let precise = list.is_some_and(|list| {
-        !list.is_empty()
-            && list
-                .iter()
-                .all(|b| matches!(b, ImportBinding::Star | ImportBinding::Named { .. }))
-    });
-    let open =
-        !precise || list.is_some_and(|list| list.iter().any(|b| matches!(b, ImportBinding::Star)));
-
-    let mut out = Vec::new();
-    if open {
-        out.push(name.to_owned());
-    }
-    if let Some(list) = list {
-        let mut locals: Vec<&str> = list
-            .iter()
-            .filter_map(|binding| match binding {
-                ImportBinding::Named { original, local }
-                    if original == name && (!open || local != name) =>
-                {
-                    Some(local.as_str())
-                }
-                _ => None,
-            })
-            .collect();
-        locals.sort_unstable();
-        locals.dedup();
-        out.extend(locals.into_iter().map(str::to_owned));
-    }
-    out
+/// A precise pair exposes exactly its declared names, so an identity rename
+/// still contributes its spelling. An open pair already carries the declared
+/// name, so only a real rename adds a second spelling. Exact duplicates cannot
+/// occur: the binding list is deduplicated when it is grouped by target.
+fn local_spellings<'a>(
+    declared: &str,
+    open: bool,
+    bindings: &'a [ImportBinding],
+) -> impl Iterator<Item = &'a str> {
+    bindings.iter().filter_map(move |binding| match binding {
+        ImportBinding::Named { original, local }
+            if original == declared && (!open || local != declared) =>
+        {
+            Some(local.as_str())
+        }
+        _ => None,
+    })
 }
 
 #[cfg(test)]
@@ -1204,18 +1212,19 @@ mod tests {
 
     #[test]
     fn identity_binding_exposes_the_declared_name_once() {
-        for extra in [
-            None,
-            Some(ImportBinding::Star),
-            Some(ImportBinding::Unfiltered),
-        ] {
-            let mut bindings = vec![ImportBinding::Named {
-                original: "helper".into(),
-                local: "helper".into(),
-            }];
-            bindings.extend(extra);
-            assert_eq!(exposed_names(1, "helper", Some(&bindings)), ["helper"]);
-        }
+        let bindings = vec![ImportBinding::Named {
+            original: "helper".into(),
+            local: "helper".into(),
+        }];
+        assert_eq!(
+            local_spellings("helper", false, &bindings).collect::<Vec<_>>(),
+            ["helper"],
+            "a precise pair exposes its declared spelling"
+        );
+        assert!(
+            local_spellings("helper", true, &bindings).next().is_none(),
+            "an open pair already carries the declared name"
+        );
     }
 
     #[test]
