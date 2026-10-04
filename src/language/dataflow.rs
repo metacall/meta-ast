@@ -73,7 +73,7 @@ mod tests {
         // Ruby is the canonical "unsupported" LangId in the dispatcher.
         let source = b"x = 1\n";
         let lang = LangId::Ruby;
-        let tree = crate::parser::parse_tree(lang, source).unwrap();
+        let tree = crate::parser::parse_tree(lang, source, std::path::Path::new("<test>")).unwrap();
         let id_gen = IdGenerator::new();
         let (nodes, edges) = extract_dataflow(lang, &tree, source, &id_gen);
         assert!(nodes.is_empty());
@@ -84,7 +84,7 @@ mod tests {
     fn javascript_dispatch_returns_dataflow() {
         let source = b"function f() { let x = 1; return x; }\n";
         let lang = LangId::JavaScript;
-        let tree = crate::parser::parse_tree(lang, source).unwrap();
+        let tree = crate::parser::parse_tree(lang, source, std::path::Path::new("<test>")).unwrap();
         let id_gen = IdGenerator::new();
         let (nodes, edges) = extract_dataflow(lang, &tree, source, &id_gen);
         assert!(!nodes.is_empty(), "JS dispatch should produce data nodes");

@@ -375,7 +375,8 @@ mod dataflow_tests {
     use crate::language::LangId;
 
     fn extract(source: &[u8]) -> (Vec<crate::model::DataNode>, Vec<crate::model::FlowEdge>) {
-        let tree = crate::parser::parse_tree(LangId::Rust, source).unwrap();
+        let tree = crate::parser::parse_tree(LangId::Rust, source, std::path::Path::new("<test>"))
+            .unwrap();
         let id_gen = crate::model::IdGenerator::new();
         extract_rust_dataflow(&tree, source, &id_gen)
     }
