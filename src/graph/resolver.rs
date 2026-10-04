@@ -313,11 +313,11 @@ impl FlattenedScopeCache {
                             .map(|p| p.display().to_string())
                             .unwrap_or_else(|| "<unknown>".to_string());
                         diagnostics.push(Diagnostic {
-                            path,
+                            path: path.clone(),
                             severity: Severity::Warning,
                             message: format!(
-                                "circular import: {} -> {}",
-                                current.to_raw(),
+                                "circular import detected: {} imports {}, closing a dependency cycle",
+                                path.display(),
                                 root_path
                             ),
                             source_range: None,
