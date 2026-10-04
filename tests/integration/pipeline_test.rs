@@ -495,6 +495,16 @@ fn edge_circular_does_not_infinite_loop() {
             msg.contains("a.py") || msg.contains("b.py"),
             "circular diagnostic should mention cycle files: {msg}"
         );
+        // Both endpoints must be paths, not raw numeric IDs.
+        for token in msg.split_whitespace() {
+            if token.ends_with(".py") || token.ends_with(".py,") {
+                continue;
+            }
+            assert!(
+                !token.chars().all(|c| c.is_ascii_digit()),
+                "circular diagnostic leaked a raw FileId: {msg}"
+            );
+        }
     }
 }
 

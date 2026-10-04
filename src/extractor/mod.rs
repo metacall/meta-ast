@@ -346,7 +346,7 @@ fn extract_source(
     id_generators: &ExtractionIdGenerators,
     opts: &ExtractOptions,
 ) -> FileExtraction {
-    let tree = match crate::parser::parse_tree(lang, source) {
+    let tree = match crate::parser::parse_tree(lang, source, path) {
         Ok(t) => t,
         Err(e) => {
             return failed_extraction(path, lang, e.to_string());

@@ -37,7 +37,11 @@ fn get_or_init_parser(
         .ok_or_else(|| Error::Config("parser slot was not initialized".into()))
 }
 
-pub(crate) fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tree, Error> {
+pub(crate) fn parse_tree(
+    lang: LangId,
+    source: &[u8],
+    path: &std::path::Path,
+) -> Result<tree_sitter::Tree, Error> {
     PARSERS.with(|cache| {
         // A re-entrant call finds the pool borrowed. A fresh parser costs one
         // grammar assignment and keeps the call panic free, which matters
@@ -45,10 +49,10 @@ pub(crate) fn parse_tree(lang: LangId, source: &[u8]) -> Result<tree_sitter::Tre
         // take the whole analysis down instead of failing one file.
         let Ok(mut pool) = cache.try_borrow_mut() else {
             let mut parser = new_parser(lang)?;
-            return parse_with(&mut parser, lang, source);
+            return parse_with(&mut parser, lang, source, path);
         };
         let parser = get_or_init_parser(&mut pool, lang)?;
-        parse_with(parser, lang, source)
+        parse_with(parser, lang, source, path)
     })
 }
 
@@ -56,10 +60,11 @@ fn parse_with(
     parser: &mut Parser,
     lang: LangId,
     source: &[u8],
+    path: &std::path::Path,
 ) -> Result<tree_sitter::Tree, Error> {
     parser.reset();
     parser.parse(source, None).ok_or_else(|| Error::Parse {
-        path: Default::default(),
+        path: path.to_path_buf(),
         message: format!("the {lang:?} parser returned no tree"),
     })
 }
@@ -131,23 +136,43 @@ mod tests {
 
     #[test]
     fn parse_tree_valid_python() {
-        let tree = parse_tree(LangId::Python, b"def hello(): pass").unwrap();
+        let tree = parse_tree(
+            LangId::Python,
+            b"def hello(): pass",
+            std::path::Path::new("<test>"),
+        )
+        .unwrap();
         assert!(!tree.root_node().has_error());
         assert_eq!(tree.root_node().kind(), "module");
     }
 
     #[test]
     fn parse_tree_switches_languages() {
-        let python = parse_tree(LangId::Python, b"def hello(): pass").unwrap();
+        let python = parse_tree(
+            LangId::Python,
+            b"def hello(): pass",
+            std::path::Path::new("<test>"),
+        )
+        .unwrap();
         assert_eq!(python.root_node().kind(), "module");
 
-        let javascript = parse_tree(LangId::JavaScript, b"function hello() {}").unwrap();
+        let javascript = parse_tree(
+            LangId::JavaScript,
+            b"function hello() {}",
+            std::path::Path::new("<test>"),
+        )
+        .unwrap();
         assert_eq!(javascript.root_node().kind(), "program");
     }
 
     #[test]
     fn tree_metrics_valid_source() {
-        let tree = parse_tree(LangId::Python, b"def hello(): pass").unwrap();
+        let tree = parse_tree(
+            LangId::Python,
+            b"def hello(): pass",
+            std::path::Path::new("<test>"),
+        )
+        .unwrap();
         let metrics = tree_metrics(&tree, b"def hello(): pass");
         assert!(metrics.error_ratio < 0.1);
         assert!(metrics.node_count > 0);
@@ -155,14 +180,19 @@ mod tests {
 
     #[test]
     fn tree_metrics_malformed() {
-        let tree = parse_tree(LangId::Python, b"def broken(").unwrap();
+        let tree = parse_tree(
+            LangId::Python,
+            b"def broken(",
+            std::path::Path::new("<test>"),
+        )
+        .unwrap();
         let metrics = tree_metrics(&tree, b"def broken(");
         assert!(metrics.error_ratio > 0.0);
     }
 
     #[test]
     fn tree_metrics_empty_source() {
-        let tree = parse_tree(LangId::Python, b"").unwrap();
+        let tree = parse_tree(LangId::Python, b"", std::path::Path::new("<test>")).unwrap();
         let metrics = tree_metrics(&tree, b"");
         assert_eq!(metrics.error_ratio, 0.0);
         assert_eq!(metrics.node_count, 0);
@@ -173,7 +203,11 @@ mod tests {
         // panic on the borrow, because the release profile aborts on panic.
         PARSERS.with(|cache| {
             let guard = cache.borrow_mut();
-            let tree = parse_tree(LangId::Python, b"def hello(): pass");
+            let tree = parse_tree(
+                LangId::Python,
+                b"def hello(): pass",
+                std::path::Path::new("<test>"),
+            );
             assert!(
                 tree.is_ok(),
                 "a busy pool must fall back to a fresh parser: {:?}",
@@ -185,11 +219,26 @@ mod tests {
 
     #[test]
     fn a_parser_is_reused_after_a_parse() {
-        let first = parse_tree(LangId::Python, b"def first(): pass").unwrap();
-        let second = parse_tree(LangId::Python, b"def second(): pass").unwrap();
+        let first = parse_tree(
+            LangId::Python,
+            b"def first(): pass",
+            std::path::Path::new("<test>"),
+        )
+        .unwrap();
+        let second = parse_tree(
+            LangId::Python,
+            b"def second(): pass",
+            std::path::Path::new("<test>"),
+        )
+        .unwrap();
         assert!(!first.root_node().has_error());
         assert!(!second.root_node().has_error());
-        let third = parse_tree(LangId::JavaScript, b"function third() {}").unwrap();
+        let third = parse_tree(
+            LangId::JavaScript,
+            b"function third() {}",
+            std::path::Path::new("<test>"),
+        )
+        .unwrap();
         assert_eq!(third.root_node().kind(), "program");
     }
 }
