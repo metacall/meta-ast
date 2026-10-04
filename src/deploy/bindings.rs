@@ -135,7 +135,17 @@ fn is_metacall_go_path(path: &str) -> bool {
 }
 
 pub(crate) fn text<'a>(node: Node<'_>, source: &'a [u8]) -> &'a str {
-    std::str::from_utf8(&source[node.byte_range()]).unwrap_or("")
+    match std::str::from_utf8(&source[node.byte_range()]) {
+        Ok(text) => text,
+        Err(_) => {
+            tracing::warn!(
+                start = node.start_byte(),
+                end = node.end_byte(),
+                "node text is not valid UTF-8, treating as empty"
+            );
+            ""
+        }
+    }
 }
 
 /// One pair of surrounding quotes, when present.

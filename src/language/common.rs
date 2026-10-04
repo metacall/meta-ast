@@ -115,9 +115,11 @@ pub(crate) fn extract_with_spec<'a>(
     tree: &'a tree_sitter::Tree,
     source: &'a [u8],
     spec: &LanguageSpec,
-) -> Result<Vec<RawSymbol<'a>>, crate::error::Error> {
+    file_path: &std::path::Path,
+) -> Result<(Vec<RawSymbol<'a>>, Vec<crate::error::Diagnostic>), crate::error::Error> {
     use std::collections::HashMap;
     let mut symbols_map: HashMap<usize, (RawSymbol<'a>, usize)> = HashMap::new();
+    let mut diagnostics: Vec<crate::error::Diagnostic> = Vec::new();
     let mut query_cursor = tree_sitter::QueryCursor::new();
     let query = (spec.query_fn)()?;
     let mut matches = query_cursor.matches(query, tree.root_node(), source);
@@ -137,24 +139,36 @@ pub(crate) fn extract_with_spec<'a>(
         for capture in m.captures() {
             let capture_name = query.capture_names()[capture.index as usize];
             match capture_name {
-                "name" => {
-                    if let Ok(text) = capture.node.utf8_text(source) {
+                "name" => match capture.node.utf8_text(source) {
+                    Ok(text) => {
                         name = Some(std::borrow::Cow::Borrowed(text));
                         name_range = Some(source_range_from_node(&capture.node));
                     }
-                }
-                "signature" => {
-                    if let Ok(text) = capture.node.utf8_text(source) {
-                        signature = Some(std::borrow::Cow::Borrowed(text));
-                    }
-                }
-                "docstring" => {
-                    if let Ok(text) = capture.node.utf8_text(source) {
+                    Err(_) => diagnostics.push(undecodable(
+                        file_path,
+                        source_range_from_node(&capture.node),
+                        "the symbol name",
+                    )),
+                },
+                "signature" => match capture.node.utf8_text(source) {
+                    Ok(text) => signature = Some(std::borrow::Cow::Borrowed(text)),
+                    Err(_) => diagnostics.push(undecodable(
+                        file_path,
+                        source_range_from_node(&capture.node),
+                        "the symbol signature",
+                    )),
+                },
+                "docstring" => match capture.node.utf8_text(source) {
+                    Ok(text) => {
                         let cleaned = clean_docstring(text);
-
                         docstring = Some(std::borrow::Cow::Borrowed(cleaned));
                     }
-                }
+                    Err(_) => diagnostics.push(undecodable(
+                        file_path,
+                        source_range_from_node(&capture.node),
+                        "the docstring",
+                    )),
+                },
                 "async" => is_async = true,
                 "visibility.public" => {
                     if capture.node.named_child_count() == 0 {
@@ -247,7 +261,7 @@ pub(crate) fn extract_with_spec<'a>(
     let mut result: Vec<_> = symbols_map.into_values().map(|(s, _)| s).collect();
     associate_docstrings(&mut result, source, tree, spec);
     result.sort_by_key(|s| s.source_range.byte_start);
-    Ok(result)
+    Ok((result, diagnostics))
 }
 
 /// Associate doc comments with symbols via post-processing.
@@ -469,12 +483,14 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
     let Some(ref_idx) = query.capture_index_for_name("reference.name") else {
         return Ok((Vec::new(), Vec::new(), Vec::new()));
     };
-    let name_at = |node: tree_sitter::Node| -> &'a str {
-        std::str::from_utf8(&source[node.byte_range()]).unwrap_or("")
-    };
 
     let mut query_cursor = tree_sitter::QueryCursor::new();
     let mut matches = query_cursor.matches(query, tree.root_node(), source);
+
+    let mut undecodable_captures: Vec<(crate::model::SourceRange, &'static str)> = Vec::new();
+    let decode = |node: tree_sitter::Node| -> Option<&'a str> {
+        std::str::from_utf8(&source[node.byte_range()]).ok()
+    };
 
     struct RawImport {
         range: crate::model::SourceRange,
@@ -518,9 +534,19 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
             {
                 star = true;
             } else if Some(idx) == call_idx {
-                rejected = !import_call_accepted(id, name_at(capture.node));
-            } else if idx == ref_idx && reference_accepted(id, name_at(capture.node)) {
-                ref_ranges.push(source_range_from_node(&capture.node));
+                match decode(capture.node) {
+                    Some(name) => rejected = !import_call_accepted(id, name),
+                    None => undecodable_captures
+                        .push((source_range_from_node(&capture.node), "the import callee")),
+                }
+            } else if idx == ref_idx {
+                match decode(capture.node) {
+                    Some(name) if reference_accepted(id, name) => {
+                        ref_ranges.push(source_range_from_node(&capture.node));
+                    }
+                    Some(_) => {}
+                    None => ref_ranges.push(source_range_from_node(&capture.node)),
+                }
             }
         }
 
@@ -554,20 +580,43 @@ pub(crate) fn extract_imports_and_references_with_spec<'a>(
 
     let text =
         |(s, e): (usize, usize)| -> Option<&'a str> { std::str::from_utf8(&source[s..e]).ok() };
-    let mut diagnostics: Vec<crate::error::Diagnostic> = Vec::new();
+    let mut diagnostics: Vec<crate::error::Diagnostic> = undecodable_captures
+        .into_iter()
+        .map(|(range, what)| undecodable(file_path, range, what))
+        .collect();
     let mut imports: Vec<crate::model::UnresolvedImport> = Vec::with_capacity(raw_imports.len());
     for r in raw_imports {
         let Some(ns) = r.namespace else {
             continue;
         };
         let Some(specifier) = text(bare_span(source, ns)) else {
-            diagnostics.push(undecodable(file_path, r.range, "the import specifier"));
+            diagnostics.push(undecodable(
+                file_path,
+                r.range.clone(),
+                "the import specifier",
+            ));
             continue;
+        };
+        let alias = match r.alias.map(&text) {
+            Some(Some(a)) => Some(a.to_string()),
+            Some(None) => {
+                diagnostics.push(undecodable(file_path, r.range.clone(), "the import alias"));
+                None
+            }
+            None => None,
+        };
+        let symbol = match r.symbol.map(&text) {
+            Some(Some(s)) => Some(s.to_string()),
+            Some(None) => {
+                diagnostics.push(undecodable(file_path, r.range.clone(), "the import symbol"));
+                None
+            }
+            None => None,
         };
         imports.push(crate::model::UnresolvedImport {
             import_specifier: specifier.to_string(),
-            alias: r.alias.and_then(text).map(str::to_string),
-            symbol: r.symbol.and_then(text).map(str::to_string),
+            alias,
+            symbol,
             star: r.star,
             range: r.range,
         });
@@ -763,6 +812,56 @@ mod tests {
     use super::{bare_span, clean_docstring, field_text, source_range_from_node};
 
     #[test]
+    fn undecodable_docstring_warns_and_keeps_symbol() {
+        let source: &[u8] = b"def f():\n    \"\"\"\xff\"\"\"\n    pass\n";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&crate::language::grammar_for(LangId::Python))
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let (symbols, diagnostics) = super::extract_with_spec(
+            &tree,
+            source,
+            crate::language::spec_for(LangId::Python),
+            std::path::Path::new("<test>"),
+        )
+        .unwrap();
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].docstring, None);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("docstring is not valid UTF-8")),
+            "expected a docstring UTF-8 warning, got {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn undecodable_import_specifier_warns() {
+        let source: &[u8] = b"#include \"\xff\"\n";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&crate::language::grammar_for(LangId::C))
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        let (imports, _references, diagnostics) = super::extract_imports_and_references_with_spec(
+            LangId::C,
+            &tree,
+            source,
+            crate::language::spec_for(LangId::C),
+            std::path::Path::new("<test>"),
+        )
+        .unwrap();
+        assert!(imports.is_empty());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("import specifier is not valid UTF-8")),
+            "expected an import specifier UTF-8 warning, got {diagnostics:?}"
+        );
+    }
+
+    #[test]
     fn source_range_tracks_node_positions() {
         let mut parser = Parser::new();
         parser
@@ -819,9 +918,13 @@ mod tests {
                 .set_language(&crate::language::grammar_for(lang))
                 .unwrap();
             let tree = parser.parse(source, None).unwrap();
-            let symbols =
-                super::extract_with_spec(&tree, source.as_bytes(), crate::language::spec_for(lang))
-                    .unwrap();
+            let (symbols, _) = super::extract_with_spec(
+                &tree,
+                source.as_bytes(),
+                crate::language::spec_for(lang),
+                std::path::Path::new("<test>"),
+            )
+            .unwrap();
             let symbol = symbols
                 .iter()
                 .find(|symbol| symbol.name == name)

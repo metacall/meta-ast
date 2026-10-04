@@ -368,18 +368,20 @@ fn extract_source(
         });
     }
 
-    let raw_symbols = match crate::language::extract_symbols_for_checked(lang, &tree, source) {
-        Ok(symbols) => symbols,
-        Err(error) => {
-            diags.push(Diagnostic {
-                path: path.to_path_buf(),
-                severity: Severity::Error,
-                message: format!("symbol extraction failed: {error}"),
-                source_range: None,
-            });
-            Vec::new()
-        }
-    };
+    let (raw_symbols, symbol_diagnostics) =
+        match crate::language::extract_symbols_for_checked(lang, &tree, source, path) {
+            Ok(extracted) => extracted,
+            Err(error) => {
+                diags.push(Diagnostic {
+                    path: path.to_path_buf(),
+                    severity: Severity::Error,
+                    message: format!("symbol extraction failed: {error}"),
+                    source_range: None,
+                });
+                (Vec::new(), Vec::new())
+            }
+        };
+    diags.extend(symbol_diagnostics);
     let symbols = raw_symbols
         .into_iter()
         .map(|raw| Symbol {

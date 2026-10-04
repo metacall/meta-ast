@@ -199,8 +199,13 @@ pub fn extract_symbols_for<'a>(
     tree: &'a tree_sitter::Tree,
     source: &'a [u8],
 ) -> Vec<RawSymbol<'a>> {
-    match extract_symbols_for_checked(id, tree, source) {
-        Ok(symbols) => symbols,
+    match extract_symbols_for_checked(id, tree, source, std::path::Path::new("")) {
+        Ok((symbols, diagnostics)) => {
+            for diagnostic in diagnostics {
+                tracing::warn!(language = ?id, message = %diagnostic.message, "symbol extraction warning");
+            }
+            symbols
+        }
         Err(error) => {
             tracing::error!(language = ?id, %error, "symbol extraction skipped");
             Vec::new()
@@ -212,8 +217,9 @@ pub fn extract_symbols_for_checked<'a>(
     id: LangId,
     tree: &'a tree_sitter::Tree,
     source: &'a [u8],
-) -> Result<Vec<RawSymbol<'a>>, crate::error::Error> {
-    common::extract_with_spec(tree, source, spec_for(id))
+    file_path: &std::path::Path,
+) -> Result<(Vec<RawSymbol<'a>>, Vec<crate::error::Diagnostic>), crate::error::Error> {
+    common::extract_with_spec(tree, source, spec_for(id), file_path)
 }
 
 /// Extract imports and references, reporting a query failure as empty results.
