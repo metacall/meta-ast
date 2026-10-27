@@ -414,6 +414,8 @@ impl GraphBuilder {
     where
         F: std::borrow::Borrow<crate::model::FileExtraction> + Sync,
     {
+        // Keep the root in the same simplified form as discovered file paths.
+        let root = crate::input::simplified_path(root);
         let mut builder = Self::new(snapshot_id);
 
         register_files(&mut builder, extractions);
@@ -425,7 +427,7 @@ impl GraphBuilder {
         let import_bindings = resolve_imports(
             &mut builder,
             extractions,
-            root,
+            &root,
             &path_to_file_id,
             diagnostics,
         );
@@ -441,7 +443,7 @@ impl GraphBuilder {
         #[cfg(feature = "metacall-deploy")]
         let mut graph = graph;
         #[cfg(feature = "metacall-deploy")]
-        let client_calls = inject_client_call_edges(&mut graph, extractions, root, diagnostics);
+        let client_calls = inject_client_call_edges(&mut graph, extractions, &root, diagnostics);
 
         let scc = crate::graph::SccAnalysis::analyze(graph.graph());
 

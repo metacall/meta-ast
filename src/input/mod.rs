@@ -77,16 +77,18 @@ pub fn discover_files_with_diagnostics(
     root: &Path,
     languages: Option<&[LangId]>,
 ) -> Result<DiscoveryOutput, std::io::Error> {
+    // Keep the root in the same form as the discovered paths.
+    let root = simplified_path(root);
     let mut results = Vec::new();
     let mut diagnostics = Vec::new();
 
     if root.is_file() {
-        if let Some(lang_id) = detect_language(root)
+        if let Some(lang_id) = detect_language(&root)
             && languages.is_none_or(|langs| langs.contains(&lang_id))
         {
             // The walk branch strips the Windows verbatim prefix; the single file
             // branch must hand out the same key form.
-            results.push((simplified_path(root), lang_id));
+            results.push((root.clone(), lang_id));
         }
         return Ok((results, diagnostics));
     }
@@ -98,7 +100,7 @@ pub fn discover_files_with_diagnostics(
         ));
     }
 
-    for entry in ignore::WalkBuilder::new(root).build() {
+    for entry in ignore::WalkBuilder::new(&root).build() {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
@@ -106,7 +108,7 @@ pub fn discover_files_with_diagnostics(
                 // belongs to the walk root itself.
                 let path = match &error {
                     ignore::Error::WithPath { path, .. } => simplified_path(path),
-                    _ => root.to_path_buf(),
+                    _ => root.clone(),
                 };
                 diagnostics.push(crate::error::Diagnostic {
                     path,

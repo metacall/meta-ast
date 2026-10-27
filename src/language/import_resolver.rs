@@ -44,9 +44,12 @@ pub(crate) fn append_extension(base: &Path, ext: &str) -> PathBuf {
     PathBuf::from(owned)
 }
 
-/// Probe `base.join(raw)` with each extension in order.
-///
-/// Returns the first candidate that exists as a file, else a miss.
+/// Strip the Windows verbatim prefix so resolver paths match discovery.
+pub(crate) fn simplified_path(path: PathBuf) -> PathBuf {
+    dunce::simplified(&path).to_path_buf()
+}
+
+/// Probe `base.join(raw)` and its `index` file with each extension.
 pub(crate) fn probe_relative(
     raw: &str,
     source_dir: &Path,
@@ -59,10 +62,13 @@ pub(crate) fn probe_relative(
         source_dir.to_path_buf()
     };
     let path = base.join(raw);
-    for ext in extensions {
-        let candidate = append_extension(&path, ext);
-        if is_file(&candidate) {
-            return Some(candidate);
+    let index = path.join("index");
+    for candidate_base in [&path, &index] {
+        for ext in extensions {
+            let candidate = append_extension(candidate_base, ext);
+            if is_file(&candidate) {
+                return Some(simplified_path(candidate));
+            }
         }
     }
     None
@@ -70,9 +76,8 @@ pub(crate) fn probe_relative(
 
 /// Shared stateless core for JS-family imports.
 ///
-/// Bare specifiers are a miss: the builder names the external node. Relative
-/// paths probe `base.join(raw)` with each extension in order and miss when no
-/// candidate exists.
+/// Bare specifiers are a miss. Relative paths probe the file and its `index`
+/// file with each extension.
 pub(crate) fn resolve_js_family_import(
     raw: &str,
     source_dir: &Path,
@@ -109,7 +114,7 @@ pub(crate) fn resolve_c_family_import(raw: &str, source_dir: &Path) -> Option<Pa
     } else {
         candidate
     };
-    candidate.is_file().then_some(candidate)
+    candidate.is_file().then(|| simplified_path(candidate))
 }
 
 /// Candidate `__init__.py` and module file for a Python import.
@@ -129,20 +134,20 @@ pub(crate) fn python_candidate_paths(
         let path = project_root.join(raw.replace('.', std::path::MAIN_SEPARATOR_STR));
         let init = path.join("__init__.py");
         let module = path.with_extension("py");
-        return Some((init, module));
+        return Some((simplified_path(init), simplified_path(module)));
     }
 
     let dots = raw.chars().take_while(|c| *c == '.').count();
     let base = source_dir.ancestors().nth(dots - 1)?;
     let rest = &raw[dots..];
     if rest.is_empty() {
-        let init = base.join("__init__.py");
+        let init = simplified_path(base.join("__init__.py"));
         return Some((init.clone(), init));
     }
     let path = base.join(rest.replace('.', std::path::MAIN_SEPARATOR_STR));
     let init = path.join("__init__.py");
     let module = path.with_extension("py");
-    Some((init, module))
+    Some((simplified_path(init), simplified_path(module)))
 }
 
 /// Walk `project_root` parents for `go.mod` and parse the module name.
@@ -155,7 +160,10 @@ pub(crate) fn find_go_module(project_root: &Path) -> Option<(PathBuf, String)> {
                 for line in content.lines() {
                     let line = line.trim();
                     if let Some(module) = line.strip_prefix("module ") {
-                        return Some((dir.to_path_buf(), module.trim().to_string()));
+                        return Some((
+                            simplified_path(dir.to_path_buf()),
+                            module.trim().to_string(),
+                        ));
                     }
                 }
             }
@@ -182,7 +190,7 @@ impl StatelessResolver {
 
 impl ImportResolver for StatelessResolver {
     fn resolve(&self, raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {
-        (self.f)(raw, source_dir, project_root)
+        (self.f)(raw, source_dir, project_root).map(simplified_path)
     }
 }
 
@@ -241,7 +249,7 @@ impl ImportResolver for PythonResolver {
             return None;
         }
 
-        (self.f)(raw, source_dir, project_root)
+        (self.f)(raw, source_dir, project_root).map(simplified_path)
     }
 
     fn clear_cache(&self) {
@@ -315,11 +323,11 @@ impl ImportResolver for GoModResolver {
             // is a miss, not an external node named by a phantom path.
             let candidate = dir.join(relative).with_extension("go");
             if candidate.is_file() {
-                return Some(candidate);
+                return Some(simplified_path(candidate));
             }
         }
 
-        (self.f)(raw, source_dir, project_root)
+        (self.f)(raw, source_dir, project_root).map(simplified_path)
     }
 
     fn clear_cache(&self) {
@@ -339,8 +347,8 @@ pub struct NodeResolver {
 
 /// Node-style extensions probed by the JS resolver.
 pub(crate) const JS_EXTS: &[&str] = &["", ".js", ".json", ".node", ".mjs", ".cjs"];
-/// TS-family extensions probed by the TS/TSX resolver.
-pub(crate) const TS_EXTS: &[&str] = &["", ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs"];
+/// TS-family extensions, TypeScript sources before emitted JavaScript.
+pub(crate) const TS_EXTS: &[&str] = &["", ".ts", ".tsx", ".d.ts", ".js", ".jsx", ".mjs", ".cjs"];
 
 impl NodeResolver {
     pub fn new(
@@ -387,26 +395,13 @@ impl ImportResolver for NodeResolver {
         };
 
         if !raw.starts_with('.') && !raw.starts_with('/') {
-            return (self.f)(raw, source_dir, project_root);
-        }
-
-        let path = if raw.starts_with('/') {
-            PathBuf::from("/").join(raw)
-        } else {
-            source_dir.join(raw)
-        };
-
-        for ext in self.extensions {
-            let candidate = append_extension(&path, ext);
-            if check_is_file(&candidate) {
-                return Some(candidate);
-            }
+            return (self.f)(raw, source_dir, project_root).map(simplified_path);
         }
 
         // A relative miss is a miss: fabricating the joined path would turn
         // a missing file into an external node instead of the warning the
         // builder emits for unresolved relative imports.
-        None
+        probe_relative(raw, source_dir, self.extensions, &check_is_file)
     }
 
     fn clear_cache(&self) {
@@ -530,6 +525,16 @@ mod tests {
     fn shared_quote_strip_helpers() {
         assert_eq!(strip_import_quotes("\"react\""), "react");
         assert_eq!(strip_c_family_quotes("<stdio.h>"), "stdio.h");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolver_answers_strip_the_windows_verbatim_prefix() {
+        let verbatim = PathBuf::from(r"\\?\C:\project\src\lib.rs");
+        assert_eq!(
+            simplified_path(verbatim),
+            PathBuf::from(r"C:\project\src\lib.rs")
+        );
     }
 
     fn scratch(name: &str) -> PathBuf {
@@ -954,6 +959,61 @@ mod tests {
                 "{lang:?} relative miss must not fabricate a path"
             );
         }
+    }
+
+    #[test]
+    fn probe_prefers_a_direct_file_over_a_directory_index() {
+        let root = scratch("direct_over_index");
+        touch(&root.join("util.js"));
+        touch(&root.join("util/index.js"));
+
+        assert_eq!(
+            resolve_js_family_import("./util", &root, JS_EXTS, &|p| p.is_file()),
+            Some(root.join("util.js")),
+            "a direct file must win over its directory index"
+        );
+    }
+
+    #[test]
+    fn js_family_stateless_resolves_a_directory_index() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        touch(&root.join("lib/index.js"));
+
+        assert_eq!(
+            resolve_js_family_import("./lib", root, JS_EXTS, &|p| p.is_file()),
+            Some(root.join("lib/index.js"))
+        );
+    }
+
+    #[test]
+    fn node_resolver_resolves_a_directory_index() {
+        let root = scratch("node_directory_index");
+        touch(&root.join("lib/index.js"));
+        touch(&root.join("pkg/index.ts"));
+
+        assert_eq!(
+            resolved(crate::language::LangId::JavaScript, "./lib", &root, &root),
+            Some(root.join("lib/index.js"))
+        );
+        assert_eq!(
+            resolved(crate::language::LangId::TypeScript, "./pkg", &root, &root),
+            Some(root.join("pkg/index.ts"))
+        );
+    }
+
+    #[test]
+    fn ts_family_prefers_typescript_sources_over_javascript() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        touch(&root.join("util.js"));
+        touch(&root.join("util.ts"));
+
+        assert_eq!(
+            resolve_js_family_import("./util", root, TS_EXTS, &|p| p.is_file()),
+            Some(root.join("util.ts")),
+            "TypeScript resolves the .ts source, not the emitted .js"
+        );
     }
 
     #[test]

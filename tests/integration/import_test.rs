@@ -205,3 +205,77 @@ fn python_absolute_first_party_import_still_resolves() {
         external_paths(&graph)
     );
 }
+
+#[test]
+fn js_relative_directory_import_resolves_index() {
+    let root = project("js_directory_index");
+    write(
+        &root,
+        "app.js",
+        "import { helper } from \"./lib\";\nhelper();\n",
+    );
+    write(&root, "lib/index.js", "export function helper() {}\n");
+
+    let (graph, diagnostics) = analyze(&root);
+
+    assert!(
+        import_edge_exists(&graph, "app.js", "lib/index.js"),
+        "externals: {:?}, diagnostics: {diagnostics:?}",
+        external_paths(&graph)
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unresolved")),
+        "a directory index import is not unresolved: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn ts_relative_directory_import_resolves_index() {
+    let root = project("ts_directory_index");
+    write(
+        &root,
+        "app.ts",
+        "import { helper } from \"./pkg\";\nhelper();\n",
+    );
+    write(&root, "pkg/index.ts", "export function helper() {}\n");
+
+    let (graph, diagnostics) = analyze(&root);
+
+    assert!(
+        import_edge_exists(&graph, "app.ts", "pkg/index.ts"),
+        "externals: {:?}, diagnostics: {diagnostics:?}",
+        external_paths(&graph)
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unresolved")),
+        "a directory index import is not unresolved: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn ts_relative_import_prefers_the_typescript_source() {
+    let root = project("ts_source_precedence");
+    write(
+        &root,
+        "app.ts",
+        "import { thing } from \"./util\";\nthing();\n",
+    );
+    write(&root, "util.js", "export function thing() {}\n");
+    write(&root, "util.ts", "export function thing() {}\n");
+
+    let (graph, diagnostics) = analyze(&root);
+
+    assert!(
+        import_edge_exists(&graph, "app.ts", "util.ts"),
+        "externals: {:?}, diagnostics: {diagnostics:?}",
+        external_paths(&graph)
+    );
+    assert!(
+        !import_edge_exists(&graph, "app.ts", "util.js"),
+        "TypeScript must not resolve the emitted JavaScript over the source"
+    );
+}

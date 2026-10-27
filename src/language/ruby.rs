@@ -16,19 +16,20 @@
 //! - Extension-less `Gemfile` and `Rakefile` are not detected.
 
 use crate::language::LangId;
+use crate::language::import_resolver::simplified_path;
 use crate::language::pack::define_language_pack;
 use crate::language::{DefaultVisibility, DocCommentConfig};
 use std::path::{Path, PathBuf};
 
 fn resolve_ruby_candidate(path: PathBuf) -> Option<PathBuf> {
     if path.is_file() {
-        return Some(path);
+        return Some(simplified_path(path));
     }
     if path.with_extension("rb").is_file() {
-        return Some(path.with_extension("rb"));
+        return Some(simplified_path(path.with_extension("rb")));
     }
     if path.with_extension("so").is_file() {
-        return Some(path.with_extension("so"));
+        return Some(simplified_path(path.with_extension("so")));
     }
     None
 }

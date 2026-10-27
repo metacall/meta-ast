@@ -1,4 +1,5 @@
 use crate::language::LangId;
+use crate::language::import_resolver::simplified_path;
 use crate::language::pack::define_language_pack;
 use crate::language::{DefaultVisibility, DocCommentConfig};
 use std::path::{Path, PathBuf};
@@ -27,11 +28,11 @@ fn module_file(segments: &[&str], base: &Path) -> Option<PathBuf> {
 
     let direct_file = current.join(format!("{last}.rs"));
     if direct_file.is_file() {
-        return Some(direct_file);
+        return Some(simplified_path(direct_file));
     }
 
     let dir_mod = current.join(last).join("mod.rs");
-    dir_mod.is_file().then_some(dir_mod)
+    dir_mod.is_file().then(|| simplified_path(dir_mod))
 }
 
 fn resolve_rust_import(raw: &str, source_dir: &Path, project_root: &Path) -> Option<PathBuf> {

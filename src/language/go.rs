@@ -1,4 +1,5 @@
 use crate::language::LangId;
+use crate::language::import_resolver::simplified_path;
 use crate::language::pack::define_language_pack;
 use crate::language::{DefaultVisibility, DocCommentConfig};
 use crate::model::Visibility;
@@ -22,7 +23,7 @@ fn resolve_go_import(raw: &str, _source_dir: &Path, project_root: &Path) -> Opti
         return None;
     }
     let candidate = dir.join(relative).with_extension("go");
-    candidate.is_file().then_some(candidate)
+    candidate.is_file().then(|| simplified_path(candidate))
 }
 
 const GO_IMPORT_QUERY_STR: &str = r#"
