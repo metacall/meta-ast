@@ -158,19 +158,25 @@ impl EdgeData {
     }
 
     /// Creates a new edge with specified confidence and no flow kind.
+    ///
+    /// Finite out-of-range values clamp into [0.0, 1.0]; non-finite values
+    /// are kept so the output layer counts and normalizes them.
     pub fn with_confidence(kind: EdgeKind, confidence: f32) -> Self {
         Self {
             kind,
-            confidence: confidence.clamp(0.0, 1.0),
+            confidence: clamp_finite(confidence),
             flow_kind: None,
         }
     }
 
     /// Creates a Flow edge with a flow kind and confidence.
+    ///
+    /// Finite out-of-range values clamp into [0.0, 1.0]; non-finite values
+    /// are kept so the output layer counts and normalizes them.
     pub fn flow(flow_kind: crate::model::FlowKind, confidence: f32) -> Self {
         Self {
             kind: EdgeKind::Flow,
-            confidence: confidence.clamp(0.0, 1.0),
+            confidence: clamp_finite(confidence),
             flow_kind: Some(flow_kind),
         }
     }
@@ -192,10 +198,19 @@ impl EdgeData {
         confidence: f32,
         flow_kind: Option<crate::model::FlowKind>,
     ) {
-        self.confidence = finite_max(self.confidence, confidence.clamp(0.0, 1.0));
+        self.confidence = finite_max(self.confidence, clamp_finite(confidence));
         if self.flow_kind.is_none() {
             self.flow_kind = flow_kind;
         }
+    }
+}
+
+/// Clamps a finite value into [0.0, 1.0]; non-finite passes through.
+pub(crate) fn clamp_finite(confidence: f32) -> f32 {
+    if confidence.is_finite() {
+        confidence.clamp(0.0, 1.0)
+    } else {
+        confidence
     }
 }
 
@@ -311,6 +326,31 @@ mod tests {
                 confidence_tier(confidence),
                 ConfidenceTier::Unknown,
                 "at {confidence}"
+            );
+        }
+    }
+
+    #[test]
+    fn with_confidence_keeps_non_finite_for_the_output_counter() {
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let edge = EdgeData::with_confidence(EdgeKind::Reference, bad);
+            assert!(!edge.confidence.is_finite(), "at {bad}");
+        }
+    }
+
+    #[test]
+    fn merge_ignores_infinite_input_in_either_order() {
+        for (first, second) in [
+            (f32::INFINITY, 0.5),
+            (0.5, f32::INFINITY),
+            (f32::NEG_INFINITY, 0.5),
+            (0.5, f32::NEG_INFINITY),
+        ] {
+            let mut edge = EdgeData::with_confidence(EdgeKind::Reference, first);
+            edge.merge_repeated(second, None);
+            assert_eq!(
+                edge.confidence, 0.5,
+                "an infinite input must not displace a finite value"
             );
         }
     }

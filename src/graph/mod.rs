@@ -46,6 +46,8 @@ pub use node::{
 };
 pub use scc::{DeployabilityHint, Scc, SccAnalysis};
 
+use edge::clamp_finite;
+
 use crate::language::LangId;
 use crate::model::{FileId, SnapshotId, SymbolId};
 use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
@@ -259,7 +261,7 @@ impl CodeGraph {
         confidence: f32,
         flow_kind: Option<crate::model::FlowKind>,
     ) {
-        let confidence = confidence.clamp(0.0, 1.0);
+        let confidence = clamp_finite(confidence);
         let key = (source, target, kind);
         if let Some(&edge_idx) = self.edge_index.get(&key) {
             self.graph[edge_idx].merge_repeated(confidence, flow_kind);
@@ -628,6 +630,46 @@ mod tests {
         assert_eq!(graph.edge_count(), 1);
         let edge = graph.graph().edges_connecting(n1, n2).next().unwrap();
         assert_eq!(edge.weight().confidence, 0.9);
+    }
+
+    #[test]
+    fn add_edge_normalized_infinity_never_displaces_finite() {
+        for (first, second) in [
+            (f32::INFINITY, 0.7),
+            (0.7, f32::INFINITY),
+            (f32::NEG_INFINITY, 0.7),
+            (0.7, f32::NEG_INFINITY),
+        ] {
+            let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+            let n1 = graph.add_node(test_file_node(1, "a.rs"));
+            let n2 = graph.add_node(test_file_node(2, "b.rs"));
+
+            graph.add_edge_normalized(n1, n2, EdgeKind::Import, first);
+            graph.add_edge_normalized(n1, n2, EdgeKind::Import, second);
+
+            let edge = graph.graph().edges_connecting(n1, n2).next().unwrap();
+            assert_eq!(
+                edge.weight().confidence,
+                0.7,
+                "a non-finite input must not displace a finite value, in either order"
+            );
+        }
+    }
+
+    #[test]
+    fn add_edge_normalized_all_non_finite_keeps_a_non_finite_edge() {
+        let mut graph = CodeGraph::new(SnapshotId::new(1).unwrap());
+        let n1 = graph.add_node(test_file_node(1, "a.rs"));
+        let n2 = graph.add_node(test_file_node(2, "b.rs"));
+
+        graph.add_edge_normalized(n1, n2, EdgeKind::Import, f32::INFINITY);
+        graph.add_edge_normalized(n1, n2, EdgeKind::Import, f32::NEG_INFINITY);
+
+        let edge = graph.graph().edges_connecting(n1, n2).next().unwrap();
+        assert!(
+            !edge.weight().confidence.is_finite(),
+            "the output layer counts and normalizes such edges"
+        );
     }
 
     #[test]

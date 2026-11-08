@@ -15,7 +15,9 @@ use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 
 use crate::graph::CodeGraph;
-use crate::graph::edge::{CONFIDENCE_CROSS_LANGUAGE, CONFIDENCE_OWN_OR_DIRECT, EdgeData, EdgeKind};
+use crate::graph::edge::{
+    CONFIDENCE_CROSS_LANGUAGE, CONFIDENCE_OWN_OR_DIRECT, EdgeData, EdgeKind, clamp_finite,
+};
 #[cfg(feature = "dataflow")]
 use crate::graph::node::DataGraphNode;
 use crate::graph::node::{ExternalNode, FileNode, NodeData, SymbolNode};
@@ -260,7 +262,7 @@ impl GraphBuilder {
         confidence: f32,
         flow_kind: Option<crate::model::FlowKind>,
     ) {
-        let confidence = confidence.clamp(0.0, 1.0);
+        let confidence = clamp_finite(confidence);
         let key = (source, target, kind);
         if let Some(&edge_idx) = self.edge_index.get(&key) {
             self.graph[edge_idx].merge_repeated(confidence, flow_kind);
