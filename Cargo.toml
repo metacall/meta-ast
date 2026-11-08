@@ -80,6 +80,7 @@ notify-debouncer-mini = { version = "0.7", optional = true }
 criterion = { version = "0.8", features = ["html_reports"] }
 insta = { version = "1.49", features = ["json"] }
 tempfile = "3.27"
+proptest = "1.6"
 
 [features]
 default = []
