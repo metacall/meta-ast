@@ -79,6 +79,7 @@ notify-debouncer-mini = { version = "0.7", optional = true }
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
 insta = { version = "1.49", features = ["json"] }
+proptest = "1.6"
 tempfile = "3.27"
 
 [features]
