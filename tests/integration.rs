@@ -15,6 +15,7 @@ mod integration {
     mod edge_cases_test;
     mod go_package_import_test;
     mod graph_contracts_test;
+    mod graph_proptest;
     mod graph_regression_test;
     mod import_hygiene_test;
     mod import_test;
