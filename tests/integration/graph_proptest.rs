@@ -5,6 +5,9 @@
 //! count never exceeds the number of distinct triples. Self-loops are kept,
 //! because SCC analysis (§5) reads them as cyclic units.
 //!
+//! The numbered properties below are the ones listed in #60; graph-model.md
+//! itself numbers only invariant 4.
+//!
 //! The expected values are computed from the rule as the spec states it, not
 //! from a copy of `merge_repeated`, so a defect in the merge cannot hide in the
 //! oracle.
@@ -101,25 +104,27 @@ fn apply(graph: &mut CodeGraph, nodes: &[NodeIndex], ops: &[Op]) {
     }
 }
 
-/// Every edge as `key -> (confidence, flow_kind)`; panics on a duplicate key.
-fn edge_map(graph: &CodeGraph) -> HashMap<Key, (f32, Option<FlowKind>)> {
+type EdgeMap = HashMap<Key, (f32, Option<FlowKind>)>;
+
+/// Every edge as `key -> (confidence, flow_kind)`; fails the case on a duplicate key.
+fn edge_map(graph: &CodeGraph) -> Result<EdgeMap, TestCaseError> {
     let g = graph.graph();
     let mut map = HashMap::new();
     for edge in g.edge_indices() {
         let (s, t) = g.edge_endpoints(edge).unwrap();
         let w = g[edge];
         let previous = map.insert((s, t, w.kind), (w.confidence, w.flow_kind));
-        assert!(
+        prop_assert!(
             previous.is_none(),
             "duplicate edge for {:?}",
             (s, t, w.kind)
         );
     }
-    map
+    Ok(map)
 }
 
 /// The rule as graph-model.md states it, per distinct triple.
-fn expected(nodes: &[NodeIndex], ops: &[Op]) -> HashMap<Key, (f32, Option<FlowKind>)> {
+fn expected(nodes: &[NodeIndex], ops: &[Op]) -> EdgeMap {
     let mut inputs: HashMap<Key, (Vec<f32>, Option<FlowKind>)> = HashMap::new();
     for &(s, t, kind, confidence, flow) in ops {
         let entry = inputs.entry((nodes[s], nodes[t], kind)).or_default();
@@ -149,29 +154,32 @@ fn same_confidence(a: f32, b: f32) -> bool {
 }
 
 proptest! {
-    /// Invariant 1: confidence of a triple equals max(c_1, ..., c_k) exactly.
+    /// Property 1 (graph-model.md invariant 4): confidence of a triple equals
+    /// max(c_1, ..., c_k) exactly.
     #[test]
     fn duplicate_triples_keep_the_max_confidence(ops in ops(unit_confidence())) {
         let (mut graph, nodes) = file_graph();
         apply(&mut graph, &nodes, &ops);
-        let actual = edge_map(&graph);
+        let actual = edge_map(&graph)?;
         for (key, (confidence, _)) in expected(&nodes, &ops) {
             prop_assert_eq!(actual[&key].0, confidence, "triple {:?}", key);
         }
     }
 
-    /// Invariant 2: the first non-None flow kind survives later duplicates.
+    /// Property 2 (graph-model.md invariant 4): the first non-None flow kind
+    /// survives later duplicates.
     #[test]
     fn first_flow_kind_is_stable(ops in ops(unit_confidence())) {
         let (mut graph, nodes) = file_graph();
         apply(&mut graph, &nodes, &ops);
-        let actual = edge_map(&graph);
+        let actual = edge_map(&graph)?;
         for (key, (_, flow)) in expected(&nodes, &ops) {
             prop_assert_eq!(actual[&key].1, flow, "triple {:?}", key);
         }
     }
 
-    /// Invariant 3: one edge per distinct triple, and never more.
+    /// Property 3 (graph-model.md invariant 4): one edge per distinct triple,
+    /// and never more.
     #[test]
     fn edge_count_equals_distinct_triples(ops in ops(any_confidence())) {
         let (mut graph, nodes) = file_graph();
@@ -179,7 +187,7 @@ proptest! {
         let distinct = expected(&nodes, &ops).len();
         prop_assert!(graph.edge_count() <= ops.len());
         prop_assert_eq!(graph.edge_count(), distinct);
-        prop_assert_eq!(edge_map(&graph).len(), distinct);
+        prop_assert_eq!(edge_map(&graph)?.len(), distinct);
     }
 
     /// Replaying the same ops is a no-op.
@@ -187,9 +195,9 @@ proptest! {
     fn replay_is_idempotent(ops in ops(any_confidence())) {
         let (mut graph, nodes) = file_graph();
         apply(&mut graph, &nodes, &ops);
-        let once = edge_map(&graph);
+        let once = edge_map(&graph)?;
         apply(&mut graph, &nodes, &ops);
-        let twice = edge_map(&graph);
+        let twice = edge_map(&graph)?;
         prop_assert_eq!(once.len(), twice.len());
         for (key, (c, f)) in &once {
             let (c2, f2) = twice[key];
@@ -198,10 +206,14 @@ proptest! {
         }
     }
 
-    /// Clamping and non-finite input: the result is the max of the finite clamped inputs,
-    /// stays in [0, 1], and does not depend on arrival order.
+    /// Clamping and non-finite input: the result is the max of the finite
+    /// clamped inputs and stays in [0, 1]. When at least one finite input
+    /// exists, the confidence does not depend on arrival order. An edge whose
+    /// every input is non-finite keeps its first input, so after a shuffle it
+    /// is only required to stay non-finite (it may change between NaN, +inf
+    /// and -inf). Flow kind is first-wins and is not checked here.
     #[test]
-    fn confidence_is_clamped_and_order_independent(
+    fn confidence_is_clamped_and_order_independent_with_a_finite_input(
         (ops, shuffled) in ops(any_confidence())
             .prop_flat_map(|ops| (Just(ops.clone()), Just(ops).prop_shuffle()))
     ) {
@@ -210,12 +222,17 @@ proptest! {
         let (mut reordered, _) = file_graph();
         apply(&mut reordered, &nodes, &shuffled);
 
-        let forward = edge_map(&forward);
-        let reordered = edge_map(&reordered);
+        let forward = edge_map(&forward)?;
+        let reordered = edge_map(&reordered)?;
         for (key, (confidence, _)) in expected(&nodes, &ops) {
             let a = forward[&key].0;
             prop_assert!(same_confidence(a, confidence), "{:?}: {} vs {}", key, a, confidence);
-            prop_assert!(same_confidence(a, reordered[&key].0), "order changed {:?}", key);
+            let b = reordered[&key].0;
+            if confidence.is_finite() {
+                prop_assert_eq!(a, b, "order changed {:?}", key);
+            } else {
+                prop_assert!(!a.is_finite() && !b.is_finite(), "{:?}: {} vs {}", key, a, b);
+            }
             prop_assert!(!a.is_finite() || (0.0..=1.0).contains(&a));
         }
     }
@@ -228,7 +245,7 @@ proptest! {
         for op in &ops {
             apply(&mut graph, &nodes, std::slice::from_ref(op));
             let key = (nodes[op.0], nodes[op.1], op.2);
-            let now = edge_map(&graph)[&key].0;
+            let now = edge_map(&graph)?[&key].0;
             if let Some(&before) = seen.get(&key) {
                 prop_assert!(!before.is_finite() || now >= before, "{:?}: {} -> {}", key, before, now);
             }
@@ -236,9 +253,10 @@ proptest! {
         }
     }
 
-    /// Invariant 4: self-loops are kept (one per kind, deduplicated), and SCC
-    /// analysis marks a node `SelfLoop` exactly when it has an Import or
-    /// Reference self-loop. Ownership and Flow self-loops stay acyclic.
+    /// Property 4 (graph-model.md invariant 4 and §5): self-loops are kept
+    /// (one per kind, deduplicated), and SCC analysis marks a node `SelfLoop`
+    /// exactly when it has an Import or Reference self-loop. Ownership and
+    /// Flow self-loops stay acyclic.
     #[test]
     fn self_loops_are_deduplicated_and_classified(
         loops in prop::collection::vec(
@@ -248,7 +266,7 @@ proptest! {
         let ops: Vec<Op> = loops.iter().map(|&(n, k, c, f)| (n, n, k, c, f)).collect();
         apply(&mut graph, &nodes, &ops);
 
-        let edges = edge_map(&graph);
+        let edges = edge_map(&graph)?;
         prop_assert_eq!(edges.len(), expected(&nodes, &ops).len());
         prop_assert!(edges.keys().all(|(s, t, _)| s == t));
 
@@ -261,6 +279,28 @@ proptest! {
             prop_assert_eq!(component.is_cyclic, cyclic);
             let hint = if cyclic { DeployabilityHint::SelfLoop } else { DeployabilityHint::Independent };
             prop_assert_eq!(component.hint, hint);
+        }
+    }
+
+    /// `add_edge_normalized` (no flow kind) follows the same merge rule as
+    /// the `_with_flow` variant and leaves `flow_kind` as `None`.
+    #[test]
+    fn add_edge_normalized_merges_without_flow_kind(
+        raw in prop::collection::vec(
+            (0..MAX_NODES, 0..MAX_NODES, edge_kind(), any_confidence()), 0..64)
+    ) {
+        let (mut graph, nodes) = file_graph();
+        for &(s, t, kind, c) in &raw {
+            graph.add_edge_normalized(nodes[s], nodes[t], kind, c);
+        }
+        let actual = edge_map(&graph)?;
+        let ops: Vec<Op> = raw.iter().map(|&(s, t, k, c)| (s, t, k, c, None)).collect();
+        let expected = expected(&nodes, &ops);
+        prop_assert_eq!(actual.len(), expected.len());
+        for (key, (confidence, _)) in expected {
+            let (c, flow) = actual[&key];
+            prop_assert!(same_confidence(c, confidence), "{:?}: {} vs {}", key, c, confidence);
+            prop_assert_eq!(flow, None, "triple {:?}", key);
         }
     }
 
@@ -287,8 +327,8 @@ proptest! {
         for &(s, t, c) in &refs {
             injected.add_edge_normalized(idx[s], idx[t], EdgeKind::Reference, c);
         }
-        let a = edge_map(&built);
-        let b = edge_map(&injected);
+        let a = edge_map(&built)?;
+        let b = edge_map(&injected)?;
         prop_assert_eq!(a.len(), b.len());
 
         let ops: Vec<Op> = refs.iter().map(|&(s, t, c)| (s, t, EdgeKind::Reference, c, None)).collect();
