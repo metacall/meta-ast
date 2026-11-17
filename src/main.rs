@@ -1,7 +1,8 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use meta_ast::interface::{args::Cli, commands};
+use meta_ast::interface::args::{Cli, Command, GlobalArgs};
+use meta_ast::interface::commands;
 
 fn main() -> ExitCode {
     match run() {
@@ -26,17 +27,28 @@ fn exit_status(error: &anyhow::Error) -> u8 {
 fn run() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    install_subscriber(&cli.globals);
 
-    meta_ast::interface::banner::print_banner();
+    if !cli.globals.no_banner {
+        meta_ast::interface::banner::print_banner();
+    }
     meta_ast::language::validate_queries();
 
-    match cli {
-        Cli::Inspect(args) => commands::inspect(args),
-        Cli::Graph(args) => commands::graph(args),
+    match cli.command {
+        Command::Inspect(args) => commands::inspect(args),
+        Command::Graph(args) => commands::graph(args),
         #[cfg(feature = "metacall-deploy")]
-        Cli::Deploy(args) => commands::deploy(args),
+        Command::Deploy(args) => commands::deploy(args),
     }
+}
+
+/// `RUST_LOG` wins when it is set; otherwise the global flags pick the level.
+fn install_subscriber(globals: &GlobalArgs) {
+    use tracing_subscriber::EnvFilter;
+
+    let filter = match std::env::var("RUST_LOG") {
+        Ok(_) => EnvFilter::from_default_env(),
+        Err(_) => EnvFilter::new(globals.log_level()),
+    };
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 }

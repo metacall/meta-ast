@@ -10,7 +10,7 @@ use std::process::ExitCode;
 #[cfg(feature = "metacall-deploy")]
 use crate::interface::args::DeployArgs;
 use crate::interface::args::{GraphArgs, InspectArgs};
-use crate::interface::report::report_diagnostics;
+use crate::interface::report::report_diagnostics_with;
 use crate::model::SnapshotId;
 use crate::output::emitter::{EmitConfig, emit_graph, emit_inspect};
 
@@ -38,7 +38,7 @@ pub fn inspect(args: InspectArgs) -> anyhow::Result<ExitCode> {
         symbols.extend(file.symbols);
     }
 
-    report_diagnostics(&diagnostics, args.fail_on)?;
+    report_diagnostics_with(&diagnostics, args.fail_on, args.diagnostics)?;
 
     let config = EmitConfig::from(&args);
     emit_inspect(&mut symbols, &config)?;
@@ -61,7 +61,7 @@ pub fn graph(args: GraphArgs) -> anyhow::Result<ExitCode> {
         languages.as_ref().map(|a| a.as_slice()),
     )?;
 
-    report_diagnostics(&diagnostics, args.fail_on)?;
+    report_diagnostics_with(&diagnostics, args.fail_on, args.diagnostics)?;
 
     let mut config = EmitConfig::from(&args);
     if config.html && config.output.is_none() {
@@ -89,7 +89,7 @@ pub fn deploy(args: DeployArgs) -> anyhow::Result<ExitCode> {
     };
 
     let diagnostics = crate::deploy::run_deploy(config)?;
-    report_diagnostics(&diagnostics, args.fail_on)?;
+    report_diagnostics_with(&diagnostics, args.fail_on, args.diagnostics)?;
 
     Ok(ExitCode::SUCCESS)
 }
