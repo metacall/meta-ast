@@ -250,6 +250,7 @@ fn debounced_watcher_smoke() {
             open_browser: false,
         },
         fail_on: meta_ast::interface::report::FailOn::Error,
+        diagnostics: meta_ast::interface::report::DiagnosticFormat::Text,
         languages: None,
     };
 
@@ -291,6 +292,7 @@ fn policy_config(fail_on: meta_ast::interface::report::FailOn) -> meta_ast::watc
             open_browser: false,
         },
         fail_on,
+        diagnostics: meta_ast::interface::report::DiagnosticFormat::Text,
         languages: None,
     }
 }
@@ -384,6 +386,7 @@ fn the_stop_flag_ends_the_loop_during_a_change_burst() {
             open_browser: false,
         },
         fail_on: meta_ast::interface::report::FailOn::Error,
+        diagnostics: meta_ast::interface::report::DiagnosticFormat::Text,
         languages: None,
     };
 

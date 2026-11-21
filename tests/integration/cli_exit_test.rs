@@ -77,6 +77,49 @@ fn graph_exits_zero_on_a_clean_project() {
     );
 }
 
+/// `--diagnostics json` puts exactly one JSON document on stderr: the banner
+/// is off the machine channel and a tripped `--fail-on` adds no error line.
+#[test]
+fn json_diagnostics_are_the_only_thing_on_stderr() {
+    let clean = scratch("json_clean");
+    std::fs::write(clean.join("ok.py"), "def ok():\n    return 1\n").unwrap();
+    let out = run(&["graph", clean.to_str().unwrap(), "--diagnostics", "json"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let value: serde_json::Value = serde_json::from_str(&stderr)
+        .expect("stderr must be a single JSON document, not the banner plus the document");
+    assert_eq!(value["summary"]["errors"].as_u64(), Some(0));
+
+    let broken = scratch("json_broken");
+    std::fs::write(broken.join("broken.py"), "def oops(:\n").unwrap();
+    let out = run(&[
+        "graph",
+        broken.to_str().unwrap(),
+        "--diagnostics",
+        "json",
+        "--fail-on",
+        "warning",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "the tripped policy must still fail the run, stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let value: serde_json::Value = serde_json::from_str(&stderr)
+        .expect("a tripped policy must not append an error line after the JSON document");
+    assert!(
+        value["summary"]["warnings"].as_u64().unwrap_or(0) >= 1,
+        "the document must carry the tripped warning count, stderr: {stderr}"
+    );
+}
+
 /// The deploy command applies the same diagnostic policy as inspect and graph.
 #[cfg(feature = "metacall-deploy")]
 #[test]

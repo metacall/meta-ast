@@ -40,11 +40,11 @@ src/
 ├── input/
 │   └── mod.rs                  File discovery, filtering, language routing, portable paths
 ├── interface/
-│   ├── args.rs                 Clap derive structs (Inspect, Graph, Deploy and their flags)
+│   ├── args.rs                 Clap derive structs: Cli + Command, global flags, Inspect/Graph/Deploy args
 │   ├── banner.rs               Startup banner
 │   ├── commands.rs             Command implementations: inspect, graph, watch and deploy
 │   ├── mod.rs                  CLI module root
-│   └── report.rs               FailOn policy and diagnostic reporting
+│   └── report.rs               FailOn policy, diagnostic rendering (text/JSON) and reporting
 ├── language/
 │   ├── c.rs                    C queries + extraction
 │   ├── common.rs               extract_with_spec, extract_imports_and_references_with_spec, associate_docstrings
