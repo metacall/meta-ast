@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::input;
-use crate::interface::report::report_diagnostics;
+use crate::interface::report::report_diagnostics_with;
 use crate::language::LangId;
 use crate::pipeline::GraphAnalysis;
 use crate::reanalyze::{ChangeSet, WatchState, incremental_reanalyze};
@@ -58,7 +58,7 @@ pub fn run_watch_until(
 
     // The policy is reported per tick and ends the run only once the loop stops:
     // a long watch run must not abort on a diagnostic it already reported.
-    if report_diagnostics(&diagnostics, config.fail_on).is_err() {
+    if report_diagnostics_with(&diagnostics, config.fail_on, config.diagnostics).is_err() {
         failures += 1;
     }
 
@@ -98,7 +98,9 @@ pub fn run_watch_until(
                 tracing::debug!(count = events.len(), "Debounced change detected");
                 match incremental_reanalyze(&root, languages, &mut state) {
                     Ok((analysis, change_set, diagnostics)) => {
-                        if report_diagnostics(&diagnostics, config.fail_on).is_err() {
+                        if report_diagnostics_with(&diagnostics, config.fail_on, config.diagnostics)
+                            .is_err()
+                        {
                             failures += 1;
                         }
                         if let Err(e) = on_change(&analysis, &change_set) {

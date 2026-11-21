@@ -110,6 +110,7 @@ fn watch(args: &GraphArgs) -> anyhow::Result<ExitCode> {
         debounce: std::time::Duration::from_millis(args.watch_debounce),
         emit: EmitConfig::from(args),
         fail_on: args.fail_on,
+        diagnostics: args.diagnostics,
         languages: args.language.map(|language| vec![language]),
     };
 

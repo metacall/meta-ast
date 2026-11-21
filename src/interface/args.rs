@@ -61,6 +61,18 @@ pub enum Command {
     Deploy(DeployArgs),
 }
 
+impl Command {
+    /// The diagnostic rendering selected for the command.
+    pub fn diagnostics(&self) -> crate::interface::report::DiagnosticFormat {
+        match self {
+            Command::Inspect(args) => args.diagnostics,
+            Command::Graph(args) => args.diagnostics,
+            #[cfg(feature = "metacall-deploy")]
+            Command::Deploy(args) => args.diagnostics,
+        }
+    }
+}
+
 /// Flags available on every subcommand, anywhere on the command line.
 #[derive(Debug, Parser)]
 pub struct GlobalArgs {

@@ -13,6 +13,7 @@
 //!   diagnostic, so tooling can consume the analysis failures.
 
 use crate::error::{Diagnostic, Error, Severity};
+use crate::model::SourceRange;
 
 /// How many diagnostics make a run fail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
@@ -79,15 +80,40 @@ fn severity_label(severity: Severity) -> &'static str {
 
 /// The machine-readable report document (`--diagnostics json`).
 #[derive(Debug, serde::Serialize)]
-struct JsonReport<'a> {
+struct JsonReport {
     summary: JsonSummary,
-    diagnostics: &'a [Diagnostic],
+    diagnostics: Vec<JsonDiagnostic>,
 }
 
 #[derive(Debug, serde::Serialize)]
 struct JsonSummary {
     errors: usize,
     warnings: usize,
+}
+
+/// One diagnostic as it appears in the JSON document.
+///
+/// The path is lossy on purpose: diagnostics come from walking the
+/// filesystem, so a path may not be valid UTF-8, and `serde_json` refuses to
+/// serialize a non-UTF-8 `PathBuf`. Lossy conversion keeps the report
+/// serializable instead of panicking on the report of every run.
+#[derive(Debug, serde::Serialize)]
+struct JsonDiagnostic {
+    path: String,
+    severity: Severity,
+    message: String,
+    source_range: Option<SourceRange>,
+}
+
+impl JsonDiagnostic {
+    fn from_diagnostic(diagnostic: &Diagnostic) -> Self {
+        Self {
+            path: diagnostic.path.to_string_lossy().into_owned(),
+            severity: diagnostic.severity,
+            message: diagnostic.message.clone(),
+            source_range: diagnostic.source_range.clone(),
+        }
+    }
 }
 
 /// Log every diagnostic and apply the policy.
@@ -126,12 +152,20 @@ pub fn report_diagnostics_with(
         DiagnosticFormat::Json => {
             let report = JsonReport {
                 summary: JsonSummary { errors, warnings },
-                diagnostics,
+                diagnostics: diagnostics
+                    .iter()
+                    .map(JsonDiagnostic::from_diagnostic)
+                    .collect(),
             };
-            // Diagnostics are plain data with no non-string map keys, so
-            // serialization is an invariant rather than a runtime failure.
-            let json = serde_json::to_string(&report).expect("diagnostics serialize to JSON");
-            eprintln!("{json}");
+            // Every field is plain string or number data, so serialization
+            // is infallible: paths that are not valid UTF-8 were made lossy
+            // above rather than left to make serde refuse them.
+            match serde_json::to_string(&report) {
+                Ok(json) => eprintln!("{json}"),
+                Err(error) => {
+                    eprintln!("warning: could not serialize diagnostics as JSON: {error}")
+                }
+            }
         }
     }
 
@@ -225,7 +259,10 @@ mod tests {
                 errors: 1,
                 warnings: 1,
             },
-            diagnostics: &diagnostics,
+            diagnostics: diagnostics
+                .iter()
+                .map(JsonDiagnostic::from_diagnostic)
+                .collect(),
         };
 
         let json = serde_json::to_string(&report).unwrap();
@@ -234,7 +271,43 @@ mod tests {
         assert_eq!(value["summary"]["warnings"], 1);
         assert_eq!(value["diagnostics"].as_array().unwrap().len(), 2);
         assert_eq!(value["diagnostics"][0]["path"], "a.py");
-        assert_eq!(value["diagnostics"][1]["severity"], "Error");
+        assert_eq!(value["diagnostics"][1]["severity"], "error");
+    }
+
+    /// A path that is not valid UTF-8: `Path::to_str` returns `None` for it.
+    #[cfg(windows)]
+    fn non_utf8_path() -> PathBuf {
+        use std::os::windows::ffi::OsStringExt;
+        PathBuf::from(std::ffi::OsString::from_wide(&[0xD800]))
+    }
+
+    /// A path that is not valid UTF-8: `Path::to_str` returns `None` for it.
+    #[cfg(not(windows))]
+    fn non_utf8_path() -> PathBuf {
+        use std::os::unix::ffi::OsStringExt;
+        PathBuf::from(std::ffi::OsString::from_vec(vec![0xFF]))
+    }
+
+    #[test]
+    fn json_diagnostics_do_not_panic_on_non_utf8_paths() {
+        let mut diagnostic = diagnostic(Severity::Warning);
+        diagnostic.path = non_utf8_path();
+        assert!(diagnostic.path.to_str().is_none());
+
+        let diagnostics = [diagnostic];
+        let result = report_diagnostics_with(&diagnostics, FailOn::Never, DiagnosticFormat::Json);
+        assert!(
+            result.is_ok(),
+            "non-UTF-8 paths must not make the JSON report fail the run"
+        );
+
+        let json = JsonDiagnostic::from_diagnostic(&diagnostics[0]);
+        let value: serde_json::Value = serde_json::to_value(&json).unwrap();
+        assert_eq!(value["severity"], "warning");
+        assert!(
+            value["path"].as_str().is_some_and(|path| !path.is_empty()),
+            "the lossy path is a valid JSON string"
+        );
     }
 
     #[test]

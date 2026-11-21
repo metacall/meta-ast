@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use crate::interface::report::FailOn;
+use crate::interface::report::{DiagnosticFormat, FailOn};
 use crate::language::LangId;
 use crate::output::emitter::EmitConfig;
 
@@ -19,6 +19,8 @@ pub struct WatchConfig {
     pub emit: EmitConfig,
     /// Diagnostic severity that fails the run when the watcher stops.
     pub fail_on: FailOn,
+    /// Diagnostic rendering applied on every tick.
+    pub diagnostics: DiagnosticFormat,
     /// Optional language filter applied to discovered files.
     pub languages: Option<Vec<LangId>>,
 }
@@ -35,6 +37,7 @@ impl WatchConfig {
                 open_browser: false,
             },
             fail_on: FailOn::Error,
+            diagnostics: DiagnosticFormat::Text,
             languages: None,
         }
     }
@@ -65,6 +68,7 @@ mod tests {
         assert!(!cfg.emit.html);
         assert!(!cfg.emit.open_browser);
         assert_eq!(cfg.fail_on, FailOn::Error);
+        assert_eq!(cfg.diagnostics, DiagnosticFormat::Text);
         assert!(cfg.languages.is_none());
     }
 

@@ -2,7 +2,12 @@ use std::path::PathBuf;
 
 use crate::model::SourceRange;
 
+/// Severity of a diagnostic.
+///
+/// Serializes lowercase so the JSON document matches the text rendering:
+/// `warning`/`error`, not `Warning`/`Error`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum Severity {
     Warning,
@@ -140,6 +145,18 @@ mod tests {
         assert_ne!(Severity::Warning, Severity::Error);
         let v = [Severity::Warning, Severity::Error];
         assert_eq!(v.len(), 2);
+    }
+
+    #[test]
+    fn severity_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&Severity::Warning).unwrap(),
+            "\"warning\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Severity::Error).unwrap(),
+            "\"error\""
+        );
     }
 
     #[test]
